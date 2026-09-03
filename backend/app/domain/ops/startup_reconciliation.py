@@ -12,11 +12,24 @@ Handles three cases:
 
 from __future__ import annotations
 
+import enum
 import logging
 from dataclasses import dataclass
 from app.core.async_boundary import ensure_sync_adapter_result
 
 logger = logging.getLogger(__name__)
+
+
+class ReconcilePolicy(enum.Enum):
+    """Stale-row policy for DB-but-not-broker positions. (REF-09)
+
+    Fail-safe default is QUARANTINE: stale rows are left in the DB for
+    manual review. DELETE_STALE restores the legacy delete path and
+    requires explicit opt-in.
+    """
+
+    DELETE_STALE = "delete_stale"
+    QUARANTINE = "quarantine"
 
 
 @dataclass(frozen=True)
@@ -38,9 +51,15 @@ class StartupReconciliation:
     Ensures the engine's position state matches the broker's actual state.
     """
 
-    def __init__(self, broker_adapter, storage) -> None:
+    def __init__(
+        self,
+        broker_adapter,
+        storage,
+        policy: ReconcilePolicy = ReconcilePolicy.QUARANTINE,
+    ) -> None:
         self._broker = broker_adapter
         self._storage = storage
+        self._policy = policy
 
     def reconcile(self) -> ReconciliationResult:
         """Run startup reconciliation.
@@ -96,10 +115,10 @@ class StartupReconciliation:
             )
             discrepancies.append(f"Broker API query failed: {e}")
 
-        # Build lookup sets
-        db_symbols = {pos.get("symbol", "") for pos in db_positions}
+        # Build lookup sets (canonical keys on both sides)
+        db_symbols = {self._row_key(pos.get("symbol", "")) for pos in db_positions}
         broker_symbols = {
-            self._extract_underlying(pos)
+            self._row_key(self._extract_underlying(pos))
             for pos in broker_positions
             if self._extract_underlying(pos)
         }
@@ -112,9 +131,9 @@ class StartupReconciliation:
         # Case 1: Position in DB AND at broker → restore (normal)
         for pos in db_positions:
             symbol = pos.get("symbol", "")
-            if symbol in broker_symbols:
+            if self._row_key(symbol) in broker_symbols:
                 restored += 1
-            else:
+            elif self._policy is ReconcilePolicy.DELETE_STALE:
                 # Case 2: Stale — in DB but NOT at broker
                 stale_removed += 1
                 discrepancies.append(
@@ -129,11 +148,16 @@ class StartupReconciliation:
                         )
                     except (KeyError, TypeError):
                         logger.debug("Failed to delete stale open position: %s", pos.get("id"), exc_info=True)
+            else:
+                # Fail-safe default: quarantine, no delete.
+                discrepancies.append(
+                    f"Quarantined: {symbol} in DB but not at broker — left for manual review"
+                )
 
         # Case 3: Orphaned — at broker but NOT in DB
         for pos in broker_positions:
             symbol = self._extract_underlying(pos)
-            if symbol and symbol not in db_symbols:
+            if symbol and self._row_key(symbol) not in db_symbols:
                 orphaned_registered += 1
                 discrepancies.append(
                     f"Orphaned: {symbol} at broker but not in DB — registering as external"
@@ -156,6 +180,11 @@ class StartupReconciliation:
             orphaned_registered=orphaned_registered,
             discrepancies=discrepancies,
         )
+
+    @staticmethod
+    def _row_key(symbol: str) -> str:
+        """Canonical compare key: uppercase + stripped (no alias logic)."""
+        return (symbol or "").upper().strip()
 
     @staticmethod
     def _extract_underlying(broker_position) -> str:

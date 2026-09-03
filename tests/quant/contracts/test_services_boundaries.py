@@ -1,4 +1,9 @@
 # tests/quant/contracts/test_services_boundaries.py
+from app.domain.ops.startup_reconciliation import (
+    ReconcilePolicy,
+    ReconciliationResult,
+    StartupReconciliation,
+)
 from quant.amt.session.scanner_config import ScannerConfig
 from shared.reconnect import ReconnectPolicy
 
@@ -91,3 +96,100 @@ def test_from_settings_parity():
         "expiry_index": 1,
         "strikes_around_atm": 3,
     }
+
+
+# --- Task 4: Reconciliation policy, characterization (REF-09, Phase A) ---
+# Tests 1, 2, 5 pin CURRENT behavior (must PASS pre-edit). Tests 3, 4, 6
+# pin the new fail-safe default (added in Phase B; must FAIL pre-edit).
+
+
+class _FakeReconStorage:
+    def __init__(self, rows):
+        self.rows = list(rows)
+        self.deleted = []
+
+    def load_open_positions(self):
+        return list(self.rows)
+
+    def delete_open_position(self, pos_id):
+        self.deleted.append(pos_id)
+        self.rows = [r for r in self.rows if r.get("id") != pos_id]
+
+
+class _FakeReconBroker:
+    def __init__(self, positions):
+        self._positions = positions
+
+    def get_positions(self):
+        return list(self._positions)
+
+
+def test_non_live_restores_without_broker(monkeypatch):
+    monkeypatch.setattr("app.shared.mode.is_live_mode", lambda: False)
+
+    class _ExplodingBroker:
+        def get_positions(self):
+            raise AssertionError("broker must not be called in non-live mode")
+
+    store = _FakeReconStorage([{"id": "p1", "symbol": "NIFTY AUG FUT"}])
+    result = StartupReconciliation(_ExplodingBroker(), store).reconcile()
+    assert isinstance(result, ReconciliationResult)
+    assert result.db_positions == 1
+    assert result.broker_positions == 0
+    assert result.restored == 1
+    assert result.stale_removed == 0
+    assert store.deleted == []
+
+
+def test_live_match_restores(monkeypatch):
+    monkeypatch.setattr("app.shared.mode.is_live_mode", lambda: True)
+    store = _FakeReconStorage([{"id": "p1", "symbol": "NIFTY AUG FUT"}])
+    broker = _FakeReconBroker([{"trading_symbol": "NIFTY AUG FUT"}])
+    result = StartupReconciliation(broker, store).reconcile()
+    assert isinstance(result, ReconciliationResult)
+    assert result.restored == 1
+    assert result.stale_removed == 0
+    assert store.deleted == []
+
+
+def test_live_broker_only_orphan_counted(monkeypatch):
+    monkeypatch.setattr("app.shared.mode.is_live_mode", lambda: True)
+    store = _FakeReconStorage([])
+    broker = _FakeReconBroker([{"trading_symbol": "BANKNIFTY AUG FUT"}])
+    result = StartupReconciliation(broker, store).reconcile()
+    assert isinstance(result, ReconciliationResult)
+    assert result.orphaned_registered == 1
+    assert result.restored == 0
+
+
+def test_live_db_only_quarantined_by_default(monkeypatch):
+    monkeypatch.setattr("app.shared.mode.is_live_mode", lambda: True)
+    store = _FakeReconStorage([{"id": "p1", "symbol": "NIFTY AUG FUT"}])
+    result = StartupReconciliation(_FakeReconBroker([]), store).reconcile()
+    assert result.stale_removed == 0
+    assert store.deleted == []
+    assert any(
+        "quarantine" in d.lower() or "manual review" in d.lower()
+        for d in result.discrepancies
+    )
+
+
+def test_live_db_only_deleted_with_explicit_policy(monkeypatch):
+    monkeypatch.setattr("app.shared.mode.is_live_mode", lambda: True)
+    store = _FakeReconStorage([{"id": "p1", "symbol": "NIFTY AUG FUT"}])
+    broker = _FakeReconBroker([])
+    result = StartupReconciliation(
+        broker, store, policy=ReconcilePolicy.DELETE_STALE
+    ).reconcile()
+    assert result.stale_removed == 1
+    assert store.deleted == ["p1"]
+
+
+def test_live_case_insensitive_match_restores(monkeypatch):
+    monkeypatch.setattr("app.shared.mode.is_live_mode", lambda: True)
+    store = _FakeReconStorage([{"id": "p1", "symbol": "  nifty aug fut "}])
+    broker = _FakeReconBroker([{"trading_symbol": "NIFTY AUG FUT"}])
+    result = StartupReconciliation(broker, store).reconcile()
+    assert result.restored == 1
+    assert result.stale_removed == 0
+    assert store.deleted == []

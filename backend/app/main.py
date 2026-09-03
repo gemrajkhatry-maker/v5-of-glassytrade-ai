@@ -53,7 +53,7 @@ from app.config import settings as _settings
 from quant.contracts.ports.broker import IBroker
 from quant.contracts.ports.storage import IStorage
 from quant.contracts.ports.market_data import IMarketData
-from app.domain.ops.startup_reconciliation import StartupReconciliation
+from app.domain.ops.startup_reconciliation import ReconcilePolicy, StartupReconciliation
 from app.shared.mode import resolve_runtime_mode
 
 
@@ -405,7 +405,13 @@ def create_application() -> FastAPI:
         reconciliation_executed = True
         try:
             begin_phase("startup_reconciliation")
-            reconciliation = StartupReconciliation(broker, storage)
+            reconciliation = StartupReconciliation(
+                broker,
+                storage,
+                policy=ReconcilePolicy.DELETE_STALE
+                if os.environ.get("RECONCILE_DELETE_STALE") == "1"
+                else ReconcilePolicy.QUARANTINE,
+            )
             reconciliation_result = reconciliation.reconcile()
             record_startup_reconciliation(reconciliation_result)
             end_phase(
