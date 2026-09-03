@@ -44,6 +44,7 @@ export const DEFAULT_CHART_CONFIG = {
   showPredictions: true,
   showVolumeProfile: true,
   vpMode: 'combined' as const,
+  showHalfTrend: true,
   trend: 'volatile' as const,
 };
 

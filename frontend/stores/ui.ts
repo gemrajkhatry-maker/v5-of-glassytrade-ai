@@ -19,6 +19,9 @@ interface UIState {
     /** Show volume profile overlay */
     showVolumeProfile: boolean;
     
+    /** Show HalfTrend overlay (trend line, ATR channels, Buy/Sell labels) */
+    showHalfTrend: boolean;
+    
     /** Current page */
     currentPage: 'trading' | 'journal';
     
@@ -48,6 +51,12 @@ interface UIActions {
     /** Toggle volume profile */
     toggleVolumeProfile: () => void;
     
+    /** Toggle HalfTrend overlay */
+    toggleHalfTrend: () => void;
+    
+    /** Set HalfTrend overlay visibility */
+    setHalfTrendVisible: (visible: boolean) => void;
+    
     /** Set current page */
     setCurrentPage: (page: 'trading' | 'journal') => void;
     
@@ -69,6 +78,7 @@ export const useUIStore = create<UIStore>()(
             rightSidebarOpen: true,
             vpMode: 'session',
             showVolumeProfile: true,
+            showHalfTrend: true,
             currentPage: 'trading',
             workspaceName: 'Default',
             
@@ -105,6 +115,14 @@ export const useUIStore = create<UIStore>()(
                 }
             }),
             
+            toggleHalfTrend: () => set((state) => {
+                state.showHalfTrend = !state.showHalfTrend;
+            }),
+            
+            setHalfTrendVisible: (visible) => set((state) => {
+                state.showHalfTrend = visible;
+            }),
+            
             setCurrentPage: (page) => set((state) => {
                 state.currentPage = page;
             }),
@@ -119,6 +137,7 @@ export const useUIStore = create<UIStore>()(
                 state.rightSidebarOpen = true;
                 state.vpMode = 'session';
                 state.showVolumeProfile = true;
+                state.showHalfTrend = true;
                 state.currentPage = 'trading';
             }),
         })),
@@ -131,6 +150,7 @@ export const useUIStore = create<UIStore>()(
                 rightSidebarOpen: state.rightSidebarOpen,
                 vpMode: state.vpMode,
                 showVolumeProfile: state.showVolumeProfile,
+                showHalfTrend: state.showHalfTrend,
                 workspaceName: state.workspaceName,
             }),
         }
@@ -159,6 +179,11 @@ export const selectRightSidebarOpen = (state: UIStore): boolean => {
 /** Select volume profile mode */
 export const selectVpMode = (state: UIStore): string => {
     return state.vpMode;
+};
+
+/** Select HalfTrend overlay visibility */
+export const selectShowHalfTrend = (state: UIStore): boolean => {
+    return state.showHalfTrend;
 };
 
 /** Select current page */

@@ -168,6 +168,8 @@ export interface ChartConfig {
   showPredictions?: boolean;
   showVolumeProfile?: boolean;
   vpMode?: 'session' | 'leg' | 'combined' | 'off';
+  /** Show the HalfTrend overlay: trend line, ATR channel rails, Buy/Sell labels. */
+  showHalfTrend?: boolean;
   trend?: 'bullish' | 'bearish' | 'sideways' | 'volatile';
 }
 

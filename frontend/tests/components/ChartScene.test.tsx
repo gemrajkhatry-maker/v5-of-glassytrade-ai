@@ -12,17 +12,26 @@ const halfTrendLineMocks: {
   };
 }[] = [];
 
+// Captures the candlestick-series mock so tests can assert marker payloads.
+const candleSeriesMocks: {
+  setMarkers: ReturnType<typeof vi.fn>;
+}[] = [];
+
 // Mock lightweight-charts
 vi.mock('lightweight-charts', () => ({
   createChart: vi.fn(() => ({
-    addCandlestickSeries: vi.fn(() => ({
-      setData: vi.fn(),
-      update: vi.fn(),
-      removePriceLine: vi.fn(),
-      createPriceLine: vi.fn(() => ({})),
-      setMarkers: vi.fn(),
-      applyOptions: vi.fn(),
-    })),
+    addCandlestickSeries: vi.fn(() => {
+      const mock = {
+        setData: vi.fn(),
+        update: vi.fn(),
+        removePriceLine: vi.fn(),
+        createPriceLine: vi.fn(() => ({})),
+        setMarkers: vi.fn(),
+        applyOptions: vi.fn(),
+      };
+      candleSeriesMocks.push(mock);
+      return mock;
+    }),
     addHistogramSeries: vi.fn(() => ({
       setData: vi.fn(),
       update: vi.fn(),
@@ -84,6 +93,7 @@ const defaultConfig: ChartConfig = {
 describe('ChartScene', () => {
   beforeEach(() => {
     halfTrendLineMocks.length = 0;
+    candleSeriesMocks.length = 0;
   });
 
   it('draws the HalfTrend overlay from the halfTrendSeries prop', () => {
@@ -126,6 +136,29 @@ describe('ChartScene', () => {
       expect(mock.options?.autoscaleInfoProvider).toBeDefined();
       expect(mock.options?.autoscaleInfoProvider?.()).toBeNull();
     }
+  });
+
+  it('hides the HalfTrend overlay and its Buy/Sell markers when showHalfTrend is false', () => {
+    render(
+      <ChartScene
+        data={mockData}
+        config={{ ...defaultConfig, showHalfTrend: false }}
+        positions={[]}
+        halfTrendSeries={[
+          { time: '2024-01-01T10:00:00Z', trend: 0, ht: 24950, atrHigh: null, atrLow: null, buy: true, sell: false },
+          { time: '2024-01-01T10:05:00Z', trend: 1, ht: 25020, atrHigh: 25060, atrLow: 24980, buy: false, sell: true },
+        ]}
+      />
+    );
+    // Overlay series exist but were cleared (no points drawn).
+    expect(halfTrendLineMocks).toHaveLength(3);
+    for (const mock of halfTrendLineMocks) {
+      const data = mock.setData.mock.calls[0][0];
+      expect(data).toHaveLength(0);
+    }
+    // No Buy/Sell label markers pushed to the candle series.
+    const markers = candleSeriesMocks[0]?.setMarkers.mock.calls[0][0] || [];
+    expect(markers.some((m: any) => m.text === 'Buy' || m.text === 'Sell')).toBe(false);
   });
 
   it('renders without crashing', () => {

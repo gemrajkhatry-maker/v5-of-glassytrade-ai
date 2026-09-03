@@ -10,7 +10,7 @@ import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTra
 import JournalPage from './components/JournalPage';
 import ModelStateBanner from './components/ModelStateBanner';
 import { useKeyboardNavigation, getDefaultTradingHotkeys } from './hooks/useKeyboardNavigation';
-import { useUIStore, selectChartMode, selectSidebarOpen, selectRightSidebarOpen, selectVpMode } from './stores/ui';
+import { useUIStore, selectChartMode, selectSidebarOpen, selectRightSidebarOpen, selectVpMode, selectShowHalfTrend } from './stores/ui';
 
 const simpleId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
@@ -27,6 +27,8 @@ function App() {
     const setCurrentPage = useUIStore(s => s.setCurrentPage);
     const vpMode = useUIStore(selectVpMode) as 'session' | 'leg' | 'combined' | 'off';
     const setVpMode = useUIStore(s => s.setVpMode);
+    const showHalfTrend = useUIStore(selectShowHalfTrend);
+    const setHalfTrendVisible = useUIStore(s => s.setHalfTrendVisible);
     const [timeframe, setTimeframe] = useState<'1m' | '5m' | 'split'>('5m');
     const currentSymbolIndex = useRef(0);
 
@@ -93,8 +95,9 @@ function App() {
         interval: timeframe === '1m' ? '1m' : '5m',
         vpMode: vpMode || config.vpMode,
         showVolumeProfile: vpMode !== 'off',
+        showHalfTrend,
         symbol: activeInstrument?.symbol || config.symbol,
-    }), [config, vpMode, activeInstrument?.symbol, timeframe]);
+    }), [config, vpMode, showHalfTrend, activeInstrument?.symbol, timeframe]);
 
     // --- Rendering ---
 
@@ -295,6 +298,31 @@ function App() {
                                         }}
                                         className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${vpMode === key
                                             ? 'bg-glassy-neutral-cool/20 text-glassy-neutral-cool border border-glassy-neutral-cool/30'
+                                            : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'
+                                            }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                                </div>
+                            </div>
+
+                            {/* HalfTrend overlay */}
+                            <div className="flex flex-col gap-1">
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-glassy-text-tertiary pl-1">HalfTrend</span>
+                                <div className="flex bg-glassy-bg-tertiary backdrop-blur-md rounded-sm p-1 gap-1 border border-glassy-border-default">
+                                {([
+                                    { on: true, label: 'On' },
+                                    { on: false, label: 'Off' },
+                                ] as const).map(({ on, label }) => (
+                                    <button
+                                        key={label}
+                                        onClick={() => {
+                                            setHalfTrendVisible(on);
+                                            setConfig(s => ({ ...s, showHalfTrend: on }));
+                                        }}
+                                        className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${showHalfTrend === on
+                                            ? 'bg-glassy-ai-primary/20 text-glassy-ai-primary border border-glassy-ai-primary/40'
                                             : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'
                                             }`}
                                     >

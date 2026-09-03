@@ -1095,7 +1095,9 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     );
 
     // HalfTrend Buy/Sell labels (signals computed in the backend)
-    allMarkers.push(...halfTrendSignalMarkers(halfTrendSeries));
+    if (config.showHalfTrend !== false) {
+      allMarkers.push(...halfTrendSignalMarkers(halfTrendSeries));
+    }
 
     // Convert to TradingView format and set markers
     const tvMarkers = allMarkers.map(m => ({
@@ -1159,11 +1161,18 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
   // 6. HalfTrend overlay — ht trend line + ATR channel rails.
   useEffect(() => {
     if (!htLineRef.current || !atrHighRef.current || !atrLowRef.current) return;
+    if (config.showHalfTrend === false) {
+      // Toggled off: clear the overlay series so stale points aren't shown.
+      htLineRef.current.setData([] as any);
+      atrHighRef.current.setData([] as any);
+      atrLowRef.current.setData([] as any);
+      return;
+    }
     const { ht, atrHigh, atrLow } = halfTrendSeriesData(halfTrendSeries || []);
     htLineRef.current.setData(ht as any);
     atrHighRef.current.setData(atrHigh as any);
     atrLowRef.current.setData(atrLow as any);
-  }, [symbol, halfTrendSeries]);
+  }, [symbol, halfTrendSeries, config.showHalfTrend]);
 
   return (
     <div className="w-full h-full relative bg-[#0f172a] overflow-hidden">
