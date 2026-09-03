@@ -1213,6 +1213,9 @@ function chartSceneAreEqual(prev: ChartSceneProps, next: ChartSceneProps): boole
     if ((prev.closedTrades?.length ?? 0) !== (next.closedTrades?.length ?? 0)) return false;
     if (prev.agentDecision !== next.agentDecision) return false;
     if (prev.amtAnalysis !== next.amtAnalysis) return false;
+    // HalfTrend is fed as its own prop (not part of amtAnalysis) — the
+    // overlay must re-render when new history/live rows arrive.
+    if (prev.halfTrendSeries !== next.halfTrendSeries) return false;
     return true;
 }
 

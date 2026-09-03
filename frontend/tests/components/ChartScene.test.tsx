@@ -3,6 +3,9 @@ import { render, screen } from '@testing-library/react';
 import ChartScene from '../../components/ChartScene';
 import { OHLCData, ChartConfig } from '../../types';
 
+// Captures the HalfTrend overlay line-series mocks for render assertions.
+const halfTrendLineMocks: { setData: ReturnType<typeof vi.fn> }[] = [];
+
 // Mock lightweight-charts
 vi.mock('lightweight-charts', () => ({
   createChart: vi.fn(() => ({
@@ -21,10 +24,11 @@ vi.mock('lightweight-charts', () => ({
         applyOptions: vi.fn(),
       })),
     })),
-    addLineSeries: vi.fn(() => ({
-      setData: vi.fn(),
-      applyOptions: vi.fn(),
-    })),
+    addLineSeries: vi.fn(() => {
+      const mock = { setData: vi.fn(), applyOptions: vi.fn() };
+      halfTrendLineMocks.push(mock);
+      return mock;
+    }),
     remove: vi.fn(),
     applyOptions: vi.fn(),
     timeScale: vi.fn(() => ({
@@ -69,6 +73,34 @@ const defaultConfig: ChartConfig = {
 };
 
 describe('ChartScene', () => {
+  beforeEach(() => {
+    halfTrendLineMocks.length = 0;
+  });
+
+  it('draws the HalfTrend overlay from the halfTrendSeries prop', () => {
+    render(
+      <ChartScene
+        data={mockData}
+        config={defaultConfig}
+        positions={[]}
+        halfTrendSeries={[
+          { time: '2024-01-01T10:00:00Z', trend: 0, ht: 24950, atrHigh: null, atrLow: null, buy: false, sell: false },
+          { time: '2024-01-01T10:05:00Z', trend: 1, ht: 25020, atrHigh: 25060, atrLow: 24980, buy: false, sell: true },
+        ]}
+      />
+    );
+    // ht line + atrHigh + atrLow series were created
+    expect(halfTrendLineMocks).toHaveLength(3);
+    // ht series received both points colored by trend
+    const htData = halfTrendLineMocks[0].setData.mock.calls[0][0];
+    expect(htData).toHaveLength(2);
+    expect(htData[0].color).toBe('#2962ff');
+    expect(htData[1].color).toBe('#f23645');
+    // channel rails skip the null row and carry the two remaining points
+    expect(halfTrendLineMocks[1].setData.mock.calls[0][0]).toHaveLength(1);
+    expect(halfTrendLineMocks[2].setData.mock.calls[0][0]).toHaveLength(1);
+  });
+
   it('renders without crashing', () => {
     const { container } = render(
       <ChartScene
