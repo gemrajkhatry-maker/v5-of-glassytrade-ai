@@ -7,6 +7,7 @@ from brokers.broker.types import OrderStatus
 from quant.decision.signal_builder import Signal as EngineSignal
 from quant.decision.signal_builder import SignalBuilder, is_stop_too_thin, clamp_quantity
 from quant.execution.fills import broker_position_to_fill
+from quant.execution.lots import snap_to_lot
 from quant.execution.order import Order, Position, position_to_row, row_to_position
 
 def test_status_table_values():
@@ -97,3 +98,13 @@ def test_fill_mapping_fallbacks_marked():
     assert (f.fill_price, f.filled_qty, f.fill_quantity_assumed) == (100.0, 65.0, True)
     g = broker_position_to_fill(SimpleNamespace(entry_price=101.5), fallback_price=100.0, fallback_qty=65.0)
     assert (g.fill_price, g.filled_qty, g.fill_quantity_assumed) == (101.5, 65.0, True)
+
+
+def test_snap_matrix():
+    assert snap_to_lot(130.0, 65.0) == 130.0
+    assert snap_to_lot(100.0, 65.0) == 130.0
+    assert snap_to_lot(10.0, 65.0) == 65.0      # minimum one lot
+    assert snap_to_lot(2.5 * 65.0, 65.0) == 3 * 65.0  # half-lots round UP (S10)
+    assert snap_to_lot(0.0, 65.0) == 0.0
+    assert snap_to_lot(100.0, 0.0) == 100.0     # bad lot passthrough
+    assert snap_to_lot(100.0, -5.0) == 100.0

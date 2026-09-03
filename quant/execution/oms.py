@@ -1,4 +1,5 @@
 from quant.decision.signal_builder import Signal
+from quant.execution.lots import snap_to_lot
 from quant.execution.order import Fill, Order, Position
 from quant.execution.ports import IOMS
 
@@ -24,21 +25,8 @@ class PaperOMS:
     def lot_size(self) -> float:
         return self._lot_size
 
-    @staticmethod
-    def _snap_to_lot(quantity: float, lot_size: float) -> float:
-        """Round a raw unit count to the nearest lot multiple (min 1 lot).
-
-        Half-lots round UP: banker's rounding (round(2.5)=2) silently
-        under-sized pyramid P2 by 20% (certification S10 finding)."""
-        if lot_size is None or lot_size <= 0 or quantity <= 0:
-            return quantity
-        import math
-
-        num_lots = max(1.0, math.floor(quantity / lot_size + 0.5))
-        return num_lots * lot_size
-
     def submit(self, signal: Signal, quantity: float) -> Position:
-        size = self._snap_to_lot(quantity, self._lot_size)
+        size = snap_to_lot(quantity, self._lot_size)
         signed = size if signal.type == "LONG" else -size
         return Position(
             order=Order(signal=signal, quantity=size),
@@ -91,7 +79,7 @@ class PaperOMS:
         (runtime._check_pyramid) after this fills, so the combined bundle
         is guaranteed positive: SL is behind the new support level.
         """
-        size = self._snap_to_lot(abs(size), self._lot_size)
+        size = snap_to_lot(abs(size), self._lot_size)
         if size <= 0:
             raise ValueError(f"Pyramid size {size} is too small (< 1 lot)")
 

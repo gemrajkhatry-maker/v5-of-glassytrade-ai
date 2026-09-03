@@ -17,7 +17,6 @@ Signal flow:
 from __future__ import annotations
 
 import logging
-import math
 from typing import TYPE_CHECKING
 
 from quant.contracts.ports.broker import IBroker
@@ -25,6 +24,7 @@ from quant.decision.signal_builder import Signal as EngineSignal
 from quant.events import OrderFilled, OrderSubmitted
 from quant.execution.broker_mapper import to_broker_signal
 from quant.execution.fills import broker_position_to_fill
+from quant.execution.lots import snap_to_lot
 from quant.execution.order import Fill, Order, Position
 
 if TYPE_CHECKING:
@@ -62,7 +62,7 @@ class LiveOMS:
         and maps the broker Position back to the engine domain Position.
         Returns None if the broker rejected the signal (normal, not an error).
         """
-        size = self._snap_to_lot(quantity, self._lot_size)
+        size = snap_to_lot(quantity, self._lot_size)
         broker_signal = to_broker_signal(signal, size)
         broker_pos = self._broker.execute_order(broker_signal, self._portfolio, signal.symbol)
 
@@ -307,7 +307,7 @@ class LiveOMS:
             "not implemented end-to-end; refusing to create a ghost pyramid "
             "position"
         )
-        size = self._snap_to_lot(abs(size), self._lot_size)
+        size = snap_to_lot(abs(size), self._lot_size)
         if size <= 0:
             raise ValueError(f"Pyramid size {size} is too small (< 1 lot)")
 
@@ -369,11 +369,3 @@ class LiveOMS:
             pyramid_level=pyramid_level,
             is_pyramid=True,
         )
-
-    @staticmethod
-    def _snap_to_lot(quantity: float, lot_size: float) -> float:
-        """Round a raw unit count to the nearest lot multiple (min 1 lot)."""
-        if lot_size is None or lot_size <= 0 or quantity <= 0:
-            return quantity
-        num_lots = max(1.0, math.floor(quantity / lot_size + 0.5))
-        return num_lots * lot_size
