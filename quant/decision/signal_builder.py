@@ -1,8 +1,11 @@
 from dataclasses import dataclass
+import logging
 
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 from quant.decision.stops import DEFAULT_TICK, structural_anchor, structural_stop
+
+logger = logging.getLogger(__name__)
 
 MIN_STOP_DISTANCE_PCT = 0.1
 MAX_POSITION_QUANTITY = 1000
@@ -104,11 +107,8 @@ class SignalBuilder:
             monotonic = sl < entry < tp
         else:
             monotonic = sl > entry > tp  # SL above entry, TP below
-        try:
-            assert monotonic, f"inverted signal: direction={direction} entry={entry} sl={sl} tp={tp}"
-        except AssertionError:
-            import logging as _log
-            _log.getLogger(__name__).warning(
+        if not monotonic:
+            logger.warning(
                 "SignalBuilder: inverted signal dropped — %s entry=%.2f sl=%.2f tp=%.2f",
                 direction, entry, sl, tp,
             )
