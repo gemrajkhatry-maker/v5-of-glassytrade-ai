@@ -12,8 +12,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from quant.contracts.aggregates import Portfolio
-from quant.contracts.entities import Position as BrokerPosition, Signal as BrokerSignal
-from quant.contracts.enums import Side, SignalType, Source, SetupType
+from quant.contracts.entities import Position as BrokerPosition
+from quant.contracts.entities import Signal as BrokerSignal
+from quant.contracts.enums import SetupType, Side, SignalType, Source
 from quant.contracts.ports.broker import IBroker
 from quant.decision.signal_builder import Signal
 from quant.execution.live_oms import LiveOMS

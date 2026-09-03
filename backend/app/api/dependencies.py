@@ -12,8 +12,9 @@ seeds when the scan is absent). Readers use ``get_active_symbols()`` (a
 
 from __future__ import annotations
 
-from fastapi import Depends, Request
 from typing import Annotated
+
+from fastapi import Depends, Request
 
 # Module-level singletons (created by init_singletons() in main.py)
 _broker = None

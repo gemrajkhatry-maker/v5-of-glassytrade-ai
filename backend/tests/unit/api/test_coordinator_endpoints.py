@@ -8,10 +8,9 @@ onto ``app.state.coordinator`` — no DI, no live market data.
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.api.dependencies import get_coordinator
 from app.main import app as _live_app
+from fastapi.testclient import TestClient
 
 
 class _RawView:

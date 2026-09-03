@@ -24,13 +24,12 @@ from typing import Optional
 
 from brokers.broker.dhan.domain import (
     API_BASE_URL,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_TIMEOUT_SECONDS,
     DHAN_API_V2_BASE_URL,
     WS_URL,
-    DEFAULT_TIMEOUT_SECONDS,
-    DEFAULT_MAX_RETRIES,
 )
 from brokers.broker.dhan.domain.errors import DhanConfigError, DhanMissingConfigError
-
 
 # =============================================================================
 # Dhan Configuration

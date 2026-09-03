@@ -15,11 +15,17 @@ from typing import Any
 
 from prometheus_client import (
     CollectorRegistry,
-    Counter as _PromCounter,
-    Gauge as _PromGauge,
-    Histogram as _PromHistogram,
     disable_created_metrics,
     generate_latest,
+)
+from prometheus_client import (
+    Counter as _PromCounter,
+)
+from prometheus_client import (
+    Gauge as _PromGauge,
+)
+from prometheus_client import (
+    Histogram as _PromHistogram,
 )
 
 # Bucket boundaries matching the previous hand-rolled implementation.

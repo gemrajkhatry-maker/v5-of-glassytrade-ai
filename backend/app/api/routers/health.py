@@ -6,27 +6,29 @@ import logging
 import resource
 import sys
 import tracemalloc
+
 from app.core.async_boundary import ensure_sync_adapter_result
 
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from app.infrastructure.metrics import MetricsCollector
+
+from app.api.dependencies import (
+    ActiveSymbolsDep,
+    BrokerDep,
+    ConfigDep,
+    StorageDep,
+    get_active_symbols,
+    get_broker,
+    get_configuration,
+    get_market_data,
+    get_storage,
+)
 from app.config import settings
+from app.infrastructure.metrics import MetricsCollector
 from quant.probability.features import (
     FEATURE_NAMES,
     PROBABILITY_FEATURE_SCHEMA_VERSION,
-)
-from app.api.dependencies import (
-    BrokerDep,
-    StorageDep,
-    ConfigDep,
-    ActiveSymbolsDep,
-    get_broker,
-    get_storage,
-    get_configuration,
-    get_active_symbols,
-    get_market_data,
 )
 
 router = APIRouter(tags=["health"])

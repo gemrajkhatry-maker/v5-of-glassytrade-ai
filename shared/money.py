@@ -1,6 +1,7 @@
 # shared/money.py
 """Sole numeric vocabulary — Decimal/float conversions. (REF-01)"""
 from __future__ import annotations
+
 from decimal import Decimal, InvalidOperation
 from typing import Any
 

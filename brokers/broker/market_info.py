@@ -11,7 +11,8 @@ String-based API — no Instrument objects required.
 """
 
 from datetime import datetime, time
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY
 
 try:

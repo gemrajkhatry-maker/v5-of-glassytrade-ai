@@ -210,8 +210,8 @@ class TestEndToEndIntegration:
         """Reconciliation detects matching positions."""
         from quant.event_store import EventStore
         from quant.events import PositionOpened
-        from quant.state_machine import PositionState
         from quant.reconciliation_service import index_rows, reconcile_sets
+        from quant.state_machine import PositionState
         
         # Create store with position
         store = EventStore()

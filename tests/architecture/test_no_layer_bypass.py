@@ -49,9 +49,17 @@ def test_no_engine_privates_in_transport():
 # gate — that is an invalid regex in `re` (fixed-width lookbehind required),
 # so gate (c) is a hardened plain-word match on a py-only file allowlist.
 
+# NOTE: hardened to span ONE nesting level (the LOT_SIZES tables embed a
+# {**registry...} comprehension). A bare [\s\S]*? was tried and REJECTED:
+# it spans to any later "NIFTY" in the file, false-positiving on
+# quant/amt/session/selector.py (MCX_LOT_SIZES comps + far-below BANKNIFTY)
+# and quant/multi_engine.py (empty dict[str, float] locals + far-below
+# comment). This bounded form keeps the hit set identical to the old
+# [^}]* while genuinely catching the nested-brace LOT_SIZES table the old
+# form missed (verified: old misses that block, this catches it).
 _LOT_SIZE_TABLE_RE = (
     r"^\s*(?:\w+\s*:\s*)?(?:Dict\[str,\s*(?:int|float)\]"
-    r"|dict\[str,\s*(?:int|float)\])\s*=\s*\{[^}]*NIFTY"
+    r"|dict\[str,\s*(?:int|float)\])\s*=\s*\{(?:[^{}]|\{[^{}]*\})*?NIFTY"
 )
 _CONVERTER_RE = r"def\s+_to_(?:decimal|float)\s*\("
 _IST_LITERAL_RE = r"\b19800\b"

@@ -7,17 +7,18 @@ No external dependencies except standard library.
 
 # Lot-size source of truth lives in quant.contracts.instrument_registry.
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY as _REG
+
 # Timeout/retry/backoff/WS/cache policy lives in shared.net_policy;
 # re-exported here so existing importers keep working unchanged.
 from shared.net_policy import (  # noqa: F401
-    DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_MAX_RETRIES,
     DEFAULT_RETRY_BACKOFF_FACTOR,
     DEFAULT_RETRY_MAX_DELAY_SECONDS,
+    DEFAULT_TIMEOUT_SECONDS,
+    INSTRUMENT_CACHE_TTL_SECONDS,
+    WS_MAX_RECONNECT_ATTEMPTS,
     WS_PING_INTERVAL_SECONDS,
     WS_RECONNECT_DELAY_SECONDS,
-    WS_MAX_RECONNECT_ATTEMPTS,
-    INSTRUMENT_CACHE_TTL_SECONDS,
 )
 
 # =============================================================================

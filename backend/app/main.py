@@ -17,6 +17,7 @@ from typing import AsyncGenerator
 
 # Load .env BEFORE any other imports that read os.getenv()
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 # Enable faulthandler to print Python traceback on segfault
@@ -25,36 +26,36 @@ faulthandler.enable()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.dependencies import init_singletons, set_active_symbols
 from app.api.routers import (
     health_router,
-    market_router,
-    trading_router,
     journal_router,
+    market_router,
     metrics_router,
     testing_router,
+    trading_router,
 )
-from app.api.routers.observability import router as observability_router
 from app.api.routers.alerts import router as alerts_router
 from app.api.routers.analysis import router as analysis_router
+from app.api.routers.observability import router as observability_router
 from app.api.websocket.gameloop import router as gameloop_router
-from app.api.dependencies import init_singletons, set_active_symbols
+from app.config import settings as _settings
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.core.correlation import CorrelationIdMiddleware
-from app.core.logging import setup_logging, get_logger
+from app.core.logging import get_logger, setup_logging
 from app.core.startup_telemetry import (
     begin_phase,
     end_phase,
-    record_startup_reconciliation,
     mark_startup_failed,
     mark_startup_finished,
     mark_startup_started,
+    record_startup_reconciliation,
 )
-from app.core.async_boundary import ensure_sync_adapter_result
-from app.config import settings as _settings
-from quant.contracts.ports.broker import IBroker
-from quant.contracts.ports.storage import IStorage
-from quant.contracts.ports.market_data import IMarketData
 from app.domain.ops.startup_reconciliation import ReconcilePolicy, StartupReconciliation
 from app.shared.mode import resolve_runtime_mode
+from quant.contracts.ports.broker import IBroker
+from quant.contracts.ports.market_data import IMarketData
+from quant.contracts.ports.storage import IStorage
 
 
 def _build_startup_contracts(
@@ -223,10 +224,11 @@ def create_application() -> FastAPI:
                     "Reusing persisted contracts (same trading day): %s", persisted
                 )
             else:
+                import concurrent.futures
+
+                from app.config import settings
                 from quant.amt.session.scanner import OptionScannerService
                 from quant.amt.session.scanner_config import ScannerConfig
-                from app.config import settings
-                import concurrent.futures
 
                 scanner = OptionScannerService(container.resolve(IMarketData))
                 scan_cfg = ScannerConfig.from_settings(settings)

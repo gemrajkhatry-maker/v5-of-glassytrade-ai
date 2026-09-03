@@ -1,6 +1,8 @@
 # tests/quant/contracts/test_money_parity.py
 from decimal import Decimal
+
 from shared.money import to_decimal, to_float
+
 
 def test_none_maps_to_zero():
     assert to_decimal(None) == Decimal("0")
@@ -19,9 +21,9 @@ def test_decimal_passthrough_and_float_string():
     assert to_float(Decimal("123.45")) == 123.45
 
 def test_quant_shims_are_shared_money():
-    import shared.money as m
     import quant.contracts.decimal_utils as du
     import quant.contracts.numeric as nu
+    import shared.money as m
     assert du.to_decimal is m.to_decimal
     assert nu.to_float is m.to_float
 
@@ -44,7 +46,13 @@ def test_adapter_lenient_wrapper_preserves_old_semantics():
 
 def test_registry_is_sole_lot_source():
     from quant.contracts.instrument_registry import (
-        DEFAULT_REGISTRY, get_lot_size as reg_lot, get_tick_size as reg_tick,
+        DEFAULT_REGISTRY,
+    )
+    from quant.contracts.instrument_registry import (
+        get_lot_size as reg_lot,
+    )
+    from quant.contracts.instrument_registry import (
+        get_tick_size as reg_tick,
     )
     assert DEFAULT_REGISTRY.try_resolve("NIFTY").lot_size == 65
     assert DEFAULT_REGISTRY.try_resolve("BANKNIFTY").lot_size == 30
@@ -52,8 +60,8 @@ def test_registry_is_sole_lot_source():
     assert reg_lot("NIFTY") == 65
     assert reg_tick("CRUDEOIL") == 1.0
     # Parity: every registry-covered root agrees with market_info + dhan constants
-    from brokers.broker.market_info import get_lot_size
     from brokers.broker.dhan.domain.constants import LOT_SIZES as DHAN_LOTS
+    from brokers.broker.market_info import get_lot_size
     for spec in DEFAULT_REGISTRY.specs():
         assert get_lot_size(spec.root) == spec.lot_size, spec.root
         if spec.root in DHAN_LOTS:

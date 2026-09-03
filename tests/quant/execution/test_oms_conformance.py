@@ -39,7 +39,6 @@ from quant.execution.oms import PaperOMS
 from quant.execution.order import Order, Position
 from quant.execution.ports import IOMS
 
-
 # ---------------------------------------------------------------------------
 # Fake broker (CURRENT quant IBroker) — perfect fills at requested price/size
 # ---------------------------------------------------------------------------

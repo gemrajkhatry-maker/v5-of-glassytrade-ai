@@ -1,14 +1,22 @@
 from types import SimpleNamespace
 
 from brokers.broker.dhan.domain.order_status import (
-    DHAN_ORDER_STATUS_MAP, TERMINAL_STATUSES, is_terminal, normalize_status,
+    DHAN_ORDER_STATUS_MAP,
+    TERMINAL_STATUSES,
+    is_terminal,
+    normalize_status,
 )
 from brokers.broker.types import OrderStatus
 from quant.decision.signal_builder import Signal as EngineSignal
-from quant.decision.signal_builder import SignalBuilder, is_stop_too_thin, clamp_quantity
+from quant.decision.signal_builder import (
+    SignalBuilder,
+    clamp_quantity,
+    is_stop_too_thin,
+)
 from quant.execution.fills import broker_position_to_fill
 from quant.execution.lots import snap_to_lot
 from quant.execution.order import Order, Position, position_to_row, row_to_position
+
 
 def test_status_table_values():
     assert DHAN_ORDER_STATUS_MAP["TRADED"] is OrderStatus.FILLED

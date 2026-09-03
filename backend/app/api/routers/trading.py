@@ -6,14 +6,15 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.dependencies import get_coordinator, get_storage, get_trade_journal
-from quant.contracts.ports.storage import IStorage
-from quant.contracts.aggregates import Portfolio
 from app.application.services.trading_query_service import TradingQueryService
 from app.core.async_boundary import ensure_sync_adapter_result
 from app.infrastructure.serialization.schemas import (
-    StatsRequestDTO, portfolio_to_dto, position_event_to_dto,
+    StatsRequestDTO,
+    portfolio_to_dto,
+    position_event_to_dto,
 )
-
+from quant.contracts.aggregates import Portfolio
+from quant.contracts.ports.storage import IStorage
 
 _trading_query_service = TradingQueryService()
 

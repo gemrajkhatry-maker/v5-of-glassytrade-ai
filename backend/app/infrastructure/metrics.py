@@ -6,8 +6,8 @@ Exposes metrics as a dict for the /api/v1/metrics endpoint.
 
 from __future__ import annotations
 
-import time
 import threading
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 
