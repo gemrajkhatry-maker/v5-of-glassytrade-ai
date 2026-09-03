@@ -9,6 +9,18 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+__all__ = [
+    "DEFAULT_REGISTRY",
+    "InstrumentRegistry",
+    "InstrumentSpec",
+    "UnknownInstrumentError",
+    "get_lot_size",
+    "get_tick_size",
+    "is_futures_contract",
+    "is_option_contract",
+    "root_token",
+]
+
 
 class UnknownInstrumentError(ValueError):
     """Raised when a symbol root is not registered. Never default an exchange."""

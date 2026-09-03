@@ -1,6 +1,18 @@
 """Sole timeout/retry/backoff owner. Frontend NETWORK_CONFIG mirrors these values. (REF-04)"""
 from __future__ import annotations
 
+__all__ = [
+    "DEFAULT_MAX_RETRIES",
+    "DEFAULT_RETRY_BACKOFF_FACTOR",
+    "DEFAULT_RETRY_MAX_DELAY_SECONDS",
+    "DEFAULT_TIMEOUT_SECONDS",
+    "INSTRUMENT_CACHE_TTL_SECONDS",
+    "WS_MAX_RECONNECT_ATTEMPTS",
+    "WS_PING_INTERVAL_SECONDS",
+    "WS_RECONNECT_DELAY_SECONDS",
+    "capped_exp_delay",
+]
+
 DEFAULT_TIMEOUT_SECONDS: float = 10.0
 DEFAULT_MAX_RETRIES: int = 3
 DEFAULT_RETRY_BACKOFF_FACTOR: float = 0.5

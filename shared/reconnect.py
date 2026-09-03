@@ -9,6 +9,8 @@ from dataclasses import dataclass
 
 from shared.net_policy import capped_exp_delay
 
+__all__ = ["ReconnectPolicy"]
+
 
 @dataclass(frozen=True)
 class ReconnectPolicy:

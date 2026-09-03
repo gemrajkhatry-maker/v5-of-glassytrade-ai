@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import math
 
+__all__ = ["snap_to_lot"]
+
 
 def snap_to_lot(quantity: float, lot_size: float) -> float:
     """Round a raw unit count to the nearest lot multiple (min 1 lot).
