@@ -170,6 +170,53 @@ def test_amt_dto_keeps_frontend_rendered_fields():
         assert keep in dto
 
 
+def test_amt_dto_half_trend_emits_null_channel_before_atr_warmup():
+    """HalfTrend ATR rails must be JSON null (never 0.0) before ATR warms.
+
+    A 0.0 rail drawn on the chart stretches the price scale from 0 up to
+    the candle price, visually crushing the candles (regression: line
+    starting from zero compressing the UI).
+    """
+    from quant.amt.market.half_trend import HalfTrendResult
+
+    result = AMTResult(
+        market_state="BALANCED",
+        poc=100,
+        value_area_high=105,
+        value_area_low=95,
+        half_trend_result=HalfTrendResult(
+            time="2024-01-01T09:30:00Z",
+            trend=0,
+            ht=8600.0,
+            atr_high=None,
+            atr_low=None,
+        ),
+    )
+    dto = amt_result_to_dto(result)
+    ht = dto["halfTrend"]
+    assert ht["ht"] == 8600.0
+    assert ht["atrHigh"] is None
+    assert ht["atrLow"] is None
+
+    # Once ATR warms, real rails pass through unchanged.
+    warmed = AMTResult(
+        market_state="BALANCED",
+        poc=100,
+        value_area_high=105,
+        value_area_low=95,
+        half_trend_result=HalfTrendResult(
+            time="2024-01-01T09:30:00Z",
+            trend=0,
+            ht=8600.0,
+            atr_high=8612.0,
+            atr_low=8588.0,
+        ),
+    )
+    dto2 = amt_result_to_dto(warmed)
+    assert dto2["halfTrend"]["atrHigh"] == 8612.0
+    assert dto2["halfTrend"]["atrLow"] == 8588.0
+
+
 def test_position_dto_drops_lot_size():
     p = Position(
         id="p1",

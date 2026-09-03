@@ -294,8 +294,11 @@ export function halfTrendLivePoint(
     time: ht.time,
     trend: ht.trend,
     ht: ht.ht,
-    atrHigh: ht.atrHigh ?? null,
-    atrLow: ht.atrLow ?? null,
+    // Channel rails are null until the backend ATR warms up. Treat 0 as
+    // null too: a 0-value rail would stretch the chart's price scale from
+    // 0 up to the candle price and visually crush the candles.
+    atrHigh: ht.atrHigh ? Number(ht.atrHigh) : null,
+    atrLow: ht.atrLow ? Number(ht.atrLow) : null,
     buy: !!ht.buySignal,
     sell: !!ht.sellSignal,
   };
@@ -340,10 +343,12 @@ export function halfTrendSeriesData(points: HalfTrendPoint[]) {
       value: p.ht,
       color: p.trend === 1 ? HALF_TREND_DOWN_COLOR : HALF_TREND_UP_COLOR,
     });
-    if (p.atrHigh != null) {
+    // Rails must be positive real channel values; a 0/null rail is skipped
+    // so the price scale is never stretched by a rogue zero point.
+    if (p.atrHigh != null && p.atrHigh > 0) {
       atrHigh.push({ time, value: p.atrHigh, color: HALF_TREND_DOWN_COLOR });
     }
-    if (p.atrLow != null) {
+    if (p.atrLow != null && p.atrLow > 0) {
       atrLow.push({ time, value: p.atrLow, color: HALF_TREND_UP_COLOR });
     }
   }

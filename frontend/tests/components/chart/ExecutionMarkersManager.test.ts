@@ -251,6 +251,26 @@ describe('ExecutionMarkersManager', () => {
       expect(halfTrendLivePoint({ ht: 5, trend: 0 } as any)).toBeNull();
     });
 
+    it('treats 0 channel rails as null (no zero line stretching the scale)', () => {
+      // Regression: backend pre-ATR-warmup rows used to serialize 0.0
+      // instead of null; a 0-valued rail crushed the candle price scale.
+      const pt = halfTrendLivePoint({
+        time: '2024-01-01T09:30:00Z',
+        trend: 0, ht: 8600, atrHigh: 0, atrLow: 0,
+        buySignal: false, sellSignal: false,
+      } as any);
+      expect(pt!.atrHigh).toBeNull();
+      expect(pt!.atrLow).toBeNull();
+      expect(pt!.ht).toBe(8600);
+
+      const { atrHigh, atrLow } = halfTrendSeriesData([
+        { time: '2024-01-01T09:30:00Z', trend: 0, ht: 8600, atrHigh: 0, atrLow: 0, buy: false, sell: false },
+        { time: '2024-01-01T09:35:00Z', trend: 0, ht: 8600, atrHigh: 0, atrLow: 0, buy: false, sell: false },
+      ]);
+      expect(atrHigh).toHaveLength(0);
+      expect(atrLow).toHaveLength(0);
+    });
+
     it('upserts same timestamp and appends newer', () => {
       const a: HalfTrendPoint = { time: '2024-01-01T09:30:00Z', trend: 0, ht: 10, atrHigh: null, atrLow: null, buy: false, sell: false };
       const b: HalfTrendPoint = { time: '2024-01-01T09:30:00Z', trend: 1, ht: 12, atrHigh: 15, atrLow: 9, buy: false, sell: true };
