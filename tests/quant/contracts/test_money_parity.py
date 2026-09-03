@@ -17,3 +17,10 @@ def test_decimal_passthrough_and_float_string():
     assert to_decimal(Decimal("1.5")) == Decimal("1.5")
     assert to_decimal(123.45) == Decimal("123.45")
     assert to_float(Decimal("123.45")) == 123.45
+
+def test_quant_shims_are_shared_money():
+    import shared.money as m
+    import quant.contracts.decimal_utils as du
+    import quant.contracts.numeric as nu
+    assert du.to_decimal is m.to_decimal
+    assert nu.to_float is m.to_float
