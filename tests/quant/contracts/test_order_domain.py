@@ -1,8 +1,13 @@
-from brokers.broker.types import OrderStatus
+from types import SimpleNamespace
+
 from brokers.broker.dhan.domain.order_status import (
     DHAN_ORDER_STATUS_MAP, TERMINAL_STATUSES, is_terminal, normalize_status,
 )
+from brokers.broker.types import OrderStatus
+from quant.decision.signal_builder import Signal as EngineSignal
 from quant.decision.signal_builder import SignalBuilder, is_stop_too_thin, clamp_quantity
+from quant.execution.fills import broker_position_to_fill
+from quant.execution.order import Order, Position, position_to_row, row_to_position
 
 def test_status_table_values():
     assert DHAN_ORDER_STATUS_MAP["TRADED"] is OrderStatus.FILLED
@@ -57,9 +62,6 @@ def test_builder_happy_path_long():
     assert sig is not None and why == ""
     assert sig.type == "LONG" and sig.entry == 100.0
     assert sig.sl < sig.entry < sig.tp
-# append to tests/quant/contracts/test_order_domain.py
-from quant.decision.signal_builder import Signal as EngineSignal
-from quant.execution.order import Order, Position, Fill, position_to_row, row_to_position
 
 
 def _eng_position(pyramid=False, level=0):
@@ -82,9 +84,6 @@ def test_row_roundtrip_base_and_pyramid():
         assert q.order.signal.entry == 100.0 and q.order.quantity == 65.0
         assert q.pyramid_level == p.pyramid_level and q.is_pyramid == p.is_pyramid
         assert row["side"] == "LONG" and row["symbol"] == "NIFTY"
-# append to tests/quant/contracts/test_order_domain.py
-from types import SimpleNamespace
-from quant.execution.fills import BrokerFill, broker_position_to_fill
 
 
 def test_fill_mapping_exact_values():
