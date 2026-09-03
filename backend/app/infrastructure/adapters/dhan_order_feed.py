@@ -61,11 +61,7 @@ def _first(payload: dict, *keys: str, default: Any = None) -> Any:
     return default
 
 
-def _to_float(value: Any) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
+from shared.money import to_float as _to_float
 
 
 def normalize_order_update(payload: Any) -> dict | None:

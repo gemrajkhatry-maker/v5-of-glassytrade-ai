@@ -33,15 +33,7 @@ from brokers.broker.dhan.domain.errors import DhanError
 logger = logging.getLogger(__name__)
 
 
-def _to_decimal(value: Any, default: str = "0") -> Decimal:
-    if isinstance(value, Decimal):
-        return value
-    if value is None:
-        return Decimal(default)
-    try:
-        return Decimal(str(value))
-    except Exception:
-        return Decimal(default)
+from shared.money import to_decimal as _to_decimal
 
 
 class DhanBrokerAdapter(IBroker):
@@ -737,7 +729,8 @@ class DhanBrokerAdapter(IBroker):
             logger.error("Cannot auto-size order without Portfolio context for %s", signal.signal_id)
             return 0
 
-        risk_pct = _to_decimal(meta.get("session_risk_pct"), default=str(RISK_PER_TRADE))
+        _raw_risk_pct = meta.get("session_risk_pct")
+        risk_pct = _to_decimal(_raw_risk_pct) if _raw_risk_pct is not None else Decimal(str(RISK_PER_TRADE))
         if risk_pct <= 0:
             risk_pct = RISK_BY_CONFIDENCE.get(str(meta.get("confidence", "Medium")), RISK_PER_TRADE)
 

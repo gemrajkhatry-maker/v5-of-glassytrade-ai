@@ -24,3 +24,10 @@ def test_quant_shims_are_shared_money():
     import quant.contracts.numeric as nu
     assert du.to_decimal is m.to_decimal
     assert nu.to_float is m.to_float
+
+def test_adapter_converters_match_shared_money():
+    import pathlib
+    adapter = pathlib.Path("backend/app/infrastructure/adapters/dhan_broker_adapter.py").read_text()
+    assert "def _to_decimal" not in adapter
+    feed = pathlib.Path("backend/app/infrastructure/adapters/dhan_order_feed.py").read_text()
+    assert "def _to_float" not in feed
