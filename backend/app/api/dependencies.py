@@ -15,6 +15,7 @@ _storage = None
 _market_data = None
 _configuration = None
 _active_symbols = []
+_coordinator = None
 
 
 def init_singletons(
@@ -23,16 +24,19 @@ def init_singletons(
     market_data,
     configuration,
     active_symbols,
+    coordinator=None,
 ) -> None:
     """Initialize module-level singletons at startup (called from main.py)."""
     global _broker, _storage
     global _market_data, _configuration, _active_symbols
+    global _coordinator
 
     _broker = broker
     _storage = storage
     _market_data = market_data
     _configuration = configuration
     _active_symbols = active_symbols
+    _coordinator = coordinator
 
 
 # FastAPI dependency functions
@@ -59,6 +63,11 @@ def get_configuration() -> "Configuration":
 def get_active_symbols() -> list:
     """Dependency: Active symbols."""
     return list(_active_symbols)
+
+
+def get_coordinator():
+    """Dependency: QuantCoordinator view (ICoordinatorView surface)."""
+    return _coordinator
 
 
 # Annotated types for FastAPI

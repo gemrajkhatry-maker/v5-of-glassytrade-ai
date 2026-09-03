@@ -10,6 +10,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.dependencies import get_coordinator
+from app.main import app as _live_app
+
 
 class _RawView:
     """Shim exposing a fake snapshot dict as a ViewState-like object so the
@@ -139,6 +142,53 @@ def test_ws_gameloop_streams_coordinator_snapshot(client):
         ws.send_json({"ping": True})
         pong = ws.receive_json()
         assert pong == {"type": "pong"}
+
+
+class _UnhaltingCoordinator(_FakeCoordinator):
+    """Fake WITH unhalt_all (mirrors QuantCoordinator.unhalt_all -> int)."""
+
+    def __init__(self, unhalted: int = 2) -> None:
+        super().__init__()
+        self._unhalted = unhalted
+
+    def unhalt_all(self) -> int:
+        return self._unhalted
+
+
+class _NoUnhaltCoordinator:
+    """Fake WITHOUT unhalt_all (coordinator present but halt surface absent)."""
+
+
+def test_unhalt_via_dependency():
+    # Fake coordinator WITH unhalt_all -> {"status": "ok", "unhalted_engines": N}
+    _live_app.dependency_overrides[get_coordinator] = lambda: _UnhaltingCoordinator(unhalted=2)
+    try:
+        c = TestClient(_live_app)
+        resp = c.post("/api/trading/risk/unhalt")
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "status": "ok",
+            "unhalted_engines": 2,
+            "message": "Cleared risk halts across 2 engines",
+        }
+    finally:
+        _live_app.dependency_overrides.pop(get_coordinator, None)
+
+
+def test_unhalt_via_dependency_no_coordinator():
+    # Fake coordinator WITHOUT unhalt_all -> {"status": "ok", "unhalted_engines": 0, ...}
+    _live_app.dependency_overrides[get_coordinator] = lambda: _NoUnhaltCoordinator()
+    try:
+        c = TestClient(_live_app)
+        resp = c.post("/api/trading/risk/unhalt")
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "status": "ok",
+            "unhalted_engines": 0,
+            "message": "Coordinator not active",
+        }
+    finally:
+        _live_app.dependency_overrides.pop(get_coordinator, None)
 
 
 def test_ws_portfolio_always_full_contract_shape(client):

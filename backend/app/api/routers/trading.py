@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.dependencies import get_storage, get_trade_journal
+from app.api.dependencies import get_coordinator, get_storage, get_trade_journal
 from quant.contracts.ports.storage import IStorage
 from quant.contracts.aggregates import Portfolio
 from app.application.services.trading_query_service import TradingQueryService
@@ -88,11 +88,11 @@ async def get_position_lifecycle(
 
 
 @router.post("/risk/unhalt")
-async def unhalt_trading():
+async def unhalt_trading(coordinator=Depends(get_coordinator)):
     """Operator endpoint to unhalt all trading engines after emergency or restart halt."""
-    from app.main import app
-    if hasattr(app.state, "coordinator") and hasattr(app.state.coordinator, "unhalt_all"):
-        count = app.state.coordinator.unhalt_all()
-        return {"status": "ok", "unhalted_engines": count, "message": f"Cleared risk halts across {count} engines"}
-    return {"status": "ok", "unhalted_engines": 0, "message": "Coordinator not active"}
+    unhalt = getattr(coordinator, "unhalt_all", None)
+    if unhalt is None:
+        return {"status": "ok", "unhalted_engines": 0, "message": "Coordinator not active"}
+    count = unhalt()
+    return {"status": "ok", "unhalted_engines": count, "message": f"Cleared risk halts across {count} engines"}
 

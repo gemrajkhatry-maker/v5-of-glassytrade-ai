@@ -467,6 +467,7 @@ def create_application() -> FastAPI:
             market_data=market_data,
             configuration=config,
             active_symbols=active_symbols,
+            coordinator=getattr(app.state, "coordinator", None),
         )
 
         # Register routers
