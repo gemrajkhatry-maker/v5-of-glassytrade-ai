@@ -14,6 +14,7 @@ from brokers.broker.entities import Instrument, Order
 from brokers.broker.types import Exchange, OrderSide, OrderStatus, OrderType
 
 from brokers.broker.dhan.domain import DhanOrder
+from brokers.broker.dhan.domain.order_status import DHAN_ORDER_STATUS_MAP
 from brokers.broker.dhan.domain.segment_mapping import SEGMENT_TO_EXCHANGE
 
 
@@ -47,19 +48,8 @@ DHAN_ORDER_TYPE_MAP: Dict[str, OrderType] = {
 
 # Dhan orderStatus string -> broker-agnostic OrderStatus.
 # Unknown strings default to OrderStatus.PENDING.
-DHAN_ORDER_STATUS_MAP: Dict[str, OrderStatus] = {
-    "PENDING": OrderStatus.PENDING,
-    "TRANSIT": OrderStatus.PENDING,
-    "OPEN": OrderStatus.OPEN,
-    "PARTIALLY_FILLED": OrderStatus.OPEN,
-    "PART_TRADED": OrderStatus.OPEN,
-    "TRADED": OrderStatus.FILLED,
-    "FILLED": OrderStatus.FILLED,
-    "CANCELLED": OrderStatus.CANCELLED,
-    "CANCELED": OrderStatus.CANCELLED,
-    "REJECTED": OrderStatus.REJECTED,
-    "EXPIRED": OrderStatus.CANCELLED,
-}
+# Table moved to brokers.broker.dhan.domain.order_status (single owner);
+# re-imported here for backward compatibility.
 
 
 def to_order(dhan_order: DhanOrder) -> Order:

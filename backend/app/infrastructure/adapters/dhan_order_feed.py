@@ -42,8 +42,7 @@ from typing import Any, Callable
 
 import websockets
 
-from brokers.broker.dhan.application.order_converter import DHAN_ORDER_STATUS_MAP
-from brokers.broker.types import OrderStatus
+from brokers.broker.dhan.domain.order_status import normalize_status
 from shared.money import to_float as _to_float
 
 logger = logging.getLogger(__name__)
@@ -82,11 +81,9 @@ def normalize_order_update(payload: Any) -> dict | None:
         return None
 
     raw_status = str(_first(data, "status", "Status") or "").strip().upper()
-    status = DHAN_ORDER_STATUS_MAP.get(raw_status)
-    if status is None:
-        # Unknown status: treat as non-terminal (PENDING) rather than guessing
-        # terminal — a wrong terminal guess would drop a live order.
-        status = OrderStatus.PENDING
+    # Unknown status: treat as non-terminal (PENDING) rather than guessing
+    # terminal — a wrong terminal guess would drop a live order.
+    status = normalize_status(raw_status)
 
     return {
         "order_id": str(order_id),
