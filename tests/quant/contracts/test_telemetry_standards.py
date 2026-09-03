@@ -44,10 +44,12 @@ def test_backward_compat_valueerror(monkeypatch):
 def test_collector_snapshot_contract():
     c = MetricsCollector()
     c.reset()
-    c.record_tick(); c.record_tick()
+    c.record_tick()
+    c.record_tick()
     c.record_signal("LONG")
     c.record_pnl(12.345)
-    c.record_cache_hit(); c.record_cache_miss()
+    c.record_cache_hit()
+    c.record_cache_miss()
     c.record_regime_change()
     snap = MetricsCollector().snapshot()  # same singleton
     assert snap["ticks_processed"] == 2
