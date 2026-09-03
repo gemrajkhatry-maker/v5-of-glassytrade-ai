@@ -129,3 +129,40 @@ def test_module_all_names_resolve():
         assert mod.__all__ == sorted(mod.__all__), name
         for n in mod.__all__:
             assert hasattr(mod, n), (name, n)
+
+
+# --- New-code logging hygiene (ADR-0003): facade-only, no bare except -----
+#
+# Files CREATED by Plans A–E, hardcoded with intent (explicit > clever — do
+# not generalize to a "created by plans" heuristic). New code must use the
+# logging facades (brokers/broker/logging, backend/app/core/logging), never
+# raw logging.getLogger, and never bare `except Exception`. Everything else
+# is grandfathered (no mass migration — YAGNI). This file itself is NOT in
+# the list (it contains the patterns as string literals).
+_NEW_CODE_HYGIENE_FILES = frozenset({
+    "shared/money.py",
+    "shared/net_policy.py",
+    "shared/reconnect.py",
+    "brokers/broker/dhan/domain/order_status.py",
+    "quant/execution/fills.py",
+    "quant/execution/lots.py",
+    "quant/amt/session/scanner_config.py",
+    "quant/coordinator_view.py",
+    "tests/quant/contracts/test_money_parity.py",
+    "tests/quant/contracts/test_services_boundaries.py",
+    "tests/quant/contracts/test_telemetry_standards.py",
+})
+
+_GETLOGGER_RE = r"logging\.getLogger\s*\("
+_BARE_EXCEPT_RE = r"except\s+Exception\s*(:|as\b)"
+
+
+def test_new_code_logging_hygiene():
+    bad: dict = {}
+    for rel in sorted(_NEW_CODE_HYGIENE_FILES):
+        src = _read(rel)
+        if re.search(_GETLOGGER_RE, src):
+            bad.setdefault(rel, []).append("logging.getLogger (use a facade)")
+        if re.search(_BARE_EXCEPT_RE, src):
+            bad.setdefault(rel, []).append("bare except Exception")
+    assert bad == {}, bad
