@@ -285,6 +285,8 @@ class AMTResult:
     gex: object | None = None
     # LuxAlgo Value Area Reversion Signals (VARS)
     vars_result: object | None = None
+    # HalfTrend indicator (display-only trend line + Buy/Sell labels)
+    half_trend_result: object | None = None
 
 
 

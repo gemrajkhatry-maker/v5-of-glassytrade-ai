@@ -167,6 +167,16 @@ def amt_result_to_dto(r) -> dict:
             "bearishReclaim": getattr(r.vars_result, "bearish_reclaim", False) if getattr(r, "vars_result", None) else False,
             "signalSource": getattr(r.vars_result, "signal_source", "") if getattr(r, "vars_result", None) else "",
         },
+        # HalfTrend indicator — display-only line + Buy/Sell labels.
+        "halfTrend": {
+            "time": getattr(r.half_trend_result, "time", "") if getattr(r, "half_trend_result", None) else "",
+            "trend": int(getattr(r.half_trend_result, "trend", 0)) if getattr(r, "half_trend_result", None) else 0,
+            "ht": float(getattr(r.half_trend_result, "ht", 0.0)) if getattr(r, "half_trend_result", None) else 0.0,
+            "atrHigh": float(getattr(r.half_trend_result, "atr_high", 0.0) or 0.0) if getattr(r, "half_trend_result", None) else 0.0,
+            "atrLow": float(getattr(r.half_trend_result, "atr_low", 0.0) or 0.0) if getattr(r, "half_trend_result", None) else 0.0,
+            "buySignal": bool(getattr(r.half_trend_result, "buy_signal", False)) if getattr(r, "half_trend_result", None) else False,
+            "sellSignal": bool(getattr(r.half_trend_result, "sell_signal", False)) if getattr(r, "half_trend_result", None) else False,
+        },
         "footprints": {
             k: {
                 "time": v.time,

@@ -29,6 +29,38 @@ async def get_history(
     return {"data": [ohlc_to_dto(d) for d in data]}
 
 
+@router.get("/halftrend/{symbol}")
+async def get_halftrend(
+    symbol: str,
+    interval: str = Query("5m"),
+    limit: int = Query(500, ge=1, le=1000),
+    market_data: IMarketData = Depends(get_market_data),
+):
+    """HalfTrend indicator series over REST history candles.
+
+    Backend-computed (everget HalfTrend port) so the frontend only renders.
+    Rows align bar-for-bar with /market/history/{symbol}.
+    """
+    from quant.amt.market.half_trend import compute_half_trend_series
+
+    candles = await market_data.fetch_history(symbol, interval, limit)
+    rows = compute_half_trend_series(candles)
+    return {
+        "data": [
+            {
+                "time": row.time,
+                "trend": row.trend,
+                "ht": row.ht,
+                "atrHigh": row.atr_high,
+                "atrLow": row.atr_low,
+                "buy": row.buy_signal,
+                "sell": row.sell_signal,
+            }
+            for row in rows
+        ]
+    }
+
+
 @router.get("/orderbook/{symbol}")
 async def get_orderbook(
     symbol: str,

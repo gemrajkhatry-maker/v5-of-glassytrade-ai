@@ -300,6 +300,11 @@ class AMTAnalyzer:
         self._triple_a = TripleAMachine()
         from quant.amt.market.vars_detector import VARSDetector
         self._vars_detector = VARSDetector()
+        # HalfTrend — display-only trend line + Buy/Sell labels (no decisions).
+        # Deliberately NOT reset on session rollover: like Pine, the machine
+        # is continuous across bars/sessions.
+        from quant.amt.market.half_trend import HalfTrendDetector
+        self._half_trend_detector = HalfTrendDetector()
         self._session_market = "NSE"
         self._last_resolve_key = ""
 
@@ -776,6 +781,11 @@ class AMTAnalyzer:
             prior_poc=prior_poc,
         )
 
+        # HalfTrend — replay seed history once so rails match the REST
+        # series, then advance on each closed bar (idempotent per bar time).
+        self._half_trend_detector.warm_up(data)
+        half_trend_result = self._half_trend_detector.update(current)
+
 
 
         result = self._build_result(
@@ -813,6 +823,7 @@ class AMTAnalyzer:
             _footprints=_footprints, _contested_zone=_contested_zone,
             _triple=_triple, _effective_market_state=_effective_market_state,
             gex=gex, vars_result=vars_result,
+            half_trend_result=half_trend_result,
         )
 
         # Squeeze detection (Fabio Playbook #4): runs on the assembled result
@@ -843,7 +854,8 @@ class AMTAnalyzer:
                       _drive_number, _drive_entry_valid, cvd_source,
                       state_result, value_migration,
                       _footprints, _contested_zone, _triple,
-                      _effective_market_state, gex=None, vars_result=None) -> AMTResult:
+                      _effective_market_state, gex=None, vars_result=None,
+                      half_trend_result=None) -> AMTResult:
         """Assemble AMTResult from computed pipeline outputs.
 
         Pure data mapping — extracted from analyze() for readability.
@@ -962,6 +974,7 @@ class AMTAnalyzer:
             absorption_cluster_low=_triple.cluster_low,
             gex=gex,
             vars_result=vars_result,
+            half_trend_result=half_trend_result,
         )
 
     # -------------------------------------------------------------------
