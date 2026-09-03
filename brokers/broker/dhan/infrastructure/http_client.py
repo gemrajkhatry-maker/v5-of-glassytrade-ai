@@ -31,6 +31,7 @@ from typing import Optional, Dict, Any, Union, TYPE_CHECKING
 import aiohttp
 
 from brokers.broker.logging import get_logger, get_correlation_id
+from shared.reconnect import ReconnectPolicy
 from brokers.broker.dhan.ports import (
     IHttpClient,
     HttpRequest,
@@ -109,9 +110,7 @@ class RetryConfig:
             Delay in seconds before the next retry.
         """
         # Exponential backoff: backoff_factor * 2^attempt
-        delay = self.backoff_factor * (2 ** attempt)
-        # Cap at max delay
-        return min(delay, self.max_delay)
+        return ReconnectPolicy(base=self.backoff_factor, cap=self.max_delay, max_attempts=self.max_retries).delay_for(attempt)
 
 
 # =============================================================================

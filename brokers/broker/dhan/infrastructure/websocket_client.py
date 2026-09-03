@@ -37,6 +37,7 @@ from websockets.asyncio.client import ClientConnection
 from websockets.protocol import State as WSState
 
 from brokers.broker.logging import get_logger
+from shared.reconnect import ReconnectPolicy
 from brokers.broker.dhan.ports import (
     IWebSocketClient,
     WSMessage,
@@ -485,7 +486,7 @@ class DhanWebSocketClient(IWebSocketClient):
     async def _attempt_reconnect(self) -> None:
         while self._reconnect_count < self._max_reconnect_attempts:
             self._reconnect_count += 1
-            delay = min(self._reconnect_delay * (2 ** (self._reconnect_count - 1)), 60.0)
+            delay = ReconnectPolicy(base=self._reconnect_delay, cap=60.0, max_attempts=self._max_reconnect_attempts).delay_for(self._reconnect_count - 1)
             logger.info(f"Reconnecting {self._reconnect_count}/{self._max_reconnect_attempts} in {delay}s")
             await asyncio.sleep(delay)
 
