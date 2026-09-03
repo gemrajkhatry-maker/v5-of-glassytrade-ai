@@ -22,6 +22,7 @@ import logging
 import os
 import threading
 import time as _time
+from collections.abc import Sequence
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from enum import Enum
@@ -113,6 +114,119 @@ def _json_value(value: Any) -> Any:
             if not key.startswith("__")
         }
     return repr(value)
+
+
+def _export_row(event: Event, sequence: int, checksum: str) -> dict[str, Any]:
+    """Serialize one event to the export row format.
+
+    Shared by the lazy :class:`EventExport` view so export rows are always
+    produced the same way, whether accessed by index or by iteration.
+    """
+    return {
+        "sequence": sequence,
+        "symbol": event.symbol,
+        "time": event.time,
+        "event_type": type(event).__name__,
+        "payload": EventStore._event_to_dict(event),
+        "checksum": checksum,
+    }
+
+
+class EventExport(Sequence[dict[str, Any]]):
+    """Lazy, list-compatible view over an ``EventStore`` export.
+
+    ``export()`` must not materialize every row up front: on a 1M-event log
+    that is ~500MB of dicts even when the caller only streams rows to disk.
+    But the pinned export() contract is list-like, not generator-like:
+
+    - indexing (``exported[0]``), ``len()``, repeatable iteration, ``==``;
+    - in-place mutation of a returned row
+      (``exported[0]["payload"]["x"] = …``) must be observable on a later
+      full iteration — the tamper-resistance suites tamper an exported row
+      and expect ``import_`` to reject it;
+    - ``.append()`` (the import-integrity suites forge an extra row by
+      appending to an export).
+
+    Rows are therefore produced lazily on first access and MEMOIZED only
+    when reached through ``__getitem__`` (the mutation path). Iteration
+    streams rows without retaining them (cache hits aside), so a consumer
+    that writes the export to disk holds one row at a time. The store
+    snapshot is taken at construction, so the view is stable even if the
+    store grows afterwards.
+    """
+
+    __slots__ = ("_events", "_checksums", "_cache", "_extras")
+
+    def __init__(
+        self,
+        events: Sequence[Event],
+        checksums: Sequence[str],
+    ) -> None:
+        self._events = list(events)
+        self._checksums = list(checksums)
+        # Rows built through __getitem__ (indexing / mutation path). Iteration
+        # consults this cache first so an in-place payload mutation of an
+        # indexed row is re-observed on later passes.
+        self._cache: dict[int, dict[str, Any]] = {}
+        # Rows appended by the caller (forgery tests) — already materialized.
+        self._extras: list[dict[str, Any]] = []
+
+    def __len__(self) -> int:
+        return len(self._events) + len(self._extras)
+
+    def _build(self, index: int) -> dict[str, Any]:
+        base_len = len(self._events)
+        if index < base_len:
+            return _export_row(
+                self._events[index], index + 1, self._checksums[index]
+            )
+        return self._extras[index - base_len]
+
+    def _row(self, index: int) -> dict[str, Any]:
+        """Return the row at ``index``, memoizing it (mutation path)."""
+        row = self._cache.get(index)
+        if row is None:
+            row = self._build(index)
+            self._cache[index] = row
+        return row
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return [self._row(i) for i in range(*index.indices(len(self)))]
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError("EventExport index out of range")
+        return self._row(index)
+
+    def __iter__(self):
+        """Stream rows lazily, honoring mutations of previously indexed rows.
+
+        Only memoized (indexed) rows are retained; the rest are serialized on
+        the fly and dropped, so a full iteration of a 1M-event export holds
+        one row at a time rather than the whole export in memory.
+        """
+        for i in range(len(self)):
+            row = self._cache.get(i)
+            if row is not None:
+                yield row
+            else:
+                yield self._build(i)
+
+    def append(self, item: dict[str, Any]) -> None:
+        self._extras.append(item)
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, (list, tuple, EventExport)):
+            return NotImplemented
+        if len(self) != len(other):
+            return False
+        return all(a == b for a, b in zip(self, other))
+
+    __hash__ = None
+
+    def __repr__(self) -> str:
+        return f"EventExport({len(self)} rows)"
 
 
 class EventStore:
@@ -366,45 +480,130 @@ class EventStore:
     def prune(self, keep_last: int = 10) -> None:
         """Drop all but the most recent ``keep_last`` events (snapshot support).
 
-        Bounds memory for long-running engines: after the fold has derived the
-        current state, old events are no longer needed to rebuild it. The
-        retained slice is re-rooted at ``GENESIS`` (its own checksum chain) and
-        the sequence counter is reset so ``fold()`` continues to work.
+        Bounds memory for long-running engines: after the caller has folded
+        and snapshotted the current state, old events are no longer needed to
+        rebuild it and can be discarded.
+
+        Integrity semantics:
+
+        - **The retained slice is re-rooted as its own checksum chain**
+          (recomputed from ``GENESIS``), so ``verify_chain()`` stays True and
+          ``export()`` → ``import_()`` round-trips still verify. Keeping the
+          original chained HMACs would break both — they sign through the
+          discarded prefix.
+        - **``keep_last <= 0`` discards the entire log** (full compact). The
+          pre-prune slice trap ``events[-0:] == events[0:]`` is avoided by
+          treating 0/negative as "keep nothing".
+        - **The fold cache is reset**: the retained slice alone cannot
+          reproduce the full-log fold (transitions may start before the
+          slice), so ``fold()`` after pruning derives state from the retained
+          events only. If the slice begins mid-transition (e.g. a
+          ``PositionClosed`` whose open was pruned), ``fold()`` raises rather
+          than silently folding partial state — the caller must keep the
+          pre-prune snapshot for state and use the retained events for
+          recent-history replay.
 
         Args:
             keep_last: Number of most-recent events to retain.
+                ``<= 0`` clears the log entirely.
         """
-        if keep_last >= len(self._events):
-            return
-        self._events = self._events[-keep_last:]
-        self._checksums = self._checksums[-keep_last:]
-        self._sequence = len(self._events)
-        self._fold_state = None
-        self._fold_base = 0
+        if not self._events:
+            return  # nothing to prune
+        with self._append_lock:
+            if keep_last <= 0:
+                logger.warning(
+                    "EventStore.prune(%d): discarded the entire event log "
+                    "(%d events) — only the caller's snapshot can rebuild "
+                    "state", keep_last, len(self._events),
+                )
+                self._events = []
+                self._checksums = []
+                self._sequence = 0
+                self._fold_state = None
+                self._fold_base = 0
+                return
+            if keep_last >= len(self._events):
+                return  # nothing to drop; chain stays as-is
 
-    def export(self) -> list[dict[str, Any]]:
+            keep = self._events[-keep_last:]
+            # Re-root the retained events from GENESIS so the pruned log is
+            # its own verifiable chain (same recomputation import_ uses).
+            prev = "GENESIS"
+            re_rooted: list[str] = []
+            for i, event in enumerate(keep, 1):
+                checksum = self._compute_checksum(prev, event, i)
+                re_rooted.append(checksum)
+                prev = checksum
+            self._events = keep
+            self._checksums = re_rooted
+            self._sequence = len(keep)
+            self._fold_state = None
+            self._fold_base = 0
+
+    def export(self) -> EventExport:
         """Export events as dictionaries for persistence.
 
-        Each entry carries the event's ``sequence`` and its chain ``checksum``
+        Returns a lazy, list-compatible :class:`EventExport` view — calling
+        ``export()`` itself is O(1) and rows are produced on first access, so
+        streaming a large log to disk does not first materialize every row
+        (~500MB of dicts at 1M events). The view keeps the pinned list
+        contract the persistence suites rely on: indexing, ``len()``,
+        repeatable iteration, ``==`` against lists, in-place row mutation
+        (memoized, so tampering is re-observed by ``import_``), and
+        ``append()``.
+
+        Each row carries the event's ``sequence`` and its chain ``checksum``
         so ``import_`` can validate contiguity and verify the log integrity.
+        The store snapshot is taken at call time: the returned view is stable
+        even if events are appended afterwards.
 
         Returns:
-            List of event dictionaries
+            Lazy export view (indexable sequence of event dictionaries)
         """
-        exported = []
-        for i, event in enumerate(self._events, 1):
-            event_dict = {
-                "sequence": i,
-                "symbol": event.symbol,
-                "time": event.time,
-                "event_type": type(event).__name__,
-                "payload": self._event_to_dict(event),
-                "checksum": self._checksums[i - 1],
-            }
-            exported.append(event_dict)
-        return exported
+        with self._append_lock:
+            events_snapshot = list(self._events)
+            checksums_snapshot = list(self._checksums)
+        return EventExport(events_snapshot, checksums_snapshot)
 
-    def import_(self, events: list[dict[str, Any]]) -> None:
+    def export_to_jsonl(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        fsync: bool = False,
+    ) -> int:
+        """Stream export rows to a JSONL file, one row per line.
+
+        Consumes the lazy :class:`EventExport` view through its streaming
+        ``__iter__`` path: each row is serialized on the fly and dropped, so
+        the full export never materializes as dicts in memory (~500MB of
+        dicts at 1M events). Only rows the caller already indexed are
+        retained by the view; this method adds no retention of its own.
+
+        The written file is a plain JSONL sequence of the exact row dicts
+        ``export()`` produces — including the ``sequence`` and ``checksum``
+        metadata — so it round-trips through ``import_()`` (pass it a list of
+        parsed lines) and tamper detection stays intact: a modified row is
+        rejected by ``import_``'s checksum verification. Rows are serialized
+        with ``sort_keys=True`` for byte-stable output.
+
+        Args:
+            path: Destination file (created or truncated).
+            fsync: fsync the file on close for crash durability.
+
+        Returns:
+            Number of rows written.
+        """
+        rows = 0
+        with open(path, "w", encoding="utf-8") as fh:
+            for row in self.export():
+                fh.write(json.dumps(row, sort_keys=True) + "\n")
+                rows += 1
+            fh.flush()
+            if fsync:
+                os.fsync(fh.fileno())
+        return rows
+
+    def import_(self, events: Sequence[dict[str, Any]]) -> None:
         """Import events from dictionaries (export format).
 
         Integrity guarantees:
@@ -648,12 +847,6 @@ class EventStore:
         else:
             # Unknown event type - return base Event
             return Event(symbol=symbol, time=time)
-
-    @staticmethod
-    def _event_to_dict(event: Event) -> dict[str, Any]:
-        """Convert an event and nested payloads to deterministic JSON data."""
-        value = _json_value(event)
-        return value if isinstance(value, dict) else {"value": value}
 
     def __len__(self) -> int:
         return len(self._events)

@@ -209,9 +209,10 @@ def test_force_close_position_closes_base_and_pyramids():
     sig = Signal(type="LONG", reason="t", entry=100.0, sl=99.0, tp=102.0,
                  rr=2.0, model_label="test", symbol=symbol, timestamp="t0")
     base = oms.submit(sig, 10.0)
-    pyr_sig = Signal(type="LONG", reason="p", entry=101.0, sl=100.0, tp=103.0,
-                     rr=2.0, model_label="test", symbol=symbol, timestamp="t1")
-    pyr = oms.submit(pyr_sig, 5.0)
+    # Build the add-on through the OMS pyramid path (is_pyramid=True) exactly
+    # like the live flow, then fold its PositionOpened so the close matches.
+    pyr = oms.add_pyramid(base=base, entry_price=101.0, new_sl=100.0,
+                          size=5.0, time="t1", pyramid_level=1)
     pm.pyramid_positions = [pyr]
     pm.pyramid_count = 1
     pm.current_position = base
@@ -219,9 +220,14 @@ def test_force_close_position_closes_base_and_pyramids():
     eng = QuantEngine.__new__(QuantEngine)
     eng.symbol = symbol
     from quant.state_machine import EngineState, PositionState
+    from quant.events import PositionOpened
+    from quant.transitions import apply_event as _apply
     eng.state = EngineState(symbol=symbol, position=PositionState(
         id=base._id, entry=100.0, size=10.0, sl=99.0, tp=102.0, side="LONG"
     ))
+    eng.state = _apply(
+        eng.state, PositionOpened(symbol=symbol, time="t1", position=pyr)
+    )
     eng._aggregator = MagicMock()
     eng._aggregator.current_bar = MagicMock(close=105.0)
     eng._portfolio_risk = None

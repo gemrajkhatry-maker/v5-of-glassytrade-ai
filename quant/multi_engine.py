@@ -202,6 +202,11 @@ _DEFAULT_CONFIG = {
     "eod_squareoff_minutes_before_close": 15,
     # First-listed roots get first claim on scanner slots (primary series).
     "underlying_priority": None,
+    # LLM advisor injection: default OFF — the Fabio AMT strategy is fully
+    # deterministic; the LLM advisor is advisory-only (narrative/journal)
+    # and must not participate in trading decisions. Set to True only for
+    # experimental/experimental runs where LLM narrative is desired.
+    "advisor_enabled": False,
 }
 
 
@@ -1255,7 +1260,7 @@ class QuantCoordinator:
         except Exception:
             logger.debug("engine %s run-task wait failed", symbol, exc_info=True)
 
-    def _spawn_engine(self, symbol: str) -> None:
+    def _spawn_engine(self, symbol: str) -> QuantEngine | None:
         # Real thread bound: refuse spawns past pool capacity BEFORE building
         # anything (one pool worker is occupied per RUNNING engine — each run
         # loop blocks on its symbol's tick queue until closed). However large
@@ -1305,8 +1310,12 @@ class QuantCoordinator:
         # F4: only the LIVE wiring path reads MLX_* env vars and builds the
         # LLMAdvisor (with its worker thread). Backtest/replay constructors
         # pass no advisor — the deterministic engine stays env-free.
+        # advisor_enabled config gate: the Fabio AMT strategy is fully
+        # deterministic; LLM advisor is advisory-only and defaults to OFF.
         from quant.wiring_advisor import build_live_advisor
-        advisor = build_live_advisor(None)
+        advisor = None
+        if self.config.get("advisor_enabled", False):
+            advisor = build_live_advisor(None)
         engine = QuantEngine(
             gateway,
             symbol,

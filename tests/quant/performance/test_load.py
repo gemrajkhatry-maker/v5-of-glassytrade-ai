@@ -324,85 +324,132 @@ def test_get_since_does_not_copy_entire_slice():
 # ---------------------------------------------------------------------------
 # Attack 9: export() builds full list of dicts in memory
 # ---------------------------------------------------------------------------
-# Expected: export() should stream to a file or use a generator, not
-#            build a list of N dicts (O(n) memory).
-# Actual:   export() builds a list of N dicts — at 1M events, ~500MB+.
-# Severity: Major — exporting the event log for persistence/replay OOMs.
+# Expected: export() should stream to a file or stay lazy, not build a list
+#            of N dicts at call time (O(n) memory).
+# Actual:   FIXED — export() returns a lazy, list-compatible EventExport
+#            view. Calling export() is O(1): rows are serialized on first
+#            access and retained only when reached via indexing (the
+#            mutation/tamper path), so a streaming consumer holds one row at
+#            a time even on a 1M-event log.
+# Severity: Major (fixed).
 
-@pytest.mark.skip(
-    reason="Conflicts with the pinned export() API: several suites index "
-    "export()[i] (a generator would break them), and export() is only called "
-    "on persistence boundaries, not hot paths. Design trade-off, not a defect."
-)
 def test_export_does_not_build_full_list():
-    """export() should stream, not build a list of all event dicts."""
+    """export() must stay lazy at call time — no full list of row dicts.
+
+    The pinned export contract is list-like (suites index rows, mutate
+    payloads, append forged rows, and round-trip through import_), so a
+    one-shot generator is not acceptable. EventExport keeps that API while
+    producing rows on first access instead of eagerly.
+    """
+    from quant.event_store import EventExport
+
     store = EventStore()
-    N = 100_000
+    N = 200_000
     for i in range(N):
         store.append(_event(i))
 
-    # Check if export returns a generator
+    t0 = time.perf_counter()
     result = store.export()
-    is_generator = hasattr(result, "__next__") and not isinstance(result, list)
+    export_sec = time.perf_counter() - t0
 
-    assert is_generator, (
-        f"export() returns a list of {len(result):,} dicts — O(n) memory. "
-        f"At 1M events this is ~500MB+. Should be a generator."
+    assert not isinstance(result, list), "export() must not be a plain list"
+    assert isinstance(result, EventExport)
+    # O(1) at call time: eagerly serializing 200k nested dataclass rows takes
+    # ~1.1s on this hardware; a lazy view returns in microseconds. Bound is
+    # generous (0.5s) yet still separates O(1) from O(n) by ~10x.
+    assert export_sec < 0.5, (
+        f"export() took {export_sec:.3f}s for {N:,} events — it materialized "
+        f"the full row list eagerly. Should be O(1) (lazy view)."
+    )
+    # Hard laziness evidence: no row has been produced yet.
+    assert len(result._cache) == 0, "export() produced rows eagerly"
+
+    # The list contract still works: len, indexing (incl. negative), and
+    # repeated iteration all agree.
+    assert len(result) == N
+    assert result[0]["sequence"] == 1
+    assert result[-1]["sequence"] == N
+    assert result[N // 2]["checksum"] == store._checksums[N // 2]
+    assert [d["sequence"] for d in result][-1] == N
+
+    # Streaming iteration must NOT retain every row: only the indexed rows
+    # above are memoized; a full pass streams the rest without caching them.
+    assert len(result._cache) == 3, (
+        f"iteration retained {len(result._cache)} rows — expected only the "
+        "3 indexed ones. Streaming consumers would hold the whole export in "
+        "memory."
     )
 
 
 # ---------------------------------------------------------------------------
 # Attack 10: Thread explosion — 500 engines = 500 threads
 # ---------------------------------------------------------------------------
-# Expected: QuantCoordinator should use a thread pool (bounded) or async
-#            event loop, not one thread per engine.
-# Actual:   Each QuantEngine gets its own daemon thread. 500 engines =
-#            500 threads — kernel scheduling overhead, memory (~8MB/stack).
-# Severity: Major — 500 threads × 8MB stack = 4GB just for thread stacks.
+# Expected: QuantCoordinator should run engines on a bounded thread pool,
+#            not one raw daemon thread per engine.
+# Actual:   FIXED — engines run on ONE ThreadPoolExecutor whose capacity
+#            (config n / max_engine_threads) caps concurrent engines, and
+#            _spawn_engine REFUSES spawns past that capacity, so 500
+#            contracts can never become 500 OS threads (~8MB stack each).
+# Severity: Major (fixed).
 
-@pytest.mark.skip(
-    reason="Requires a bounded thread-pool redesign of QuantCoordinator (out of "
-    "scope for the correctness-bug round); engines are per-symbol daemon "
-    "threads by design. Tracked as a scalability follow-up, not a defect fix."
-)
-def test_coordinator_does_not_spawn_unbounded_threads():
-    """QuantCoordinator must bound thread count (pool), not 1:1 with engines."""
+def test_coordinator_does_not_spawn_unbounded_threads(tmp_path, monkeypatch):
+    """QuantCoordinator must bound thread count (pool), not 1:1 with engines.
+
+    Behavioral proof: the coordinator owns ONE bounded ThreadPoolExecutor
+    sized to its engine budget, and spawning beyond that capacity is refused
+    — the 500-engine / 500-thread explosion is structurally impossible.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
     from quant.multi_engine import QuantCoordinator
 
-    coord = QuantCoordinator.__new__(QuantCoordinator)
-    coord.market_data = MagicMock()
-    coord.broker = MagicMock()
-    coord.config = {"exchange": "NSE", "eod_squareoff_minutes_before_close": 15}
-    coord._strategy = None
-    coord._storage = None
-    coord._contracts_file = "/tmp/.test_contracts.json"
-    coord._session_levels = MagicMock()
-    coord._feed = MagicMock()
-    coord._engines = {}
-    coord._gateways = {}
-    coord._underlying_gateways = {}
-    coord._threads = {}
-    coord._stop = threading.Event()
-    coord._eod_thread = None
-    coord._gex_by_root = {}
-    coord._lock = threading.Lock()
-    coord._lifecycle_lock = threading.RLock()
-    coord._portfolio_risk = MagicMock()
-    coord.started = False
-    coord.reconciliation = None
+    class _MD:
+        def get_nearest_futures(self, *a, **k):
+            return None
 
-    # Check for thread pool mechanism
-    has_thread_pool = (
-        hasattr(coord, "_thread_pool")
-        or hasattr(coord, "_executor")
-        or hasattr(coord, "_max_threads")
+        def get_lot_size(self, symbol):
+            return 1.0
+
+        async def fetch_history(self, *a, **k):
+            return []
+
+    monkeypatch.setattr("quant.amt_engine.AMTEngine.seed", lambda self: None)
+    # Suppress real engine loops — this test asserts the BOUND (pool +
+    # refusal), not engine behavior; running loops would block pool workers
+    # on tick queues for the test's lifetime.
+    monkeypatch.setattr(
+        QuantCoordinator, "_start_engine_loop", lambda self, engine: None
     )
 
-    assert has_thread_pool, (
-        "QuantCoordinator has no thread pool — each engine spawns its own "
-        "daemon thread. 500 engines = 500 threads = ~4GB stack memory. "
-        "Should use a bounded thread pool."
+    coord = QuantCoordinator(
+        _MD(),
+        config={
+            "underlyings": ["NIFTY", "BANKNIFTY", "FINNIFTY"],
+            "n": 2,
+            "contracts_file": str(tmp_path / "contracts.json"),
+            "session_levels_file": str(tmp_path / "session_levels.json"),
+            "include_futures": False,
+        },
     )
+    try:
+        # The pool IS the thread budget: bounded, lazy, shared across engines.
+        assert isinstance(coord._executor, ThreadPoolExecutor)
+        assert coord._max_threads == 2, (
+            f"engine thread budget should mirror config n=2, got "
+            f"{coord._max_threads}"
+        )
+
+        # 500 hypothetical contracts cannot become 500 threads: the third
+        # spawn (past the budget of 2) must be refused, keeping 2 engines.
+        assert coord._spawn_engine("NIFTY AUG FUT") is not None
+        assert coord._spawn_engine("BANKNIFTY AUG FUT") is not None
+        assert coord._spawn_engine("FINNIFTY AUG FUT") is None, (
+            "spawn beyond pool capacity must be refused, not queued into a "
+            "growing thread count"
+        )
+        assert len(coord.symbols()) == 2
+    finally:
+        coord.stop()
 
 
 # ---------------------------------------------------------------------------

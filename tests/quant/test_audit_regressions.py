@@ -164,11 +164,11 @@ def test_emergency_halt_actually_blocks_new_entries(monkeypatch, tmp_path):
 
     monkeypatch.setattr("quant.amt_engine.AMTEngine.seed", lambda self: None)
 
-    class _NoStart(threading.Thread):
-        def start(self):
-            return
-
-    monkeypatch.setattr(multi_engine.threading, "Thread", _NoStart)
+    # Engines run on the coordinator's bounded pool; suppress the run task
+    # so no pool worker blocks on a tick queue mid-assertion.
+    monkeypatch.setattr(
+        QuantCoordinator, "_start_engine_loop", lambda self, engine: None
+    )
 
     class _MD:
         def get_nearest_futures(self, *a, **k):
@@ -346,11 +346,11 @@ def test_live_oms_enabled_with_broker_injects_live_oms(monkeypatch, tmp_path):
         "quant.amt_engine.AMTEngine.seed", lambda self: None
     )
 
-    class _NoStart(threading.Thread):
-        def start(self):
-            return
-
-    monkeypatch.setattr(multi_engine.threading, "Thread", _NoStart)
+    # Engines run on the coordinator's bounded pool; suppress the run task
+    # so no pool worker blocks on a tick queue mid-assertion.
+    monkeypatch.setattr(
+        QuantCoordinator, "_start_engine_loop", lambda self, engine: None
+    )
 
     class _MD:
         def get_nearest_futures(self, *a, **k):
@@ -395,11 +395,11 @@ def _spawn_coord(monkeypatch, tmp_path, extra_config):
 
     monkeypatch.setattr("quant.amt_engine.AMTEngine.seed", lambda self: None)
 
-    class _NoStart(threading.Thread):
-        def start(self):
-            return
-
-    monkeypatch.setattr(multi_engine.threading, "Thread", _NoStart)
+    # Engines run on the coordinator's bounded pool; suppress the run task
+    # so no pool worker blocks on a tick queue mid-assertion.
+    monkeypatch.setattr(
+        QuantCoordinator, "_start_engine_loop", lambda self, engine: None
+    )
 
     class _MD:
         def get_nearest_futures(self, *a, **k):

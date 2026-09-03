@@ -24,11 +24,11 @@ class _Broker:
 def test_live_oms_instances_share_coordinator_portfolio(monkeypatch, tmp_path):
     monkeypatch.setattr("quant.amt_engine.AMTEngine.seed", lambda self: None)
 
-    class _NoStart(threading.Thread):
-        def start(self):
-            return
-
-    monkeypatch.setattr("quant.multi_engine.threading.Thread", _NoStart)
+    # Engines run on the coordinator's bounded pool; suppress the run task
+    # so no pool worker blocks on a tick queue mid-assertion.
+    monkeypatch.setattr(
+        QuantCoordinator, "_start_engine_loop", lambda self, engine: None
+    )
 
     coordinator = QuantCoordinator(
         _MarketData(),

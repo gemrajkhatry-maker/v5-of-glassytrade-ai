@@ -444,6 +444,13 @@ class QuantEngine:
         self.state = self.state.with_position(_position_to_state(position))
         self._entry_bar_index = self._bar_index
         self._entry_time_epoch = 0.0
+        # Seed EventStore with baseline PositionOpened so event sourcing
+        # and subsequent fold()/PositionClosed remain consistent.
+        from quant.events import PositionOpened
+        ts = getattr(position, "open_time", None) or getattr(position, "entry_time", None) or "0"
+        self.event_store.append(
+            PositionOpened(symbol=self.symbol, time=str(ts), position=position)
+        )
 
     def close(self) -> None:
         """Cleanly release attached resources (advisor, journal)."""
@@ -1296,16 +1303,17 @@ class QuantEngine:
         position = rebuilt.position
         pm = self._get_position_manager()
         if position is None and pm.current_position is not None:
-            # Restored-book baseline (process restart): the in-memory
-            # EventStore holds no events yet — the JSONL journal is not
-            # replayed into it — so an empty fold must NOT clobber the
-            # position restored from storage (restore_position). Adopting it
-            # keeps the run-loop position gates (tick/bar exits, entry
-            # blocking) consistent with the execution book.
+            # Restored-book baseline (process restart): restore_position()
+            # seeds the EventStore with a baseline PositionOpened event, so
+            # the fold normally yields a position. This branch fires only
+            # when the fold still yields no position (e.g., journal pruned,
+            # seed event absent, or the store is genuinely empty). Adopting
+            # the PositionManager's book keeps the run-loop position gates
+            # (tick/bar exits, entry blocking) consistent with execution.
             position = _position_to_state(pm.current_position)
             logger.info(
-                "startup_reconcile %s: event store empty — adopting restored "
-                "position %s",
+                "startup_reconcile %s: event store fold yielded no position "
+                "— adopting restored position %s from execution book",
                 self.symbol, position.id,
             )
         elif position is not None and pm.current_position is None:

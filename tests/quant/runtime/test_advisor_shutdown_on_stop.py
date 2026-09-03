@@ -81,6 +81,7 @@ def coordinator(tmp_path):
             "contracts_file": str(tmp_path / "c.json"),
             "session_levels_file": str(tmp_path / "session_levels.json"),
             "include_futures": False,
+            "advisor_enabled": True,  # this test verifies advisor shutdown
         },
     )
 
@@ -93,25 +94,14 @@ def test_stop_engine_shuts_down_advisor_each_cycle(coordinator, monkeypatch):
 
     import quant.wiring_advisor as wiring
 
-    monkeypatch.setattr(wiring, "_ADVISOR_FACTORY", _fake_advisor_factory)
-
-    # Don't start real engine run threads (they'd block on next_tick forever
-    # and pollute the thread-count baseline). We are counting ADVISOR worker
-    # threads only — the leak F3 fixes.
-    class _NoStartThread:
-        def __init__(self, *a, **k):
-            self.daemon = False
-
-        def start(self):
-            pass
-
-        def join(self, timeout=None):
-            pass
+    monkeypatch.setattr(wiring, "_ADVISOR_FACTORY", _fake_advisor_factory)    # Don't run engine loops (they'd block on next_tick forever and pollute
+    # the thread-count baseline). Engines run on the coordinator's bounded
+    # pool; suppressing the run task keeps pool workers from being occupied.
+    # We are counting ADVISOR worker threads only — the leak F3 fixes.
+    from quant.multi_engine import QuantCoordinator
 
     monkeypatch.setattr(
-        __import__("quant.multi_engine", fromlist=["threading"]).threading,
-        "Thread",
-        _NoStartThread,
+        QuantCoordinator, "_start_engine_loop", lambda self, engine: None
     )
 
     baseline = threading.active_count()
@@ -135,6 +125,13 @@ def test_stop_engine_survives_broken_advisor_shutdown(coordinator, monkeypatch):
     import quant.wiring_advisor as wiring
 
     monkeypatch.setattr(wiring, "_ADVISOR_FACTORY", _broken_factory)
+    # Suppress the engine run task: this test exercises advisor shutdown on
+    # stop, not the run loop (which would block a pool worker on next_tick).
+    from quant.multi_engine import QuantCoordinator
+
+    monkeypatch.setattr(
+        QuantCoordinator, "_start_engine_loop", lambda self, engine: None
+    )
 
     eng = coordinator._spawn_engine("NIFTY AUG FUT")
     assert eng._advisor is broken

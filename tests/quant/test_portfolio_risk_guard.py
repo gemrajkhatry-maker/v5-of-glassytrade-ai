@@ -94,6 +94,11 @@ def test_manage_exit_full_close_books_pyramid_pnl_to_portfolio():
     pm = eng._get_position_manager()
     pm._exits = exits
     pm.pyramid_positions = [pyramid]
+    # Mirror the live flow: check_pyramid emits the add-on's PositionOpened,
+    # so the fold's pyramids tuple must see it before the close can match.
+    from quant.events import PositionOpened
+
+    eng._emit(PositionOpened(symbol="TEST FUT", time="t1", position=pyramid))
 
     bar = Bar(time="t300", open=102.0, high=103.5, low=101.5, close=103.0, volume=10.0)
     eng._manage_exit({}, bar)

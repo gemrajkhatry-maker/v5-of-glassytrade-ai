@@ -261,9 +261,11 @@ class TestAtomicTransitions:
         assert new_state.position is None  # Base position closed
 
     def test_closing_pyramid_does_not_clear_base(self):
-        """Closing a pyramid (different ID) doesn't clear base position."""
+        """Closing an OPEN pyramid (matched ID) removes only the pyramid and
+        preserves the base. A close matching NEITHER the base nor an open
+        pyramid is an invariant violation and raises."""
         from quant.state_machine import EngineState, PositionState
-        from quant.events import PositionClosed
+        from quant.events import PositionOpened, PositionClosed
         
         pos = PositionState(
             id="abc-123",
@@ -274,14 +276,39 @@ class TestAtomicTransitions:
             side="LONG",
         )
         state = EngineState(symbol="NIFTY", position=pos)
+
+        # Open the pyramid add-on in the fold first (live flow: check_pyramid
+        # emits PositionOpened for the add-on before any close can arrive).
+        pyr = PositionState(
+            id="pyr-456",
+            entry=105.0,
+            size=50.0,
+            sl=103.0,
+            tp=110.0,
+            side="LONG",
+            pyramid_level=1,
+            is_pyramid=True,
+        )
+        state = apply_event(
+            state, PositionOpened(symbol="NIFTY", time="t0", position=pyr)
+        )
+        assert len(state.pyramids) == 1
         
-        # Fill references a DIFFERENT position ID (pyramid close)
+        # Fill references the pyramid ID (open pyramid close)
         fill = MockFill(pos_id="pyr-456")
         event = PositionClosed(symbol="NIFTY", time="t0", fill=fill)
         
-        # State should be unchanged (pyramid close doesn't affect base)
         new_state = apply_event(state, event)
         assert new_state.position == pos  # Base position preserved
+        assert len(new_state.pyramids) == 0  # Pyramid removed
+
+        # A close matching NEITHER the base nor an open pyramid must raise
+        # (event-production bug or reordering — never silently swallowed).
+        ghost_fill = MockFill(pos_id="ghost-999")
+        with pytest.raises(ValueError, match="does not match open position"):
+            apply_event(
+                state, PositionClosed(symbol="NIFTY", time="t1", fill=ghost_fill)
+            )
 
     def test_opening_position_when_already_open_raises(self):
         """Opening a position when one is already open raises error."""
