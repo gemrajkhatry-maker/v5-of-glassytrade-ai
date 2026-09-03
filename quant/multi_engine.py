@@ -1,8 +1,11 @@
 """QuantCoordinator — multi-symbol orchestrator.
 
-Runs one QuantEngine per scanned option contract on its own daemon thread,
-folds engine decisions onto a shared queue for the backend shell. Pure quant:
-imports ``quant.*`` and stdlib only — zero backend imports.
+Runs one QuantEngine per scanned contract on a single BOUNDED thread pool
+(a per-engine blocking run loop occupies exactly one pool worker, so pool
+capacity caps both concurrent engines and OS threads; spawns past the bound
+are refused). Engine decisions fold onto a shared queue for the backend
+shell. Pure quant: imports ``quant.*`` and stdlib only — zero backend
+imports.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ import logging
 import re
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -259,6 +263,19 @@ def _signed_broker_qty(bp) -> float:
     return qty
 
 
+def _retrieve_future_exception(future: Future) -> None:
+    """Mark a completed engine task's exception as retrieved.
+
+    ``engine.run()`` logs CRITICAL and re-raises after flagging ``_crashed``;
+    the raised exception is stored on the pool Future. Without retrieval the
+    interpreter warns "exception was never retrieved" when the Future is
+    dropped. The engine already logged the failure — this only silences the
+    GC warning.
+    """
+    if not future.cancelled():
+        future.exception()
+
+
 class QuantCoordinator:
     """Owns one :class:`QuantEngine` per scanned contract, all fed by a
     single multiplexed :class:`MultiplexedMarketFeed` — one WebSocket
@@ -281,7 +298,30 @@ class QuantCoordinator:
         self._engines: dict[str, QuantEngine] = {}
         self._gateways: dict[str, LiveGateway] = {}
         self._underlying_gateways: dict[str, LiveGateway] = {}
-        self._threads: dict[str, threading.Thread] = {}
+        # Bounded engine pool. Each RUNNING engine occupies one worker (its
+        # run loop blocks on the symbol's tick queue until the gateway
+        # closes), so the pool is sized to the maximum concurrent contracts
+        # the coordinator may own (config ``n``) and ``_spawn_engine``
+        # refuses anything past that capacity — N contracts can never become
+        # N raw daemon threads, and rescan/rotation cycles REUSE pool threads
+        # instead of churning one OS thread per engine per cycle. Override
+        # the budget with config ``max_engine_threads``.
+        try:
+            engine_slots = max(1, int(self.config.get("n", 8) or 8))
+        except (TypeError, ValueError):
+            engine_slots = 8
+        try:
+            self._max_threads = max(
+                1, int(self.config.get("max_engine_threads") or engine_slots)
+            )
+        except (TypeError, ValueError):
+            self._max_threads = engine_slots
+        self._executor: ThreadPoolExecutor | None = None
+        self._ensure_executor()
+        # Per-engine run handles: symbol -> pool Future (None when a test
+        # seam suppressed the run task). Mirrors the historical per-engine
+        # Thread map — ``_stop_engine`` pops and waits on the handle.
+        self._threads: dict[str, Future | None] = {}
         self._stop = threading.Event()
         self._gex_by_root: dict[str, object] = {}
         self._eod_thread: threading.Thread | None = None
@@ -590,6 +630,16 @@ class QuantCoordinator:
                 self._eod_thread = None
             self._stop_engines()
             self._feed.close()
+            # Join the bounded engine pool. Every engine task was already
+            # waited (<=1s each) in _stop_engines after its gateway closed,
+            # so remaining tasks finish in milliseconds. A fresh executor is
+            # built lazily if a later start()/rescan reuses the coordinator.
+            executor = getattr(self, "_executor", None)
+            if executor is not None:
+                try:
+                    executor.shutdown(wait=True)
+                finally:
+                    self._executor = None
             self.started = False
 
     def snapshot(self, symbol: str) -> dict:
@@ -612,7 +662,14 @@ class QuantCoordinator:
             engine = self._engines.get(symbol)
         if engine is None:
             return {"_symbol": symbol}
-        vs = project_state(engine.event_store.fold())
+        try:
+            vs = project_state(engine.event_store.fold())
+        except Exception as e:
+            logger.warning(
+                "snapshot: EventStore.fold failed for %s (%s) — falling back to engine.state",
+                symbol, e,
+            )
+            vs = project_state(engine.state)
         live = engine.projector.snapshot(symbol)
         # Closed trades + balance/leverage from the projector's event view;
         # positions OVERRIDDEN from the fold (single position authority).
@@ -1140,7 +1197,79 @@ class QuantCoordinator:
             pass
         return float(DEFAULT_REGISTRY.resolve(symbol).lot_size)
 
+    # ------------------------------------------------------------------
+    # Bounded engine pool
+    # ------------------------------------------------------------------
+
+    def _ensure_executor(self) -> ThreadPoolExecutor:
+        """Return the coordinator's engine pool, creating it lazily.
+
+        Threads are allocated lazily on first submit and never exceed
+        ``self._max_threads``. ``stop()`` shuts the executor down and clears
+        the reference so a later lifecycle phase builds a fresh one.
+        """
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=self._max_threads, thread_name_prefix="quant-engine"
+            )
+        return self._executor
+
+    def _start_engine_loop(self, engine) -> Future | None:
+        """Submit an engine's blocking run loop to the bounded pool.
+
+        Seam: tests that construct engines without running them (they only
+        assert construction wiring) replace this method with a no-op so no
+        pool worker blocks on a tick queue mid-assertion.
+        """
+        future = self._ensure_executor().submit(engine.run)
+        future.add_done_callback(_retrieve_future_exception)
+        return future
+
+    @staticmethod
+    def _wait_run_handle(handle, symbol: str) -> None:
+        """Wait for an engine to finish stopping, bounded to ~1s.
+
+        ``handle`` is either a pool Future (production) or a plain Thread
+        (legacy test doubles that pre-seed ``coord._threads``). A hung engine
+        (e.g. stuck in a broker call) must never block rescan/stop forever;
+        the coordinator's ``stop()`` joins stragglers via the pool shutdown.
+        """
+        if handle is None:
+            return
+        join = getattr(handle, "join", None)
+        if callable(join):
+            try:
+                join(timeout=1.0)
+            except RuntimeError:
+                pass
+            return
+        # Pool Future: exception(timeout) both waits and retrieves the stored
+        # engine exception (crash surfaced; no GC warning at drop).
+        try:
+            handle.exception(timeout=1.0)
+        except TimeoutError:
+            logger.debug(
+                "engine %s still stopping after 1s — coordinator stop will "
+                "join it via pool shutdown", symbol,
+            )
+        except Exception:
+            logger.debug("engine %s run-task wait failed", symbol, exc_info=True)
+
     def _spawn_engine(self, symbol: str) -> None:
+        # Real thread bound: refuse spawns past pool capacity BEFORE building
+        # anything (one pool worker is occupied per RUNNING engine — each run
+        # loop blocks on its symbol's tick queue until closed). However large
+        # a scan requests, concurrent engines can never exceed
+        # self._max_threads OS threads.
+        with self._lock:
+            if len(self._engines) >= self._max_threads:
+                logger.warning(
+                    "QuantCoordinator: refusing to spawn %s — at the bounded "
+                    "engine ceiling of %d (pool capacity). Stop an engine or "
+                    "raise config n / max_engine_threads before adding more.",
+                    symbol, self._max_threads,
+                )
+                return None
         gateway = LiveGateway(self._feed, symbol)
         underlying_gateway = None
         if not _is_futures_symbol(symbol):
@@ -1242,37 +1371,35 @@ class QuantCoordinator:
             jdir.mkdir(parents=True, exist_ok=True)
             engine.journal_path = str(jdir / f"{day}_{safe}.jsonl")
             engine.attach_journal()
-        thread = threading.Thread(
-            target=engine.run, daemon=True, name=f"quant-{symbol}"
-        )
-        # Publish ownership before starting the thread.  Otherwise shutdown,
-        # health, and option-underlying lookup can observe a running engine
-        # that is absent from the coordinator maps.
+        # Publish ownership and submit the run loop atomically under one
+        # lock: shutdown/health/option-underlying lookup must never observe an
+        # engine whose run task is missing, nor a run task for a symbol the
+        # maps no longer own.
         with self._lock:
             self._engines[symbol] = engine
             self._gateways[symbol] = gateway
             if underlying_gateway is not None:
                 self._underlying_gateways[symbol] = underlying_gateway
-            self._threads[symbol] = thread
-        thread.start()
+            self._threads[symbol] = self._start_engine_loop(engine)
         return engine
 
     def _stop_engine(self, symbol: str) -> None:
         with self._lock:
             gateway = self._gateways.pop(symbol, None)
             underlying_gateway = self._underlying_gateways.pop(symbol, None)
-            thread = self._threads.pop(symbol, None)
+            run_handle = self._threads.pop(symbol, None)
             engine = self._engines.pop(symbol, None)
-        # F3: the advisor's daemon worker spins on a 1s poll loop for as long
-        # as _running is True — and nothing ever called shutdown() on the
-        # coordinator path, so every rescan cycle leaked one thread per
-        # stopped engine. Defensive + non-fatal: an engine without an advisor
-        # (or a broken shutdown) must never abort the gateway close.
         if engine is not None:
             try:
                 engine.persist_prior_profile()
             except Exception:
                 pass
+            # F3: the advisor's daemon worker spins on a 1s poll loop for as
+            # long as _running is True — and nothing ever called shutdown()
+            # on the coordinator path, so every rescan cycle leaked one
+            # thread per stopped engine. Defensive + non-fatal: an engine
+            # without an advisor (or a broken shutdown) must never abort the
+            # gateway close.
             try:
                 advisor = getattr(engine, "_advisor", None)
                 if advisor is not None and callable(getattr(advisor, "shutdown", None)):
@@ -1281,6 +1408,18 @@ class QuantCoordinator:
                 logger.exception(
                     "advisor shutdown failed during stop of %s (ignored)", symbol
                 )
+        # Close the gateways FIRST so the engine's blocking run loop wakes on
+        # the end-of-stream None (feed.unsubscribe -> queue.put(None)) and
+        # exits promptly — only then wait for the run handle.
+        if gateway is not None:
+            gateway.close()
+        if underlying_gateway is not None:
+            underlying_gateway.close()
+        if run_handle is not None:
+            self._wait_run_handle(run_handle, symbol)
+        # The run loop has exited (or timed out), so closing the journal can
+        # no longer race an in-flight append from the engine thread.
+        if engine is not None:
             try:
                 journal = getattr(engine, "_journal", None)
                 if journal is not None and callable(getattr(journal, "close", None)):
@@ -1289,15 +1428,6 @@ class QuantCoordinator:
                 logger.exception(
                     "journal close failed during stop of %s (ignored)", symbol
                 )
-        if gateway is not None:
-            gateway.close()
-        if underlying_gateway is not None:
-            underlying_gateway.close()
-        if thread is not None:
-            try:
-                thread.join(timeout=1.0)
-            except RuntimeError:
-                pass
 
     def _stop_engines(self) -> None:
         with self._lock:

@@ -79,7 +79,11 @@ def _build_initial_snapshots(
     initial_payloads = []
     previous_states = {}
     for s in ordered_symbols:
-        snap = coordinator.snapshot(s)
+        try:
+            snap = coordinator.snapshot(s)
+        except Exception:
+            logger.exception("Error building initial snapshot for %s — skipping", s)
+            continue
         copied = copy.deepcopy(snap)
         previous_states[s] = copied
         initial_payloads.append({**copied, "_type": "full"})
@@ -93,7 +97,11 @@ def _collect_symbol_deltas(
     deltas = []
     updated_states = dict(previous_states)
     for s in symbols:
-        snap = coordinator.snapshot(s)
+        try:
+            snap = coordinator.snapshot(s)
+        except Exception:
+            logger.exception("Error collecting delta for %s — skipping", s)
+            continue
         prev_s = updated_states.get(s)
         delta = _compute_delta(prev_s, snap)
         if delta:
