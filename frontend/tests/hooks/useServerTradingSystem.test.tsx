@@ -495,4 +495,41 @@ describe('warm chart history via /api/market/history (Phase 2)', () => {
       restoreFetch();
     }
   });
+
+  it('tolerates explicit amt:null analytics snapshots without crashing or clearing the series', async () => {
+    const { result, ws, restoreFetch } = await connectWithHistory([]);
+    try {
+      expect(ws).toBeDefined();
+
+      // Warm up a halfTrend point via a full snapshot first.
+      await pushMessage(ws, {
+        _type: 'full',
+        _symbol: 'NIFTY',
+        amt: {
+          halfTrend: {
+            time: '2026-08-07T14:50:00+05:30',
+            trend: 0,
+            ht: 127,
+            atrHigh: 128.5,
+            atrLow: 125.5,
+          },
+        },
+      });
+      expect(result.current.instruments['NIFTY'].halfTrendSeries).toHaveLength(1);
+
+      // Backend emits explicit null when there is no fresh analysis (regression:
+      // this used to throw "Cannot read properties of null (reading 'halfTrend')").
+      await pushMessage(ws, {
+        _type: 'full',
+        _symbol: 'NIFTY',
+        amt: null,
+      });
+
+      const inst = result.current.instruments['NIFTY'];
+      expect(inst.amtAnalysis).toBeNull();
+      expect(inst.halfTrendSeries).toHaveLength(1);
+    } finally {
+      restoreFetch();
+    }
+  });
 });

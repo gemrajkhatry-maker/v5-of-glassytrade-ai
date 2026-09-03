@@ -510,9 +510,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.portfolio !== undefined) merged.portfolio = { ...existing.portfolio, ...state.portfolio };
                     if (state.amt !== undefined) {
                         merged.amtAnalysis = state.amt === null ? null : { ...existing.amtAnalysis, ...state.amt };
-                        const htPoint = halfTrendLivePoint(state.amt.halfTrend);
-                        if (htPoint) {
-                            merged.halfTrendSeries = mergeHalfTrendPoint(existing.halfTrendSeries, htPoint);
+                        if (state.amt !== null) {
+                            const htPoint = halfTrendLivePoint(state.amt.halfTrend);
+                            if (htPoint) {
+                                merged.halfTrendSeries = mergeHalfTrendPoint(existing.halfTrendSeries, htPoint);
+                            }
                         }
                     }
                     if (state.auction !== undefined) merged.auctionAnalysis = { ...existing.auctionAnalysis, ...state.auction };
