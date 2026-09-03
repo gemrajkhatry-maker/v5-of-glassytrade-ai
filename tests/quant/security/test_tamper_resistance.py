@@ -658,10 +658,12 @@ class TestExportImportIntegrity:
     """
 
     def test_export_import_preserves_tampered_data(self):
-        """Tampered data survives export/import round-trip.
+        """Tampered data is detected on import.
 
-        Expected: Tampered data should be detected on import.
-        Actual: Tampered data is faithfully preserved.
+        The export format now carries each event's chain checksum; import
+        verifies the chain over the exported payloads, so a tampered event
+        (stale checksum vs. rewritten payload) raises ValueError instead of
+        being silently preserved.
         """
         store1 = EventStore()
         store1.append(_make_bar_close(symbol="NIFTY"))
@@ -672,11 +674,11 @@ class TestExportImportIntegrity:
         # Export and re-import
         exported = store1.export()
         store2 = EventStore()
-        store2.import_(exported)
 
-        # SECURE: Tampered data should be detected
-        # Actual: Tampered data is preserved
-        assert store2._events[0].symbol == "TAMPERED"
+        # SECURE: Tampered data must be rejected on import.
+        with pytest.raises(ValueError, match="checksum"):
+            store2.import_(exported)
+        assert len(store2) == 0
 
     def test_import_clears_existing_events(self):
         """import_() clears existing events — potential data loss.

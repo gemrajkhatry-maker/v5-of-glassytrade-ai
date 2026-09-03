@@ -112,10 +112,25 @@ class EventStore:
         without access to the secret.
         """
         payload = self._event_to_dict(event)
+        return self._checksum_for_payload(
+            prev_checksum,
+            self._sequence if sequence is None else sequence,
+            payload,
+        )
+
+    def _checksum_for_payload(
+        self, prev_checksum: str, sequence: int, payload: dict[str, Any]
+    ) -> str:
+        """HMAC-SHA256 of previous checksum + sequence + an exported payload.
+
+        Shared by ``_compute_checksum`` (live appends) and ``import_`` (log
+        verification) so both sides of a round-trip agree on the exact bytes
+        being signed.
+        """
         data = json.dumps(
             {
                 "prev": prev_checksum,
-                "sequence": self._sequence if sequence is None else sequence,
+                "sequence": sequence,
                 "payload": payload,
             },
             sort_keys=True,
@@ -245,6 +260,9 @@ class EventStore:
     def export(self) -> list[dict[str, Any]]:
         """Export events as dictionaries for persistence.
 
+        Each entry carries the event's ``sequence`` and its chain ``checksum``
+        so ``import_`` can validate contiguity and verify the log integrity.
+
         Returns:
             List of event dictionaries
         """
@@ -256,31 +274,82 @@ class EventStore:
                 "time": event.time,
                 "event_type": type(event).__name__,
                 "payload": self._event_to_dict(event),
+                "checksum": self._checksums[i - 1],
             }
             exported.append(event_dict)
         return exported
 
     def import_(self, events: list[dict[str, Any]]) -> None:
-        """Import events from dictionaries.
+        """Import events from dictionaries (export format).
+
+        Integrity guarantees:
+
+        - **Sequence metadata is validated**: sequences must be contiguous
+          integers starting at 1. Gaps, duplicates, out-of-order or missing
+          sequences raise ``ValueError`` instead of being silently renumbered.
+        - **Checksum chain is verified** when the exported dicts carry
+          checksums: the whole chain is recomputed over the exported payloads
+          before anything is imported, so tampered or corrupted logs raise
+          ``ValueError``. Hand-built dicts without checksum metadata (legacy
+          fixtures) skip this verification; partially-signed logs are rejected.
+        - **Atomic**: the existing store is left untouched on any validation or
+          reconstruction error — no partial clear/import.
 
         Args:
             events: List of event dictionaries (from export)
         """
-        # Clear existing events
-        self._events = []
-        self._sequence = 0
-        self._checksums = []
+        # 1. Validate sequence metadata before touching any state.
+        expected = 1
+        for event_dict in events:
+            seq = event_dict.get("sequence")
+            if seq != expected:
+                raise ValueError(
+                    f"import: invalid sequence metadata — expected {expected}, "
+                    f"got {seq!r} (sequences must be contiguous starting at 1)"
+                )
+            expected += 1
 
-        # Import events - reconstruct Event objects from payload
+        # 2. Verify the exported checksum chain when checksums are present.
+        stored_checksums = [event_dict.get("checksum") for event_dict in events]
+        signed = [c for c in stored_checksums if c is not None]
+        if signed and len(signed) != len(events):
+            raise ValueError(
+                "import: inconsistent checksum metadata — all events must "
+                "carry a checksum or none may"
+            )
+        if signed:
+            prev = "GENESIS"
+            for event_dict, stored in zip(events, stored_checksums):
+                recomputed = self._checksum_for_payload(
+                    prev,
+                    event_dict.get("sequence"),
+                    event_dict.get("payload", {}),
+                )
+                if recomputed != stored:
+                    raise ValueError(
+                        f"import: checksum mismatch at sequence "
+                        f"{event_dict.get('sequence')} — log is tampered "
+                        f"or corrupted"
+                    )
+                prev = stored
+
+        # 3. Reconstruct into temporary lists; commit only on full success.
+        new_events: list[Event] = []
+        new_checksums: list[str] = []
         prev_checksum = "GENESIS"
         for event_dict in events:
-            self._sequence += 1
             event = self._dict_to_event(event_dict)
             if event is not None:
-                self._events.append(event)
-                checksum = self._compute_checksum(prev_checksum, event, self._sequence)
-                self._checksums.append(checksum)
+                new_events.append(event)
+                checksum = self._compute_checksum(
+                    prev_checksum, event, len(new_events)
+                )
+                new_checksums.append(checksum)
                 prev_checksum = checksum
+
+        self._events = new_events
+        self._sequence = len(events)
+        self._checksums = new_checksums
 
     @staticmethod
     def _dict_to_event(event_dict: dict[str, Any]) -> Event | None:

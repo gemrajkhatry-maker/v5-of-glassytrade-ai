@@ -1354,24 +1354,21 @@ class TestImportDuplicateSequence:
     """Attack: import_ with duplicate sequence numbers."""
 
     def test_import_duplicate_sequence_numbers(self):
-        """import_ doesn't check for duplicate sequence numbers.
+        """import_ rejects duplicate sequence numbers.
 
-        BUG: If imported events have duplicate sequences, they're accepted.
+        Duplicate sequences are ambiguous log metadata (a gap or replay);
+        import_ must reject them instead of silently renumbering.
         """
         store = EventStore()
-        store.import_([
-            {"sequence": 1, "symbol": "NIFTY", "time": "t1",
-             "event_type": "BarClosed", "payload": {"bar": {"time": "t1"}}},
-            {"sequence": 1, "symbol": "NIFTY", "time": "t2",
-             "event_type": "BarClosed", "payload": {"bar": {"time": "t2"}}},
-        ])
-
-        assert len(store) == 2
-        # BUG: Both have sequence=1 in their dict, but store uses internal _sequence
-        exported = store.export()
-        # Internal sequences are 1, 2 (not the imported 1, 1)
-        assert exported[0]["sequence"] == 1
-        assert exported[1]["sequence"] == 2
+        with pytest.raises(ValueError, match="sequence"):
+            store.import_([
+                {"sequence": 1, "symbol": "NIFTY", "time": "t1",
+                 "event_type": "BarClosed", "payload": {"bar": {"time": "t1"}}},
+                {"sequence": 1, "symbol": "NIFTY", "time": "t2",
+                 "event_type": "BarClosed", "payload": {"bar": {"time": "t2"}}},
+            ])
+        # Failed import is atomic — store untouched.
+        assert len(store) == 0
 
 
 class TestApplyEventSequenceGaps:

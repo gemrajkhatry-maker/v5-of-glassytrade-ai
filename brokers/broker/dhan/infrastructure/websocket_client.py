@@ -121,6 +121,11 @@ class DhanWebSocketClient(IWebSocketClient):
         self._message_queue: Optional[asyncio.Queue] = None  # lazily initialized in connect()
         self._receive_task: Optional[asyncio.Task] = None
 
+        # Feed observability: count of messages dropped because the bounded
+        # queue was full (backpressure). Exposed via dropped_message_count so
+        # ops can detect a consumer that cannot keep up with the feed.
+        self._dropped_message_count: int = 0
+
         self._subscriptions: Set[str] = set()
         self._current_feed_type: int = FEED_TYPE_FULL
         # Maps security_id string → exchange segment string (e.g. "NSE_FNO", "MCX_COMM").
@@ -145,6 +150,11 @@ class DhanWebSocketClient(IWebSocketClient):
     @property
     def subscriptions(self) -> Set[str]:
         return self._subscriptions.copy()
+
+    @property
+    def dropped_message_count(self) -> int:
+        """Number of feed messages dropped due to queue overflow (since connect)."""
+        return self._dropped_message_count
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -429,15 +439,7 @@ class DhanWebSocketClient(IWebSocketClient):
                 for chunk in self._split_raw(raw):
                     msg = self._parse_message(chunk)
                     if msg and self._message_queue:
-                        try:
-                            self._message_queue.put_nowait(msg)
-                        except asyncio.QueueFull:
-                            # Drop oldest message to make room (backpressure)
-                            try:
-                                self._message_queue.get_nowait()
-                            except asyncio.QueueEmpty:
-                                pass
-                            self._message_queue.put_nowait(msg)
+                        self._enqueue_message(msg)
             except websockets.exceptions.ConnectionClosed as e:
                 logger.warning(f"WebSocket closed: {e}")
                 self._connected = False
@@ -452,6 +454,33 @@ class DhanWebSocketClient(IWebSocketClient):
                     await self._message_queue.put(
                         WSMessage(type="error", data={"error": str(e)}, timestamp=datetime.now())
                     )
+
+    def _enqueue_message(self, msg: WSMessage) -> None:
+        """Put a decoded message on the queue, dropping the oldest on overflow.
+
+        The queue is a bounded buffer between the network task and consumers;
+        when the consumer cannot keep up, the oldest message is discarded to
+        make room for the newest. Each drop is counted and exposed via
+        ``dropped_message_count`` (and logged) so feed starvation is
+        observable instead of silent.
+        """
+        if self._message_queue is None:
+            return
+        try:
+            self._message_queue.put_nowait(msg)
+        except asyncio.QueueFull:
+            # Drop oldest message to make room (backpressure)
+            try:
+                self._message_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            self._message_queue.put_nowait(msg)
+            self._dropped_message_count += 1
+            logger.warning(
+                "WS feed queue full — dropped oldest message "
+                "(total dropped=%d)",
+                self._dropped_message_count,
+            )
 
     async def _attempt_reconnect(self) -> None:
         while self._reconnect_count < self._max_reconnect_attempts:
@@ -695,5 +724,6 @@ class DhanWebSocketClient(IWebSocketClient):
     def __repr__(self) -> str:
         return (
             f"DhanWebSocketClient(connected={self._connected}, "
-            f"subscriptions={len(self._subscriptions)})"
+            f"subscriptions={len(self._subscriptions)}, "
+            f"dropped={self._dropped_message_count})"
         )
