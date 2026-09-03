@@ -5,6 +5,8 @@ This module contains all constants specific to the Dhan broker API.
 No external dependencies except standard library.
 """
 
+# Lot-size source of truth lives in quant.contracts.instrument_registry.
+from quant.contracts.instrument_registry import DEFAULT_REGISTRY as _REG
 # Timeout/retry/backoff/WS/cache policy lives in shared.net_policy;
 # re-exported here so existing importers keep working unchanged.
 from shared.net_policy import (  # noqa: F401
@@ -139,8 +141,6 @@ DEPTH_RC_DISCONNECT: int = 50  # Server-initiated disconnect
 # =============================================================================
 # Lot Sizes by Exchange Segment
 # =============================================================================
-
-from quant.contracts.instrument_registry import DEFAULT_REGISTRY as _REG
 
 LOT_SIZES: dict[str, int] = {
     **{s.root: s.lot_size for s in _REG.specs()},

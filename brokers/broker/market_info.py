@@ -11,6 +11,8 @@ String-based API — no Instrument objects required.
 """
 
 from datetime import datetime, time
+from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+from quant.contracts.instrument_registry import DEFAULT_REGISTRY as _MI_REG
 from typing import Optional, Dict, Any
 
 try:
@@ -24,8 +26,6 @@ except (ImportError, ModuleNotFoundError):
 # =============================================================================
 # LOT SIZES
 # =============================================================================
-
-from quant.contracts.instrument_registry import DEFAULT_REGISTRY as _MI_REG
 
 LOT_SIZES: Dict[str, int] = {
     **{s.root: s.lot_size for s in _MI_REG.specs()},
@@ -161,8 +161,6 @@ def get_lot_size(symbol: str) -> int:
     Returns:
         Lot size. Returns 1 if not found.
     """
-    from quant.contracts.instrument_registry import DEFAULT_REGISTRY
-
     canon = normalize_symbol(symbol)
     spec = DEFAULT_REGISTRY.try_resolve(canon)
     if spec is not None:
@@ -180,8 +178,6 @@ def get_step_size(symbol: str) -> float:
     Returns:
         Step size. Returns 5.0 as default for stocks.
     """
-    from quant.contracts.instrument_registry import DEFAULT_REGISTRY
-
     canon = normalize_symbol(symbol)
     spec = DEFAULT_REGISTRY.try_resolve(canon)
     if spec is not None:
