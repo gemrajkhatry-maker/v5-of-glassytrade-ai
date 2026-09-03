@@ -145,7 +145,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
                     legVah={amtResult?.legVah}
                     legVal={amtResult?.legVal}
                     vars={amtResult?.vars}
-                    fractal={amtResult?.fractal}
                 />
                 <LocationCard currentLtp={currentLtp} amtResult={amtResult} poc={poc} />
                 <VaFreezeCard auction={auction} />

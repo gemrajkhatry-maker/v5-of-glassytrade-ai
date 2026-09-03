@@ -285,8 +285,6 @@ class AMTResult:
     gex: object | None = None
     # LuxAlgo Value Area Reversion Signals (VARS)
     vars_result: object | None = None
-    # ChartArt Fractal Breakout (half-trend) — trend + BUY/SELL labels for UI
-    fractal_result: object | None = None
 
 
 

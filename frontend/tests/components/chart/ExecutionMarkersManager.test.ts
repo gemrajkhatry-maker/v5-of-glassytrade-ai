@@ -5,8 +5,6 @@ import {
   generateIBBreakMarker,
   generateCVDDivergenceMarkers,
   generateAcceptanceRejectionMarkers,
-  generateFractalMarkers,
-  fractalLineData,
   generateAllExecutionMarkers,
   ChartMarker,
 } from '../../../components/chart/ExecutionMarkersManager';
@@ -277,102 +275,4 @@ describe('ExecutionMarkersManager', () => {
     });
   });
 
-  describe('generateFractalMarkers', () => {
-    const data = [{ time: '2024-01-01T09:15:00Z', close: 50000 }] as any[];
-
-    it('generates FRACTAL BUY marker below bar when buySignal fires', () => {
-      const amt = {
-        fractal: {
-          fractalTop: false,
-          lastFractalPrice: 49950.5,
-          fractalAverage: 49940.0,
-          trend: true,
-          breakout: true,
-          buySignal: true,
-          sellSignal: false,
-        },
-      } as any;
-
-      const markers = generateFractalMarkers(data, amt);
-      expect(markers).toHaveLength(1);
-      expect(markers[0].position).toBe('belowBar');
-      expect(markers[0].color).toBe('#089981');
-      expect(markers[0].shape).toBe('arrowUp');
-      expect(markers[0].text).toBe('FRACTAL BUY @49950.50');
-      expect(markers[0].size).toBe(2);
-    });
-
-    it('generates FRACTAL SELL marker above bar when sellSignal fires', () => {
-      const amt = {
-        fractal: {
-          fractalTop: false,
-          lastFractalPrice: 50050.0,
-          fractalAverage: 50060.0,
-          trend: false,
-          breakout: false,
-          buySignal: false,
-          sellSignal: true,
-        },
-      } as any;
-
-      const markers = generateFractalMarkers(data, amt);
-      expect(markers).toHaveLength(1);
-      expect(markers[0].position).toBe('aboveBar');
-      expect(markers[0].color).toBe('#f23645');
-      expect(markers[0].shape).toBe('arrowDown');
-      expect(markers[0].text).toBe('FRACTAL SELL');
-    });
-
-    it('returns empty when no fractal signals', () => {
-      const amt = {
-        fractal: {
-          fractalTop: false, lastFractalPrice: 0, fractalAverage: 0,
-          trend: false, breakout: false, buySignal: false, sellSignal: false,
-        },
-      } as any;
-      expect(generateFractalMarkers(data, amt)).toHaveLength(0);
-    });
-
-    it('returns empty when fractal state missing', () => {
-      expect(generateFractalMarkers(data, {} as any)).toHaveLength(0);
-      expect(generateFractalMarkers([], {
-        fractal: { buySignal: true, sellSignal: false } as any,
-      } as any)).toHaveLength(0);
-    });
-
-    it('included in generateAllExecutionMarkers output', () => {
-      const amt = {
-        fractal: {
-          fractalTop: false, lastFractalPrice: 49950.5, fractalAverage: 0,
-          trend: true, breakout: true, buySignal: true, sellSignal: false,
-        },
-      } as any;
-      const markers = generateAllExecutionMarkers([], [], data, amt, { mode: 'STANDARD' });
-      expect(markers.find(m => m.text.startsWith('FRACTAL BUY'))).toBeDefined();
-    });
-  });
-
-  describe('fractalLineData', () => {
-    it('maps backend top points to colored line segments', () => {
-      const pts = fractalLineData({
-        line: [
-          { time: '2024-01-01T09:20:00Z', price: 49950.5, dir: 0 },
-          { time: '2024-01-01T09:30:00Z', price: 50000.25, dir: 1 },
-          { time: '2024-01-01T09:40:00Z', price: 49975.0, dir: -1 },
-        ],
-      } as any);
-      expect(pts).toHaveLength(3);
-      expect(pts[0].color).toBe('#2962ff');
-      expect(pts[1].color).toBe('#089981');
-      expect(pts[2].color).toBe('#f23645');
-      expect(pts[1].value).toBe(50000.25);
-      expect(pts[1].time).toBeGreaterThan(pts[0].time);
-    });
-
-    it('returns empty when no line points', () => {
-      expect(fractalLineData({ line: [] } as any)).toHaveLength(0);
-      expect(fractalLineData(undefined)).toHaveLength(0);
-      expect(fractalLineData({} as any)).toHaveLength(0);
-    });
-  });
 });

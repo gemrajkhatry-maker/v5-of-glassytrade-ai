@@ -22,7 +22,6 @@ import {
 } from './chart/AMTLevelsOverlay';
 import {
   generateAllExecutionMarkers,
-  fractalLineData,
   ExecutionMarkersOptions,
 } from './chart/ExecutionMarkersManager';
 import {
@@ -97,7 +96,6 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
     const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-    const fractalLineRef = useRef<ISeriesApi<"Line"> | null>(null);
     const activePriceLinesRef = useRef<Map<string, IPriceLine[]>>(new Map());
     const amtLinesRef = useRef<IPriceLine[]>([]);
     const initializedRef = useRef(false);
@@ -135,17 +133,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       prev.breakDirection === amtAnalysis.breakDirection &&
       prev.breakLevel === amtAnalysis.breakLevel &&
       prev.ibComplete === amtAnalysis.ibComplete;
-    // Fractal half-trend BUY/SELL labels (backend-calculated) must still
-    // propagate to the marker layer when only the flags flip.
-    const fractalSame =
-      prev.fractal?.buySignal === amtAnalysis.fractal?.buySignal &&
-      prev.fractal?.sellSignal === amtAnalysis.fractal?.sellSignal &&
-      prev.fractal?.trend === amtAnalysis.fractal?.trend &&
-      prev.fractal?.breakout === amtAnalysis.fractal?.breakout &&
-      prev.fractal?.lastFractalPrice === amtAnalysis.fractal?.lastFractalPrice &&
-      (prev.fractal?.line?.length ?? 0) === (amtAnalysis.fractal?.line?.length ?? 0);
-
-    if (profileSame && legSame && printsSame && levelsSame && fractalSame) {
+    if (profileSame && legSame && printsSame && levelsSame) {
       return prev; // Return old reference to skip redraw
     }
 
@@ -241,20 +229,9 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       scaleMargins: { top: 0.8, bottom: 0 },
     });
 
-    // ChartArt fractal top line (overlay) — segments colored by the
-    // backend-computed top direction; data set in the markers effect.
-    const fractalLineSeries = chart.addLineSeries({
-      color: '#2962ff',
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: true,
-    });
-
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
-    fractalLineRef.current = fractalLineSeries;
 
     chartRef.current.priceScale('right').applyOptions({
       scaleMargins: {
@@ -305,7 +282,6 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       cancelAnimationFrame(raf);
       resizeObserver.disconnect();
       chart.remove();
-      fractalLineRef.current = null;
       initializedRef.current = false;
     };
   }, []); // Only runs once on mount
@@ -1085,17 +1061,6 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
 
     tvMarkers.sort((a, b) => (a.time as number) - (b.time as number));
     candleSeriesRef.current.setMarkers(tvMarkers);
-
-    // ChartArt fractal top line: draw the backend-computed top points as a
-    // colored line series (green/red/blue by top direction).
-    if (fractalLineRef.current) {
-      const fractalLinePoints = fractalLineData(stableAmtAnalysis?.fractal);
-      if (fractalLinePoints.length > 0) {
-        fractalLineRef.current.setData(fractalLinePoints as any);
-      } else {
-        fractalLineRef.current.setData([]);
-      }
-    }
 
     const currentPosIds = new Set((positions || []).map(p => p.id));
     activePriceLinesRef.current.forEach((lines, id) => {

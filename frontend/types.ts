@@ -347,26 +347,6 @@ export interface AMTAnalysis {
   gex?: GammaExposure;
   // LuxAlgo Value Area Reversion Signals (VARS)
   vars?: VARSState;
-  // ChartArt Fractal Breakout (half-trend) — BUY/SELL labels
-  fractal?: FractalState;
-}
-
-export interface FractalState {
-  fractalTop: boolean;
-  lastFractalPrice: number;
-  fractalAverage: number;
-  trend: boolean;
-  breakout: boolean;
-  buySignal: boolean;
-  sellSignal: boolean;
-  // Confirmed fractal top line points: {time, price, dir}
-  line?: FractalLinePoint[];
-}
-
-export interface FractalLinePoint {
-  time: string;
-  price: number;
-  dir: -1 | 0 | 1;
 }
 
 export interface VARSState {

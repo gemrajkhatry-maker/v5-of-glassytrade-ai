@@ -1,6 +1,6 @@
 import React from 'react';
 import { Settings } from 'lucide-react';
-import { VARSState, FractalState } from '../../types';
+import { VARSState } from '../../types';
 
 interface MarketStateCardProps {
     marketState: string;
@@ -12,17 +12,13 @@ interface MarketStateCardProps {
     legVah?: number;
     legVal?: number;
     vars?: VARSState;
-    fractal?: FractalState;
 }
 
 /** 01. STATE — session & leg market regime badge. */
-const MarketStateCard = React.memo<MarketStateCardProps>(({ marketState, isImbalanced, statusColor, statusBg, hasDisplacement, legPoc, legVah, legVal, vars, fractal }) => {
+const MarketStateCard = React.memo<MarketStateCardProps>(({ marketState, isImbalanced, statusColor, statusBg, hasDisplacement, legPoc, legVah, legVal, vars }) => {
     const hasVarsSignal = vars?.bullishReclaim || vars?.bearishReclaim;
     const varsIsBuy = vars?.bullishReclaim;
     const varsSrc = vars?.signalSource || 'VA';
-    // ChartArt fractal half-trend (backend-calculated): trend + latest label
-    const hasFractal = !!fractal && (fractal.buySignal || fractal.sellSignal || fractal.trend);
-    const fractalIsBuy = !!fractal && (fractal.buySignal || (!fractal.sellSignal && fractal.trend));
 
     return (
         <div className="flex flex-col gap-2 relative">
@@ -40,13 +36,6 @@ const MarketStateCard = React.memo<MarketStateCardProps>(({ marketState, isImbal
                                 <span className="text-glassy-text-tertiary font-normal">VARS</span>
                                 <div className={`w-1.5 h-1.5 rounded-full ${varsIsBuy ? 'bg-emerald-400' : 'bg-rose-400'} animate-pulse`} />
                                 {varsSrc} {varsIsBuy ? 'RECLAIM BUY' : 'RECLAIM SELL'}
-                            </div>
-                        )}
-                        {hasFractal && (
-                            <div className={`px-2 py-0.5 rounded-sm text-[8px] font-bold tracking-wide flex items-center gap-1.5 ${fractalIsBuy ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}`}>
-                                <span className="text-glassy-text-tertiary font-normal">FRACTAL</span>
-                                <div className={`w-1.5 h-1.5 rounded-full ${fractalIsBuy ? 'bg-emerald-400' : 'bg-rose-400'} animate-pulse`} />
-                                {fractal!.buySignal ? 'BUY' : fractal!.sellSignal ? 'SELL' : fractal!.trend ? 'TREND UP' : 'TREND DOWN'}
                             </div>
                         )}
                         {marketState === 'DEAD' ? (
