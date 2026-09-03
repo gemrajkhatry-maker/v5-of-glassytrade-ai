@@ -25,20 +25,15 @@ except (ImportError, ModuleNotFoundError):
 # LOT SIZES
 # =============================================================================
 
+from quant.contracts.instrument_registry import DEFAULT_REGISTRY as _MI_REG
+
 LOT_SIZES: Dict[str, int] = {
-    # NSE F&O Indices — exchange-authoritative Aug 2026 revision
-    # (NIFTY=65, BANKNIFTY=30, FINNIFTY=60; were 25/15/25).
-    "NIFTY": 65,
+    **{s.root: s.lot_size for s in _MI_REG.specs()},
+    # --- Non-registry extras: display aliases + stocks + non-registry micros
     "NIFTY 50": 65,
-    "BANKNIFTY": 30,
     "NIFTY BANK": 30,
-    "FINNIFTY": 60,
     "NIFTY FIN SERVICE": 60,
-    "MIDCPNIFTY": 120,
     "NIFTY MID SELECT": 120,
-    "SENSEX": 20,     # BSE — raised 10->20 in 2025
-    "BANKEX": 30,
-    # NSE F&O Stocks
     "RELIANCE": 250,
     "TCS": 150,
     "INFY": 600,
@@ -59,21 +54,7 @@ LOT_SIZES: Dict[str, int] = {
     "NTPC": 2300,
     "POWERGRID": 2600,
     "ULTRACEMCO": 150,
-    # MCX Commodities (authoritative per exchange_config)
-    "GOLD": 100,
-    "GOLDM": 100,   # was 10 — 10x under-sized risk sizing for the traded mini gold
-    "GOLDPETAL": 1,
-    "SILVER": 30,
-    "SILVERM": 5,
     "SILVERMIC": 1,
-    "CRUDEOIL": 100,
-    "CRUDEOILM": 10,
-    "NATURALGAS": 1250,
-    "COPPER": 2500,
-    "ALUMINIUM": 5000,
-    "ZINC": 5000,
-    "LEAD": 5000,
-    "NICKEL": 1500,
 }
 
 

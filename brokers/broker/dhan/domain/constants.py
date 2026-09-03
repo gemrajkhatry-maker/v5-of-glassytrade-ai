@@ -127,17 +127,11 @@ DEPTH_RC_DISCONNECT: int = 50  # Server-initiated disconnect
 # Lot Sizes by Exchange Segment
 # =============================================================================
 
-# Default lot sizes for major indices and stocks
+from quant.contracts.instrument_registry import DEFAULT_REGISTRY as _REG
+
 LOT_SIZES: dict[str, int] = {
-    # NSE F&O Indices — exchange-authoritative Aug 2026 revision
-    # (NIFTY=65, BANKNIFTY=30, FINNIFTY=60; were 25/15/25).
-    "NIFTY": 65,
-    "BANKNIFTY": 30,
-    "FINNIFTY": 60,
-    "MIDCPNIFTY": 120,
-    "SENSEX": 20,     # BSE — raised 10->20 in 2025
-    "BANKEX": 30,
-    # NSE F&O Stocks (sample - actual lot sizes vary)
+    **{s.root: s.lot_size for s in _REG.specs()},
+    # --- Non-registry extras: NSE F&O stocks (lots vary; registry covers indices/MCX only)
     "RELIANCE": 250,
     "TCS": 150,
     "INFY": 600,

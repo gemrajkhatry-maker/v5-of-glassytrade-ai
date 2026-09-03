@@ -190,3 +190,11 @@ class InstrumentRegistry:
 
 
 DEFAULT_REGISTRY = InstrumentRegistry()
+
+
+def get_lot_size(root: str) -> int:
+    return DEFAULT_REGISTRY.resolve(root).lot_size
+
+
+def get_tick_size(root: str) -> float:
+    return DEFAULT_REGISTRY.resolve(root).tick_size
