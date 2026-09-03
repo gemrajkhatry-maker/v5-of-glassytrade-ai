@@ -210,28 +210,27 @@ def create_application() -> FastAPI:
                 )
             else:
                 from quant.amt.session.scanner import OptionScannerService
+                from quant.amt.session.scanner_config import ScannerConfig
                 from app.config import settings
                 import concurrent.futures
 
                 scanner = OptionScannerService(container.resolve(IMarketData))
+                scan_cfg = ScannerConfig.from_settings(settings)
 
                 # Run scanner in thread pool (it's synchronous)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     results = pool.submit(
                         scanner.scan_top_n,
-                        n=settings.SCANNER_TOP_N,
-                        underlyings=settings.SCANNER_UNDERLYINGS,
-                        preferred_option_type=settings.SCANNER_OPTION_TYPE or None,
-                        exchange=settings.DEFAULT_EXCHANGE,
-                        expiry_index=settings.SCANNER_EXPIRY_INDEX,
-                        strikes_around_atm=settings.STRIKES_AROUND_ATM,
+                        **scan_cfg.to_scan_kwargs(
+                            exchange=settings.DEFAULT_EXCHANGE
+                        ),
                     ).result(timeout=120)
 
                 if results:
                     # Filter to valid contracts with LTP > 0
                     final = [r for r in results if r.ltp > 0] or results
                     selected_symbols = [
-                        r.symbol for r in final[:settings.SCANNER_TOP_N]
+                        r.symbol for r in final[:scan_cfg.top_n]
                     ]
 
             if selected_symbols:

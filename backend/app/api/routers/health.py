@@ -349,20 +349,17 @@ async def scanner_rescan(request: Request):
         return {"count": len(syms), "contracts": contracts}
 
     from quant.amt.session.scanner import OptionScannerService
+    from quant.amt.session.scanner_config import ScannerConfig
 
     market_data = get_market_data()
     scanner = OptionScannerService(market_data)
+    scan_cfg = ScannerConfig.from_settings(settings)
 
     try:
         results = await asyncio.wait_for(
             asyncio.to_thread(
                 scanner.scan_top_n,
-                n=settings.SCANNER_TOP_N,
-                underlyings=settings.SCANNER_UNDERLYINGS,
-                preferred_option_type=settings.SCANNER_OPTION_TYPE or None,
-                exchange=settings.DEFAULT_EXCHANGE,
-                expiry_index=settings.SCANNER_EXPIRY_INDEX,
-                strikes_around_atm=settings.STRIKES_AROUND_ATM,
+                **scan_cfg.to_scan_kwargs(exchange=settings.DEFAULT_EXCHANGE),
             ),
             timeout=60.0,
         )
