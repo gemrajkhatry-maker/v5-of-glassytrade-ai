@@ -67,7 +67,7 @@ from quant.state import LiveQuoteCache, _decision_to_view, _epoch_to_iso
 from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.event_store import EventStore
 from quant.state_machine import EngineState
-from quant.reconciliation import PeriodicReconciliationResult
+from quant.reconciliation_service import PeriodicReconciliationResult
 from quant.transitions import apply_event, _position_to_state
 
 logger = logging.getLogger(__name__)

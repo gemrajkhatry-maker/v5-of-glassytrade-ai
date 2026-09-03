@@ -9,8 +9,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 
@@ -213,7 +211,7 @@ class TestEndToEndIntegration:
         from quant.event_store import EventStore
         from quant.events import PositionOpened
         from quant.state_machine import PositionState
-        from quant.reconciliation import Reconciliation, ReconciliationResult
+        from quant.reconciliation_service import index_rows, reconcile_sets
         
         # Create store with position
         store = EventStore()
@@ -231,10 +229,17 @@ class TestEndToEndIntegration:
         class MockBroker:
             def get_positions(self):
                 return [{"id": "abc-123", "symbol": "NIFTY", "size": 100.0}]
-        
-        # Reconcile
-        recon = Reconciliation(store, MockBroker())
-        result = recon.reconcile()
-        
-        assert result.can_trade is True
+
+        # Reconcile the journal fold (as the DB-side book) against the
+        # broker book via the single reconciliation service.
+        folded = store.fold()
+        assert folded.position is not None
+        db = index_rows(
+            [{"symbol": "NIFTY", "size": folded.position.size}],
+            size_of=lambda r: r["size"],
+        )
+        broker = index_rows(MockBroker().get_positions(), size_of=lambda r: r["size"])
+        result = reconcile_sets(db, broker, db)
+
+        assert result.restored == 1
         assert result.discrepancies == ()

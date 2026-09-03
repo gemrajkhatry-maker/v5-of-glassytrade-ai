@@ -31,6 +31,7 @@ from quant.contracts.timezones import IST, MCX_SESSION_CLOSE, NSE_SESSION_CLOSE
 from quant.events import BarClosed
 from quant.execution.live_oms import LiveOMS
 from quant.execution.oms import PaperOMS
+from quant.reconciliation_service import canonical_key, partition_keys
 from quant.runtime import QuantEngine
 from quant.session_levels import SessionLevelStore
 from quant.state import project_state
@@ -877,7 +878,7 @@ class QuantCoordinator:
 
         broker_by_symbol: dict[str, float] = {}
         for bp in broker_positions:
-            sym = str(getattr(bp, "symbol", "") or "").strip()
+            sym = canonical_key(str(getattr(bp, "symbol", "") or ""))
             if sym:
                 broker_by_symbol[sym] = _signed_broker_qty(bp)
 
@@ -894,18 +895,27 @@ class QuantCoordinator:
             net = float(pos.size) if pos is not None else 0.0
             for pyr in pyramids:
                 net += float(getattr(pyr, "size", 0.0))
-            engine_by_symbol[sym] = net
+            engine_by_symbol[canonical_key(sym)] = net
 
+        # Shared presence-compare from the single reconciliation service.
+        # Drift strings are unchanged (pinned by audit-regression tests).
+        broker_only, both, engine_only = partition_keys(
+            broker_by_symbol, engine_by_symbol
+        )
         drift = []
-        for sym, broker_qty in broker_by_symbol.items():
-            engine_qty = engine_by_symbol.get(sym)
-            if engine_qty is None:
-                drift.append(f"{sym}: broker={broker_qty} but no engine position (orphan?)")
-            elif abs(broker_qty - engine_qty) > 0.01:
+        for sym in sorted(broker_only):
+            drift.append(
+                f"{sym}: broker={broker_by_symbol[sym]} but no engine position (orphan?)"
+            )
+        for sym in sorted(both):
+            broker_qty = broker_by_symbol[sym]
+            engine_qty = engine_by_symbol[sym]
+            if abs(broker_qty - engine_qty) > 0.01:
                 drift.append(f"{sym}: broker={broker_qty} vs engine={engine_qty}")
-        for sym, engine_qty in engine_by_symbol.items():
-            if sym not in broker_by_symbol:
-                drift.append(f"{sym}: engine={engine_qty} but broker has none (desync?)")
+        for sym in sorted(engine_only):
+            drift.append(
+                f"{sym}: engine={engine_by_symbol[sym]} but broker has none (desync?)"
+            )
 
         if drift:
             logger.warning(
