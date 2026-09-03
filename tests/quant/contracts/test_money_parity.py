@@ -52,3 +52,22 @@ def test_registry_is_sole_lot_source():
     assert get_lot_size("RELIANCE") == 250
     assert get_lot_size("NIFTY 50") == 65
     assert get_lot_size("UNKNOWN_XYZ") == 1
+
+
+def test_backoff_golden_table():
+    from shared.net_policy import capped_exp_delay
+    assert capped_exp_delay(0) == 0.5
+    assert capped_exp_delay(1) == 1.0
+    assert capped_exp_delay(2) == 2.0
+    assert capped_exp_delay(10) == 30.0
+
+
+def test_net_policy_values_match_dhan_constants():
+    import shared.net_policy as np
+    from brokers.broker.dhan.domain import constants as dc
+    assert dc.DEFAULT_TIMEOUT_SECONDS == np.DEFAULT_TIMEOUT_SECONDS == 10.0
+    assert dc.DEFAULT_MAX_RETRIES == np.DEFAULT_MAX_RETRIES == 3
+    assert dc.DEFAULT_RETRY_BACKOFF_FACTOR == np.DEFAULT_RETRY_BACKOFF_FACTOR == 0.5
+    assert dc.WS_RECONNECT_DELAY_SECONDS == np.WS_RECONNECT_DELAY_SECONDS == 5.0
+    assert dc.WS_MAX_RECONNECT_ATTEMPTS == np.WS_MAX_RECONNECT_ATTEMPTS == 30
+    assert dc.INSTRUMENT_CACHE_TTL_SECONDS == np.INSTRUMENT_CACHE_TTL_SECONDS == 86400

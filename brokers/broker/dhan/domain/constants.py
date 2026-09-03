@@ -5,6 +5,19 @@ This module contains all constants specific to the Dhan broker API.
 No external dependencies except standard library.
 """
 
+# Timeout/retry/backoff/WS/cache policy lives in shared.net_policy;
+# re-exported here so existing importers keep working unchanged.
+from shared.net_policy import (  # noqa: F401
+    DEFAULT_TIMEOUT_SECONDS,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_RETRY_BACKOFF_FACTOR,
+    DEFAULT_RETRY_MAX_DELAY_SECONDS,
+    WS_PING_INTERVAL_SECONDS,
+    WS_RECONNECT_DELAY_SECONDS,
+    WS_MAX_RECONNECT_ATTEMPTS,
+    INSTRUMENT_CACHE_TTL_SECONDS,
+)
+
 # =============================================================================
 # API Configuration
 # =============================================================================
@@ -205,13 +218,8 @@ HISTORICAL_MAX_DAYS: int = 90
 # Timeouts and Retries
 # =============================================================================
 
-# Default timeout in seconds
-DEFAULT_TIMEOUT_SECONDS: float = 10.0
-
-# Default retry configuration
-DEFAULT_MAX_RETRIES: int = 3
-DEFAULT_RETRY_BACKOFF_FACTOR: float = 0.5
-DEFAULT_RETRY_MAX_DELAY_SECONDS: float = 30.0
+# Default timeout in seconds / retry configuration — owned by shared.net_policy
+# (names re-exported here so existing importers keep working unchanged)
 
 # TOTP time window in seconds (standard TOTP interval)
 TOTP_TIME_WINDOW_SECONDS: int = 30
@@ -221,22 +229,16 @@ TOTP_TIME_WINDOW_SECONDS: int = 30
 # WebSocket Configuration
 # =============================================================================
 
-# WebSocket ping/pong interval in seconds
-WS_PING_INTERVAL_SECONDS: float = 30.0
-
-# WebSocket reconnection delay in seconds
-WS_RECONNECT_DELAY_SECONDS: float = 5.0
-
-# Maximum reconnection attempts
-WS_MAX_RECONNECT_ATTEMPTS: int = 30
+# WebSocket ping/pong, reconnection — owned by shared.net_policy
+# (names re-exported here so existing importers keep working unchanged)
 
 
 # =============================================================================
 # Cache Configuration
 # =============================================================================
 
-# Instrument cache TTL in seconds (24 hours)
-INSTRUMENT_CACHE_TTL_SECONDS: int = 86400
+# Instrument cache TTL in seconds (24 hours) — owned by shared.net_policy
+# (name re-exported here so existing importers keep working unchanged)
 
 
 # =============================================================================
