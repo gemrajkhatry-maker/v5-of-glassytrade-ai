@@ -12,9 +12,6 @@
 // Time Constants
 // =============================================================================
 
-/** IST offset from UTC in seconds (UTC+5:30) */
-export const IST_OFFSET_SECONDS = 19800;
-
 /** One day in milliseconds */
 export const ONE_DAY_MS = 86_400_000;
 
