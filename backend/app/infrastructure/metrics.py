@@ -60,8 +60,21 @@ class MetricsCollector:
         with self._lock:
             self._ticks_processed += 1
 
+    @classmethod
+    def reset(cls) -> None:
+        """Reset singleton state (test isolation only — never call live)."""
+        inst = cls._instance
+        if inst is not None and getattr(inst, "_initialized", False):
+            with inst._lock:
+                inst._signal_counts.clear()
+                inst._total_pnl = 0.0
+                inst._cache_hits = 0
+                inst._cache_misses = 0
+                inst._regime_changes = 0
+                inst._ticks_processed = 0
+
     def snapshot(self) -> dict:
-        """Return current metrics as a dict."""
+        """Return current metrics as a dict. Keys are a stable contract for /api/v1/metrics — do not rename."""
         with self._lock:
             total_cache = self._cache_hits + self._cache_misses
 

@@ -1,5 +1,6 @@
 # tests/quant/contracts/test_telemetry_standards.py
 import pytest
+from app.infrastructure.metrics import MetricsCollector
 from brokers.broker.dhan.application.config import DhanConfig
 from brokers.broker.dhan.domain.errors import DhanConfigError, DhanError, DhanMissingConfigError
 
@@ -38,3 +39,36 @@ def test_backward_compat_valueerror(monkeypatch):
     monkeypatch.setenv("TESTDHAN_ACCESS_TOKEN", "tok")
     with pytest.raises(ValueError):
         DhanConfig.from_env(prefix="TESTDHAN_")
+
+
+def test_collector_snapshot_contract():
+    c = MetricsCollector()
+    c.reset()
+    c.record_tick(); c.record_tick()
+    c.record_signal("LONG")
+    c.record_pnl(12.345)
+    c.record_cache_hit(); c.record_cache_miss()
+    c.record_regime_change()
+    snap = MetricsCollector().snapshot()  # same singleton
+    assert snap["ticks_processed"] == 2
+    assert snap["signals"] == {"LONG": 1}
+    assert snap["total_pnl"] == 12.35
+    assert snap["cache"] == {"hits": 1, "misses": 1, "hit_rate": 0.5}
+    assert snap["regime_changes"] == 1
+    assert snap["uptime_seconds"] >= 0
+    c.reset()
+
+
+def test_collector_reset_isolation():
+    c = MetricsCollector()
+    c.record_tick()
+    c.reset()
+    assert MetricsCollector().snapshot()["ticks_processed"] == 0
+
+
+def test_registry_counter_names():
+    from app.core.metrics import metrics
+    assert hasattr(metrics, "counter")
+    c1 = metrics.counter("ticks_processed_total", "Total ticks processed")
+    c2 = metrics.counter("signals_generated_total", "Signals generated")
+    assert c1.value >= 0 and c2.value >= 0

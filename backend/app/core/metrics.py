@@ -176,6 +176,15 @@ class MetricsRegistry:
         blocks = [generate_latest(family).decode().rstrip("\n") for family in families]
         return "\n".join(blocks)
 
+    @classmethod
+    def reset(cls) -> None:
+        """Drop all registered families (test isolation only)."""
+        inst = cls._instance
+        if inst is not None:
+            with inst._lock:
+                inst._metrics.clear()
+                inst._families.clear()
+
 
 # Global metrics registry
 metrics = MetricsRegistry()
