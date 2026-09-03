@@ -11,9 +11,8 @@ String-based API — no Instrument objects required.
 """
 
 from datetime import datetime, time
-from quant.contracts.instrument_registry import DEFAULT_REGISTRY
-from quant.contracts.instrument_registry import DEFAULT_REGISTRY as _MI_REG
 from typing import Optional, Dict, Any
+from quant.contracts.instrument_registry import DEFAULT_REGISTRY
 
 try:
     import pytz
@@ -28,7 +27,7 @@ except (ImportError, ModuleNotFoundError):
 # =============================================================================
 
 LOT_SIZES: Dict[str, int] = {
-    **{s.root: s.lot_size for s in _MI_REG.specs()},
+    **{s.root: s.lot_size for s in DEFAULT_REGISTRY.specs()},
     # --- Non-registry extras: display aliases + stocks + non-registry micros
     "NIFTY 50": 65,
     "NIFTY BANK": 30,
