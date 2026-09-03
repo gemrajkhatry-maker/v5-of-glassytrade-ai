@@ -461,7 +461,7 @@ class QuantCoordinator:
             last_tick_wall = float(getattr(engine, "_last_tick_wall", now) or now)
             is_stale = (now - last_tick_wall) > stale_sec
             amt_dto = getattr(engine, "last_amt_dto", None) or {}
-            is_dead_state = str(amt_dto.get("marketState", "")).upper() in (MarketState.DEAD.value, "DEAD_MARKET", "DEAD")
+            is_dead_state = str(amt_dto.get("marketState", "")).upper() in (MarketState.DEAD.value, "DEAD_MARKET")
 
             reason = ""
             if is_drifted:
@@ -470,6 +470,10 @@ class QuantCoordinator:
                 reason = f"Dead market state and stale feed ({now - last_tick_wall:.0f}s)"
             elif is_dead_state:
                 reason = "Dead market state — searching for active momentum contract"
+
+            if not reason:
+                # Contract is healthy, active, and near ATM — do not rotate
+                continue
 
             # Find replacement contract using OptionScanner
             try:

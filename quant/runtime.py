@@ -78,6 +78,7 @@ logger = logging.getLogger(__name__)
 # model inference is involved, so _decide never waits on external calls.
 _DETERMINISTIC_CONVICTION = 0.7
 # Minimum closed bars (live + seeded history) before the engine may decide.
+_UNDERLYING_WARNED: bool = False
 # The analysis kernel needs enough bars for a meaningful POC/VA/VWAP profile;
 # the AMT/decision design pins this at > 15 bars, which also keeps entries
 # out of the opening-noise window (15 minutes at the default 1m timeframe).
@@ -468,6 +469,8 @@ class QuantEngine:
             # Option contract with no underlying feed — running AMT on the
             # option's own premium is a fallback, not the faithful setup.
             self._underlying_warned = True
+            global _UNDERLYING_WARNED
+            _UNDERLYING_WARNED = True
             logger.warning(
                 "No underlying feed for %s — running AMT on the option premium. "
                 "Pass underlying_gateway to compute auction structure on the futures.",
@@ -482,6 +485,7 @@ class QuantEngine:
                     self._underlying_amt_dto = self._amt_engine.last_amt_dto
                 self._emit_merged_amt(self._option_amt_dto, self._option_amt_dto.get("time", ""))
         elif self._amt_engine.last_amt_dto:
+            self._underlying_amt_dto = self._amt_engine.last_amt_dto
             self._emit(AmtUpdated(symbol=self.symbol, time=self._amt_engine.last_amt_dto.get("time", ""), amt=self._amt_engine.last_amt_dto))
 
         initial_amt = self._option_amt_dto or self._amt_engine.last_amt_dto
@@ -642,6 +646,8 @@ class QuantEngine:
             pm.current_position = remaining
             self._release_partial_reserves(pm, remaining)
             if remaining is None:
+                if self.state.position is not None:
+                    self.state = self.state.with_position(None)
                 self._last_close_bar_index = self._bar_index
                 if self._portfolio_risk is not None:
                     self._portfolio_risk.record_close(
@@ -942,9 +948,10 @@ class QuantEngine:
     def _build_context(self, bar, amt_dto: dict, cooldown_remaining_sec: float):
         """Single DecisionContext source shared by the flat-path ``_decide()``
         and the positioned thesis-flip check — extracted, not duplicated."""
+        eval_symbol = self._underlying() if self._underlying_gateway is not None else self.symbol
         return DecisionContextBuilder().build(
             bar=bar,
-            symbol=self.symbol,
+            symbol=eval_symbol,
             market=self._market,
             contract_expiry=self._contract_expiry,
             tick_size=self._tick_size,

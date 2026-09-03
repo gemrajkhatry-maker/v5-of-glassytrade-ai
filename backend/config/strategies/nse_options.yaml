@@ -27,8 +27,8 @@ scanner:
   underlyings: ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
   # Priority order: NIFTY weekly gets first claim, followed by BANKNIFTY, FINNIFTY, MIDCPNIFTY
   underlying_priority: ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"]
-  top_n: 8
-  top_per_underlying: 3
+  top_n: 12
+  top_per_underlying: 2
   strikes_around_atm: 3
   expiry_index: 0  # nearest expiry: NIFTY weekly (Tue), monthlies last Tue
   option_type: ""  # Auto-select based on momentum

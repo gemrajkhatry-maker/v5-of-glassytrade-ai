@@ -497,11 +497,16 @@ class OptionScannerService:
 
         # Ensure every underlying root has active contracts represented
         if not big_move_mode:
-            for u in underlyings:
+            for idx, u in enumerate(underlyings):
                 if u not in per_u or not per_u[u]:
                     fb = self._fallback_atm([u], expiry_index, chains=cached_chains)
                     if fb:
-                        per_u[u] = fb[:max(1, int(top_per_underlying))]
+                        cap = max(1, int(top_per_underlying))
+                        if cap == 1 and idx % 2 == 1 and len(fb) > 1:
+                            # Alternate CE/PE across roots when cap is 1
+                            per_u[u] = [fb[1]]
+                        else:
+                            per_u[u] = fb[:cap]
 
         final = self._round_robin(n, per_u, underlying_priority)
 

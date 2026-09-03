@@ -45,6 +45,7 @@ _SEED_FETCH_RETRIES = 4      # max attempts per symbol (1 + 3 backoff retries)
 _SEED_FETCH_BASE_DELAY = 1.0  # exponential backoff base between attempts (s)
 _SEED_GATE_LOCK = threading.Lock()
 _SEED_NEXT_START = 0.0
+_SEED_CACHE: dict[tuple[str, str], tuple[float, list]] = {}
 
 
 def _reserve_seed_slot() -> None:
@@ -221,40 +222,47 @@ class AMTEngine:
         if self._history_source is None:
             return
 
-        _reserve_seed_slot()
-        candles: list = []
         seed_interval = self._seed_interval_str()
-        for attempt in range(1, _SEED_FETCH_RETRIES + 1):
-            try:
-                result = self._history_source.fetch_history(
-                    self.symbol, seed_interval, 500
-                )
-                awaitable = inspect.isawaitable(result)
-                candles = asyncio.run(result) if awaitable else (result or [])
-            except Exception as e:
-                awaitable = True
-                if not isinstance(e, (TimeoutError, ConnectionError, OSError, asyncio.CancelledError)):
-                    logger.critical("Unexpected error", exc_info=True)
-                logger.warning(
-                    "AMT history seed failed for %s (attempt %d/%d)",
-                    self.symbol, attempt, _SEED_FETCH_RETRIES, exc_info=True,
-                )
-                candles = []
-            if candles:
-                break
-            # ponytail: sync [] means no history source, not DH-3001. Only async
-            # empty responses (Dhan swallowed rate-limit) are retried.
-            if not awaitable:
-                break
-            if attempt < _SEED_FETCH_RETRIES:
-                delay = _SEED_FETCH_BASE_DELAY * (
-                    2 ** (attempt - 1)
-                ) + random.uniform(0.0, 1.0)
-                logger.info(
-                    "AMT history seed retry %d/%d for %s in %.1fs",
-                    attempt + 1, _SEED_FETCH_RETRIES, self.symbol, delay,
-                )
-                time.sleep(delay)
+        cache_key = (self.symbol, seed_interval)
+        cached = _SEED_CACHE.get(cache_key)
+        if cached and (time.monotonic() - cached[0]) < 300.0:
+            logger.info("AMT history seed: reusing cached history for %s (%d candles)", self.symbol, len(cached[1]))
+            candles = list(cached[1])
+        else:
+            _reserve_seed_slot()
+            candles: list = []
+            for attempt in range(1, _SEED_FETCH_RETRIES + 1):
+                try:
+                    result = self._history_source.fetch_history(
+                        self.symbol, seed_interval, 500
+                    )
+                    awaitable = inspect.isawaitable(result)
+                    candles = asyncio.run(result) if awaitable else (result or [])
+                except Exception as e:
+                    awaitable = True
+                    if not isinstance(e, (TimeoutError, ConnectionError, OSError, asyncio.CancelledError)):
+                        logger.critical("Unexpected error", exc_info=True)
+                    logger.warning(
+                        "AMT history seed failed for %s (attempt %d/%d)",
+                        self.symbol, attempt, _SEED_FETCH_RETRIES, exc_info=True,
+                    )
+                    candles = []
+                if candles:
+                    _SEED_CACHE[cache_key] = (time.monotonic(), list(candles))
+                    break
+                # ponytail: sync [] means no history source, not DH-3001. Only async
+                # empty responses (Dhan swallowed rate-limit) are retried.
+                if not awaitable:
+                    break
+                if attempt < _SEED_FETCH_RETRIES:
+                    delay = _SEED_FETCH_BASE_DELAY * (
+                        2 ** (attempt - 1)
+                    ) + random.uniform(0.0, 1.0)
+                    logger.info(
+                        "AMT history seed retry %d/%d for %s in %.1fs",
+                        attempt + 1, _SEED_FETCH_RETRIES, self.symbol, delay,
+                    )
+                    time.sleep(delay)
         if not candles:
             return
 

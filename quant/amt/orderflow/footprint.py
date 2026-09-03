@@ -321,14 +321,14 @@ def detect_absorption(candle: FootprintCandle, price_change_pct: float) -> dict 
 
 
 def detect_contested_zone(candles: list[FootprintCandle], window: int = 2) -> bool:
-    """Detect contested zone: both BUY and SELL stacked imbalances in the latest active window.
+    """Detect contested zone: both BUY and SELL stacked imbalances colliding in the same price zone.
 
-    When both sides show opposing stacked imbalances in recent candles, the market is contested —
-    neither side has control. Best action is FLAT.
+    When both sides show opposing stacked imbalances colliding at the same price zone,
+    the market is contested — neither side has control. Best action is FLAT.
     """
     recent = candles[-window:] if len(candles) >= window else candles
-    has_buy_stacked = False
-    has_sell_stacked = False
+    buy_stacked_prices: list[float] = []
+    sell_stacked_prices: list[float] = []
 
     for candle in recent:
         if not candle.levels:
@@ -336,10 +336,18 @@ def detect_contested_zone(candles: list[FootprintCandle], window: int = 2) -> bo
         for lv in candle.levels:
             if lv.stacked:
                 if lv.delta > 0:
-                    has_buy_stacked = True
+                    buy_stacked_prices.append(float(lv.price))
                 elif lv.delta < 0:
-                    has_sell_stacked = True
-        if has_buy_stacked and has_sell_stacked:
-            return True
+                    sell_stacked_prices.append(float(lv.price))
+
+    if not buy_stacked_prices or not sell_stacked_prices:
+        return False
+
+    # Check for actual price zone overlap: do opposing stacked imbalances collide within 5 ticks / 0.1%?
+    for bp in buy_stacked_prices:
+        for sp in sell_stacked_prices:
+            thresh = max(0.25, bp * 0.001)
+            if abs(bp - sp) <= thresh:
+                return True
 
     return False

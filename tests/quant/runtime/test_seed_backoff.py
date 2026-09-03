@@ -21,6 +21,7 @@ from tests.quant.runtime.test_runtime import _ticks
 
 def _reset_seed_gate():
     amt_eng._SEED_NEXT_START = 0.0
+    amt_eng._SEED_CACHE.clear()
 
 
 def test_seed_starts_staggered_across_engines():

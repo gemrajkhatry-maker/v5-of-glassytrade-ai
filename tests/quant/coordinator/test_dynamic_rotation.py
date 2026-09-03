@@ -94,3 +94,35 @@ def test_rotate_dead_symbols_swaps_drifted_strike(mock_scan, mock_open):
     assert len(rotated) == 1
     assert rotated[0] == ("NIFTY 1 SEP 24100 PUT", "NIFTY 1 SEP 24500 PUT")
     coord.switch_symbol.assert_called_once_with("NIFTY 1 SEP 24100 PUT", "NIFTY 1 SEP 24500 PUT")
+
+
+@patch("quant.amt.session.symbol_registry.is_market_open", return_value=True)
+def test_rotate_dead_symbols_keeps_healthy_contract(mock_open):
+    """When an option strike is near ATM and active, it must NOT be rotated."""
+    coord = QuantCoordinator.__new__(QuantCoordinator)
+    coord._lock = MagicMock()
+    coord._lifecycle_lock = MagicMock()
+    coord._stop = MagicMock()
+    coord._stop.is_set.return_value = False
+    coord.config = {"exchange": "NSE"}
+
+    mock_fut = MagicMock()
+    mock_fut._aggregator.current_bar = Bar(
+        time="t1", open=14710.0, high=14710.0, low=14710.0, close=14710.0,
+        volume=100, buy_volume=50, sell_volume=50, delta=0, oi=1000, vwap=14710.0,
+    )
+
+    mock_opt = MagicMock()
+    mock_opt._position = None
+    mock_opt._market = "NSE"
+    import time
+    mock_opt._last_tick_wall = time.monotonic()  # fresh tick!
+    mock_opt.last_amt_dto = {"marketState": "BALANCED"}
+
+    coord._engines = {
+        "MIDCPNIFTY SEP FUT": mock_fut,
+        "MIDCPNIFTY 29 SEP 14700 PUT": mock_opt,
+    }
+
+    rotated = coord.check_and_rotate_dead_symbols(max_drift_steps=2.5)
+    assert rotated == [], "healthy contract must not be rotated"
