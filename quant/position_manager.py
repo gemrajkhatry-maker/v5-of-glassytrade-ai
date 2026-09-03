@@ -251,7 +251,16 @@ class PositionManager:
         """
         # Double-close guard: skip if this position was already closed.
         pos_id = getattr(position, '_id', None) or getattr(position, 'id', None)
-        if pos_id and pos_id in self._closed_ids:
+        if pos_id is None:
+            # A position without an id cannot be guarded, closed against the
+            # broker, or matched to its PositionClosed event — refusing to
+            # proceed prevents a silent add of None to _closed_ids and a
+            # phantom close the event fold could never reconcile.
+            raise ValueError(
+                f"{self.symbol}: cannot close a position without an id "
+                f"(type={type(position).__name__})"
+            )
+        if pos_id in self._closed_ids:
             logger.warning(
                 "⚠️ [DOUBLE-CLOSE GUARD] %s position %s already closed — skipping",
                 self.symbol, str(pos_id)[:8],

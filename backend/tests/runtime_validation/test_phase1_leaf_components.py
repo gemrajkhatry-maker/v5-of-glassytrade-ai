@@ -194,11 +194,9 @@ class TestSignalGeneration:
         results = [GateResult(i, i != 3) for i in range(1, 6)]  # gate 3 fails
         assert sb.build(_ctx(state, "LONG"), results) is None
 
-    def test_size_clamped_to_max(self):
-        sb = SignalBuilder()
-        qty = sb.size(equity=100_000.0, entry=100.0, sl=99.9,
-                      risk_per_trade_pct=0.01)
-        assert qty == 1000  # MAX_POSITION_QUANTITY
+    # NOTE: SignalBuilder.size was removed (duplicate sizing authority — the
+    # engine sizes through SessionRisk.position_size + clamp_quantity). The
+    # clamp ceiling itself is still covered by tests/quant/decision tests.
 
 
 # ---------------------------------------------------------------------------

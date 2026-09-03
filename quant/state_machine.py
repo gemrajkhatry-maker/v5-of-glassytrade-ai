@@ -49,6 +49,7 @@ class Bar:
     buy_volume: float = 0.0
     sell_volume: float = 0.0
     oi: float = 0.0
+    delta: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +72,11 @@ class EngineState:
     
     # Risk state
     risk: RiskState = field(default_factory=RiskState)
+    
+    # Realized P&L accumulated through PositionClosed folds (base + pyramids).
+    # Drives the fold-path portfolio equity so the WS snapshot reflects actual
+    # trading results instead of the paper starting capital.
+    realized_pnl: float = 0.0
     
     # Cooldown tracking
     last_close_bar: int = -1

@@ -56,7 +56,6 @@ def _amt_result_with_prints(prints: list[AggressivePrint]) -> AMTResult:
         hvns=(),
         aggressive_prints=tuple(prints),
         aggression=0.0,
-        signal=None,
         setup=None,
         session_vwap=100.0,
     )

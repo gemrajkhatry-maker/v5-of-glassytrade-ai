@@ -76,9 +76,28 @@ logger = logging.getLogger(__name__)
 # decides from the auction state alone (above the 0.55 min_probability
 # threshold). The decision-critical path is 100% deterministic by design — no
 # model inference is involved, so _decide never waits on external calls.
+# Price-scaled WS ``amt`` keys that must stay on the OPTION contract's scale
+# when an option engine merges underlying-futures context into its payload.
+# GEX strike levels are deliberately absent: strikes are underlying-scale by
+# nature (the option chain's own levels), so they ride through unchanged.
+_OPTION_SCALE_KEYS = (
+    "poc", "valueAreaHigh", "valueAreaLow", "lvns", "hvns", "profile",
+    "aggressivePrints", "sessionVwap", "vwapUpper1", "vwapUpper2",
+    "vwapLower1", "vwapLower2", "ibHigh", "ibLow", "ibPoc", "ibVah", "ibVal",
+    "priorPoc", "priorVah", "priorVal", "npocAbove", "npocBelow",
+    "legProfile", "legLvns", "legPoc", "legVah", "legVal",
+    "absorptionClusterHigh", "absorptionClusterLow", "breakLevel",
+    "contestedZone", "acceptanceAbove", "acceptanceBelow",
+    "rejectionAtHigh", "rejectionAtLow", "squeezeTrappedLevel",
+    "dailyVah", "dailyVal", "dailyPoc", "hourlyPoc", "valueMigration",
+    "footprints", "halfTrend",
+)
+
+# Safe empty shape for the option-scale keys above (built once at import).
+_EMPTY_AMT_DTO = empty_amt_dto()
+
 _DETERMINISTIC_CONVICTION = 0.7
 # Minimum closed bars (live + seeded history) before the engine may decide.
-_UNDERLYING_WARNED: bool = False
 # The analysis kernel needs enough bars for a meaningful POC/VA/VWAP profile;
 # the AMT/decision design pins this at > 15 bars, which also keeps entries
 # out of the opening-noise window (15 minutes at the default 1m timeframe).
@@ -468,9 +487,9 @@ class QuantEngine:
         elif not self._underlying_warned and self._contract_expiry is not None:
             # Option contract with no underlying feed — running AMT on the
             # option's own premium is a fallback, not the faithful setup.
+            # Warning state is per-engine (self._underlying_warned) so one
+            # engine's startup path never mutates a module global.
             self._underlying_warned = True
-            global _UNDERLYING_WARNED
-            _UNDERLYING_WARNED = True
             logger.warning(
                 "No underlying feed for %s — running AMT on the option premium. "
                 "Pass underlying_gateway to compute auction structure on the futures.",
@@ -648,41 +667,31 @@ class QuantEngine:
             if remaining is None:
                 if self.state.position is not None:
                     self.state = self.state.with_position(None)
-                self._last_close_bar_index = self._bar_index
-                if self._portfolio_risk is not None:
-                    self._portfolio_risk.record_close(
-                        getattr(self, "_open_trade_risk", 0.0),
-                        float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
-                    )
-                    self._open_trade_risk = 0.0
+                self._book_full_close()
 
     def _emit_merged_amt(self, base_dto: dict, time_str: str) -> None:
         merged = dict(self._underlying_amt_dto or base_dto)
         opt_dto = self._option_amt_dto or (self._option_amt_engine.last_amt_dto if self._option_amt_engine else None)
-        if opt_dto and opt_dto.get("profile"):
-            merged["profile"] = opt_dto["profile"]
-            if opt_dto.get("poc"):
-                merged["poc"] = opt_dto["poc"]
-            if opt_dto.get("valueAreaHigh"):
-                merged["valueAreaHigh"] = opt_dto["valueAreaHigh"]
-            if opt_dto.get("valueAreaLow"):
-                merged["valueAreaLow"] = opt_dto["valueAreaLow"]
-            merged["hvns"] = opt_dto.get("hvns", [])
-            merged["lvns"] = opt_dto.get("lvns", [])
-            if opt_dto.get("legProfile"):
-                merged["legProfile"] = opt_dto["legProfile"]
-                merged["legPoc"] = opt_dto.get("legPoc")
-                merged["legVah"] = opt_dto.get("legVah")
-                merged["legVal"] = opt_dto.get("legVal")
-        elif self._option_amt_engine is not None:
-            # Option contract: never leak futures-scale profile (24,000+) onto option chart (50-200)
-            merged["profile"] = []
-            merged["poc"] = 0.0
-            merged["valueAreaHigh"] = 0.0
-            merged["valueAreaLow"] = 0.0
-            merged["hvns"] = []
-            merged["lvns"] = []
-            merged["legProfile"] = []
+        # Option-scale price fields. The WS ``amt`` payload renders ON the
+        # option contract's chart (candles at premium scale ~50-200), so every
+        # price-scaled display field must come from the OPTION engine — never
+        # from the underlying futures (~24,000). A futures-scale overlay on an
+        # option chart is drawn tens of thousands of points off-scale: the
+        # HalfTrend line, VWAP/IB/prior levels, absorption clusters and volume
+        # profile (architectural review finding 4 — the pre-fix merge only
+        # overrode profile/poc/VAH/VAL/hvns/lvns/leg*, leaking futures-scale
+        # halfTrend and VWAP/IB levels onto the option chart).
+        if self._option_amt_engine is not None:
+            if opt_dto is not None:
+                for key in _OPTION_SCALE_KEYS:
+                    if key in opt_dto and opt_dto[key] is not None:
+                        merged[key] = opt_dto[key]
+            else:
+                # Option engine exists but has no analysis yet — replace every
+                # price-scaled key with the safe empty shape so a futures-scale
+                # value can never ride through to the option chart.
+                for key in _OPTION_SCALE_KEYS:
+                    merged[key] = _EMPTY_AMT_DTO.get(key)
         merged["barInterval"] = getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC)
         merged["microBarInterval"] = getattr(self._micro_aggregator, "interval_seconds", 60) if self._micro_aggregator is not None else None
         self._emit(AmtUpdated(symbol=self.symbol, time=time_str, amt=merged))
@@ -1006,7 +1015,11 @@ class QuantEngine:
                 getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC) or DEFAULT_INTERVAL_SEC
             )
             ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
-            decision = self._decision_service.evaluate(ctx, allow_positioned=True)
+            # One strategy seam: the positioned flip evaluation goes through the
+            # same should_enter entry point entries use (allow_positioned=True
+            # bypasses gate 2's open-position blocker and the halt entry gate),
+            # so a swapped-in strategy governs both entries and flips.
+            decision = self._strategy.should_enter(ctx, allow_positioned=True)
             self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
             if not (decision.approved and decision.signal is not None):
                 return
@@ -1027,13 +1040,26 @@ class QuantEngine:
                 ExitDecision(True, "OPPOSING_SIGNAL", float(exec_bar.close)),
                 exec_bar.time,
             )
-            self._last_close_bar_index = self._bar_index
-            if self._portfolio_risk is not None:
-                self._portfolio_risk.record_close(
-                    getattr(self, "_open_trade_risk", 0.0),
-                    float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
-                )
-                self._open_trade_risk = 0.0
+            self._book_full_close()
+
+    def _book_full_close(self) -> None:
+        """Shared post-full-close bookkeeping — the ONLY full-close release path.
+
+        Called exactly once per full close by every close site (bar exit, tick
+        exit, thesis-flip, EOD force-close): marks the cooldown bar index and
+        releases the aggregate portfolio-risk reservation for the trade. Prior
+        to this extraction each site duplicated the block inline; a divergence
+        (e.g. one path skipping the risk release) silently leaked aggregate
+        headroom for the rest of the day.
+        """
+        pm = self._get_position_manager()
+        self._last_close_bar_index = self._bar_index
+        if self._portfolio_risk is not None:
+            self._portfolio_risk.record_close(
+                getattr(self, "_open_trade_risk", 0.0),
+                float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
+            )
+            self._open_trade_risk = 0.0
 
     def _get_position_manager(self) -> PositionManager:
         """Lazily create the PositionManager with the correct emit function."""
@@ -1096,14 +1122,8 @@ class QuantEngine:
                         pm._portfolio_risk.record_close(risk_i, float(pyr_fill.pnl))
                 pm.pyramid_positions = []
                 pm.pyramid_count = 0
-            # Post-close bookkeeping mirrors _manage_exit's full-close branch.
-            if self._portfolio_risk is not None:
-                self._portfolio_risk.record_close(
-                    getattr(self, "_open_trade_risk", 0.0),
-                    float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
-                )
-                self._open_trade_risk = 0.0
-            self._last_close_bar_index = self._bar_index
+            # Post-close bookkeeping — one shared release path.
+            self._book_full_close()
             logger.warning(
                 "🔒 [EOD FORCE CLOSE] %s reason=%s price=%.2f",
                 self.symbol, reason, price,
@@ -1139,13 +1159,7 @@ class QuantEngine:
             pm.current_position = remaining
             self._release_partial_reserves(pm, remaining)
             if was_open and remaining is None:
-                self._last_close_bar_index = self._bar_index
-                if self._portfolio_risk is not None:
-                    self._portfolio_risk.record_close(
-                        getattr(self, "_open_trade_risk", 0.0),
-                        float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
-                    )
-                    self._open_trade_risk = 0.0
+                self._book_full_close()
 
         # Run advisor on position management state so model reasons about open trade
         if hasattr(self, "_advisor") and self._advisor is not None:
@@ -1214,7 +1228,23 @@ class QuantEngine:
 
         Event sourcing: every emitted event is appended to the EventStore
         (the source of truth) and folded into the cached EngineState.
+
+        Timestamp contract: the EventStore rejects empty event times (audit
+        integrity), so an event constructed without a time inherits the last
+        bar's time, falling back to the current IST wall-clock for a flat
+        store. This catches synthetic DTOs (e.g. the seeded AmtUpdated whose
+        payload has no "time" key) without crashing the engine thread.
         """
+        if not event.time:
+            from dataclasses import replace as _dc_replace
+            from datetime import datetime as _dt
+            from quant.contracts.timezones import IST as _IST
+
+            fallback = getattr(self.state, "last_bar", None)
+            fallback_time = getattr(fallback, "time", None) or ""
+            if not fallback_time:
+                fallback_time = _dt.now(tz=_IST).isoformat()
+            event = _dc_replace(event, time=fallback_time)
         with self._emit_lock:
             if isinstance(event, AgentDecisionProduced) and isinstance(event.decision, dict):
                 dec = event.decision
@@ -1263,11 +1293,32 @@ class QuantEngine:
                 self.symbol,
             )
         rebuilt = self.event_store.fold()
+        position = rebuilt.position
+        pm = self._get_position_manager()
+        if position is None and pm.current_position is not None:
+            # Restored-book baseline (process restart): the in-memory
+            # EventStore holds no events yet — the JSONL journal is not
+            # replayed into it — so an empty fold must NOT clobber the
+            # position restored from storage (restore_position). Adopting it
+            # keeps the run-loop position gates (tick/bar exits, entry
+            # blocking) consistent with the execution book.
+            position = _position_to_state(pm.current_position)
+            logger.info(
+                "startup_reconcile %s: event store empty — adopting restored "
+                "position %s",
+                self.symbol, position.id,
+            )
+        elif position is not None and pm.current_position is None:
+            logger.warning(
+                "startup_reconcile %s: event store holds position %s but the "
+                "execution book is flat — store wins for state; investigate",
+                self.symbol, position.id,
+            )
         self.state = EngineState(
             symbol=self.symbol,
             sequence=rebuilt.sequence,
             last_bar=rebuilt.last_bar,
-            position=rebuilt.position,
+            position=position,
             pyramids=rebuilt.pyramids,
             risk=rebuilt.risk,
             last_close_bar=rebuilt.last_close_bar,
@@ -1287,10 +1338,38 @@ class QuantEngine:
         discrepancies: list[str] = []
         risk_event_emitted = False
 
-        # Position drift
+        # Position drift vs the event store (cached-state desync)
         if canonical.position != self.state.position:
             discrepancies.append(
                 f"position drift: state={self.state.position} vs store={canonical.position}"
+            )
+
+        # Execution-truth drift: the PositionManager book is the execution
+        # authority (it owns partial-fill adoption and pyramid state). The
+        # cached state must agree with it — a divergence means an entry/exit
+        # mutated the book without an event, or an event desynced from the
+        # book (the pre-fold PositionReduced staleness lived exactly here:
+        # fold AND cached state both kept the full size while the book held
+        # the reduced runner, so neither side of the old check saw it).
+        pm = self._get_position_manager()
+        pm_pos = pm.current_position
+        st_pos = self.state.position
+        pm_size = float(getattr(pm_pos, "size", 0.0) or 0.0) if pm_pos is not None else 0.0
+        st_size = float(st_pos.size) if st_pos is not None else 0.0
+        if (pm_pos is None) != (st_pos is None) or abs(pm_size - st_size) > 1e-9:
+            discrepancies.append(
+                f"position drift: position_manager_size={pm_size} "
+                f"vs state_size={st_size}"
+            )
+        pm_pyramid_ids = {
+            str(getattr(p, "_id", None) or getattr(p, "id", ""))
+            for p in (pm.pyramid_positions or [])
+        }
+        st_pyramid_ids = {str(p.id) for p in self.state.pyramids}
+        if pm_pyramid_ids != st_pyramid_ids:
+            discrepancies.append(
+                f"pyramid drift: position_manager={sorted(pm_pyramid_ids)} "
+                f"vs state={sorted(st_pyramid_ids)}"
             )
 
         # Risk drift (e.g., halt state mismatch)
@@ -1313,7 +1392,19 @@ class QuantEngine:
                 equity=0.0,
                 cushion_tier="CONSERVATIVE",
             )
-            self._emit(RiskUpdated(symbol=self.symbol, time="", risk=exec_risk))
+            # Timestamp the drift-correction event: an empty time would be
+            # rejected by the EventStore timestamp validation (audit trail
+            # integrity). Prefer the canonical fold's last bar time (market
+            # time); fall back to the current IST wall-clock for a flat store.
+            from quant.contracts.timezones import IST as _IST
+            from datetime import datetime as _dt
+
+            drift_time = (
+                getattr(canonical.last_bar, "time", None)
+                if canonical.last_bar is not None
+                else None
+            ) or _dt.now(tz=_IST).isoformat()
+            self._emit(RiskUpdated(symbol=self.symbol, time=drift_time, risk=exec_risk))
             risk_event_emitted = True
 
         return PeriodicReconciliationResult(

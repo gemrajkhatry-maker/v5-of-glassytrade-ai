@@ -267,8 +267,10 @@ def _option_mode_engine(side="LONG", entry=100.0):
 
 
 def _spy_pipeline(eng):
-    """Stub decision service that ALWAYS approves a fresh SHORT and records
-    the exact ctx object it was handed (and the builder's (bar, dto) args)."""
+    """Stub the STRATEGY seam (the flip now routes through should_enter, the
+    same entry point entries use — see runtime._check_thesis_flip) with one
+    that ALWAYS approves a fresh SHORT, recording the exact ctx it was handed
+    (and the builder's (bar, dto) args)."""
     captured = {}
 
     def fake_build(bar, amt_dto, cooldown_remaining_sec):
@@ -278,14 +280,15 @@ def _spy_pipeline(eng):
 
     eng._build_context = fake_build
 
-    def evaluate(ctx, allow_positioned=False):
+    def should_enter(ctx, *, allow_positioned=False):
         captured["ctx"] = ctx
+        captured["allow_positioned"] = allow_positioned
         return SimpleNamespace(
             approved=True, signal=_signal(side="SHORT"), gate_results=[],
             reason="APPROVED", phase="", block_reasons=[], model_label="",
         )
 
-    eng._decision_service = SimpleNamespace(evaluate=evaluate)
+    eng._strategy = SimpleNamespace(should_enter=should_enter)
     return captured
 
 

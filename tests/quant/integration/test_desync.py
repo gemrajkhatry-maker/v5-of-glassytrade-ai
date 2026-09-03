@@ -96,8 +96,21 @@ class TestPyramidPositionOpenedCrash:
             id="base-001", entry=100.0, size=10.0, sl=95.0, tp=110.0, side="LONG"
         ))
 
-        # Pyramid add-on emits PositionOpened
+        # Pyramid add-on emits PositionOpened — the production path
+        # (PositionManager.check_pyramid → OMS.add_pyramid) stamps
+        # is_pyramid=True on the add-on so the fold treats it as a pyramid.
         pyramid_pos = _make_position(pos_id="pyr-001", entry=101.0)
+        from dataclasses import replace as _replace
+        from quant.execution.order import Position as _Position
+
+        pyramid_pos = _Position(
+            order=pyramid_pos.order,
+            open_price=pyramid_pos.open_price,
+            open_time=pyramid_pos.open_time,
+            size=pyramid_pos.size,
+            pyramid_level=1,
+            is_pyramid=True,
+        )
         pyramid_event = PositionOpened(symbol="NIFTY", time="t1", position=pyramid_pos)
 
         # EXPECTED: Should succeed (pyramids are valid add-ons)
@@ -115,7 +128,17 @@ class TestPyramidPositionOpenedCrash:
         store = EventStore()
         base_pos = _make_position(pos_id="base-001")
         pyramid_pos = _make_position(pos_id="pyr-001", entry=101.0)
+        from dataclasses import replace as _replace
+        from quant.execution.order import Position as _Position
 
+        pyramid_pos = _Position(
+            order=pyramid_pos.order,
+            open_price=pyramid_pos.open_price,
+            open_time=pyramid_pos.open_time,
+            size=pyramid_pos.size,
+            pyramid_level=1,
+            is_pyramid=True,
+        )
         store.append(PositionOpened(symbol="NIFTY", time="t0", position=base_pos))
         store.append(PositionOpened(symbol="NIFTY", time="t1", position=pyramid_pos))
 
@@ -544,7 +567,8 @@ class TestPositionToStateEdgeCases:
     """
 
     def test_position_to_state_without_signal(self):
-        """_position_to_state crashes if position has no order.signal."""
+        """_position_to_state raises ValueError if position has no order.signal
+        (malformed payload) instead of crashing with AttributeError."""
         # Position with order=None (from import_ reconstruction)
         pos = Position(
             order=None,
@@ -554,6 +578,5 @@ class TestPositionToStateEdgeCases:
             _id="test-001",
         )
 
-        # BUG: _position_to_state accesses pos.order.signal which is None
-        with pytest.raises(AttributeError):
+        with pytest.raises(ValueError, match="order with a signal"):
             _position_to_state(pos)

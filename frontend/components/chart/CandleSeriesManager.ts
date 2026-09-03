@@ -42,10 +42,13 @@ const IST_OFFSET = IST_OFFSET_SECONDS;
  */
 export function toISTTimestamp(timeStr: string | number): number {
   if (typeof timeStr === 'number') {
-    return timeStr + IST_OFFSET;
+    if (!Number.isFinite(timeStr) || timeStr <= 0) return 0;
+    const sec = timeStr > 1e11 ? Math.floor(timeStr / 1000) : timeStr;
+    return sec + IST_OFFSET;
   }
+  if (!timeStr) return 0;
   const parsed = new Date(timeStr).getTime();
-  if (isNaN(parsed)) return 0;
+  if (isNaN(parsed) || parsed <= 0) return 0;
   return Math.floor(parsed / 1000) + IST_OFFSET;
 }
 

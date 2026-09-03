@@ -1100,17 +1100,31 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     }
 
     // Convert to TradingView format and set markers
-    const tvMarkers = allMarkers.map(m => ({
-      time: m.time as any,
-      position: m.position,
-      color: m.color,
-      shape: m.shape === 'diamond' ? 'square' : m.shape, // TradingView doesn't support diamond
-      text: m.text,
-      size: m.size as any,
-    }));
+    const tvMarkers = allMarkers
+      .map(m => {
+        let t = typeof m.time === 'number' ? m.time : Number(m.time);
+        if (typeof m.time === 'string') {
+          const parsed = new Date(m.time).getTime() / 1000;
+          if (!Number.isNaN(parsed) && parsed > 0) t = parsed;
+        }
+        return {
+          time: t as any,
+          position: m.position,
+          color: m.color,
+          shape: m.shape === 'diamond' ? 'square' : m.shape, // TradingView doesn't support diamond
+          text: m.text,
+          size: m.size as any,
+        };
+      })
+      .filter(m => typeof m.time === 'number' && Number.isFinite(m.time) && m.time > 0);
 
     tvMarkers.sort((a, b) => (a.time as number) - (b.time as number));
-    candleSeriesRef.current.setMarkers(tvMarkers);
+
+    try {
+      candleSeriesRef.current.setMarkers(tvMarkers);
+    } catch (err) {
+      console.warn('[ChartScene] setMarkers skipped due to invalid data:', err);
+    }
 
     const currentPosIds = new Set((positions || []).map(p => p.id));
     activePriceLinesRef.current.forEach((lines, id) => {

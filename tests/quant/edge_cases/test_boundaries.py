@@ -196,27 +196,34 @@ class TestInvalidTransitions:
         with pytest.raises(ValueError):
             apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos2))
 
-    def test_double_open_same_id_raises_error(self):
-        """Opening the same position ID twice must raise ValueError.
+    def test_double_open_same_id_is_idempotent(self):
+        """Re-opening the SAME position ID is a replay, not a double-open.
 
-        The system correctly rejects double-opens. This test documents
-        that the guard works for both different and same IDs.
+        A replayed/duplicate PositionOpened of the same id must be a no-op so
+        a log replay never crashes the fold (drift-detection contract). A
+        second open of a DIFFERENT id while a base is open raises.
         """
         pos = _make_position(pos_id="same-id")
         state = EngineState(symbol="NIFTY")
         state = apply_event(state, PositionOpened(symbol="NIFTY", time="t1", position=pos))
+        assert state.position.id == "same-id"
+        assert state.sequence == 1
 
-        # Same position ID — should raise because state.position is not None
+        # Same position ID — idempotent no-op (replay), state unchanged
         pos2 = _make_position(pos_id="same-id")
+        result = apply_event(state, PositionOpened(symbol="NIFTY", time="t2", position=pos2))
+        assert result.position.id == "same-id"
+        assert result.sequence == 1  # no transition consumed
+
+        # Different ID — genuine double-open, must raise
+        pos3 = _make_position(pos_id="other-id")
         with pytest.raises(ValueError, match="Position already open"):
-            apply_event(state, PositionOpened(symbol="NIFTY", time="t2", position=pos2))
+            apply_event(state, PositionOpened(symbol="NIFTY", time="t3", position=pos3))
 
-    def test_close_wrong_id_returns_unchanged(self):
-        """Closing a different position ID should be a no-op (pyramid handling).
-
-        BUG: In apply_event, if event.fill.position._id != state.position.id,
-        the state is returned unchanged. But this swallows the close event
-        silently — the PositionClosed event is never applied.
+    def test_close_wrong_id_raises(self):
+        """Closing a position whose ID matches neither the base nor a pyramid
+        is a real invariant violation (event-production bug or reordering).
+        It must raise instead of silently leaving the position open forever.
         """
         pos1 = _make_position(pos_id="base")
         pos2 = _make_position(pos_id="other")
@@ -225,11 +232,10 @@ class TestInvalidTransitions:
         state = EngineState(symbol="NIFTY")
         state = apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos1))
 
-        # Close with a different position ID — BUG: silently ignored
+        # Close with a different position ID — must raise, not silently ignore
         event = PositionClosed(symbol="NIFTY", time="t2", fill=fill2)
-        result = apply_event(state, event)
-        # BUG: Position is still open despite PositionClosed event
-        assert result.position is not None, "BUG: Close with wrong ID silently ignored"
+        with pytest.raises(ValueError, match="does not match open position"):
+            apply_event(state, event)
 
     def test_close_after_close_raises_or_noop(self):
         """Closing an already-closed position — must be idempotent or error."""
@@ -256,15 +262,11 @@ class TestBoundaryValues:
     """Attack: float('inf'), float('nan'), -1, 0, sys.maxsize."""
 
     def test_apply_event_with_zero_size_position(self):
-        """Position with zero size should be rejected.
-
-        BUG: No validation on size — zero-size position opens silently.
-        """
+        """Position with zero size must be rejected (division-by-zero risk)."""
         pos = _make_position(size=0.0)
         state = EngineState(symbol="NIFTY")
-        result = apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos))
-        # BUG: Zero-size position is allowed — division by zero risk later
-        assert result.position is not None, "BUG: Zero-size position opens"
+        with pytest.raises(ValueError, match="size"):
+            apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos))
 
     def test_apply_event_with_negative_size(self):
         """Position with negative size when long — should this be valid?
@@ -280,26 +282,20 @@ class TestBoundaryValues:
         assert result.position.side == "SHORT"  # Derived from size, not signal
 
     def test_apply_event_with_inf_entry_price(self):
-        """Position with float('inf') entry price.
-
-        BUG: No validation on price values — inf propagates silently.
-        """
+        """Position with float('inf') entry price must be rejected."""
         pos = _make_position(entry=float("inf"))
         state = EngineState(symbol="NIFTY")
-        result = apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos))
-        # BUG: inf entry price accepted
-        assert math.isinf(result.position.entry), "BUG: inf entry price accepted"
+        with pytest.raises(ValueError, match="inf"):
+            apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos))
 
     def test_apply_event_with_nan_entry_price(self):
-        """Position with float('nan') entry price.
-
-        BUG: NaN comparisons always return False, so SL/TP checks break.
+        """Position with float('nan') entry price must be rejected — NaN
+        comparisons always return False, so SL/TP checks would break.
         """
         pos = _make_position(entry=float("nan"))
         state = EngineState(symbol="NIFTY")
-        result = apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos))
-        # BUG: NaN entry price accepted — NaN != NaN so comparisons fail
-        assert math.isnan(result.position.entry), "BUG: NaN entry price accepted"
+        with pytest.raises(ValueError, match="NaN"):
+            apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos))
 
     def test_apply_event_with_maxsize_values(self):
         """Position with sys.maxsize values.
@@ -325,15 +321,13 @@ class TestBoundaryValues:
         assert result.last_bar.close == 0.0, "BUG: Zero-price bar accepted"
 
     def test_apply_event_with_negative_price(self):
-        """Bar with negative prices — logically impossible for equities.
-
-        BUG: Negative prices silently accepted.
+        """Bar with negative prices — logically impossible for the traded
+        instruments; must be rejected.
         """
         bar = _make_bar(close=-100.0, high=-90.0, low=-110.0, open=-95.0)
         state = EngineState(symbol="NIFTY")
-        result = apply_event(state, BarClosed(symbol="NIFTY", time="t", bar=bar))
-        # BUG: Negative price bar accepted
-        assert result.last_bar.close == -100.0, "BUG: Negative price bar accepted"
+        with pytest.raises(ValueError, match="price"):
+            apply_event(state, BarClosed(symbol="NIFTY", time="t", bar=bar))
 
 
 # =============================================================================
@@ -369,14 +363,11 @@ class TestTypeConfusion:
         assert result is state, "BUG: Base Event silently ignored"
 
     def test_event_store_append_non_event(self):
-        """Appending a non-Event to EventStore should raise TypeError.
-
-        BUG: No type validation on append — non-events accepted.
-        """
+        """Appending a non-Event to EventStore must raise TypeError."""
         store = EventStore()
-        # BUG: No type check on append — non-Event objects accepted
-        seq = store.append({"symbol": "NIFTY", "time": "t"})  # type: ignore
-        assert seq == 1, "BUG: Dict appended as event"
+        with pytest.raises(TypeError):
+            store.append({"symbol": "NIFTY", "time": "t"})  # type: ignore
+        assert len(store) == 0, "Rejected append must not mutate the store"
 
     def test_apply_event_position_opened_with_position_state(self):
         """PositionOpened with a PositionState instead of Position.
@@ -535,18 +526,15 @@ class TestTimeTravel:
         assert state.last_bar.close == 90.0, "BUG: Out-of-order events applied as-is"
 
     def test_fold_events_with_future_timestamp(self):
-        """Events with future timestamps.
-
-        BUG: No validation on time — future dates accepted silently.
+        """Events with future timestamps are rejected at append (clock-skew
+        guard — logic comparing to "now" would break otherwise).
         """
         store = EventStore()
         future_time = "2099-12-31T23:59:59+05:30"
         bar = _make_bar(time=future_time)
-        store.append(BarClosed(symbol="NIFTY", time=future_time, bar=bar))
-
-        state = store.fold()
-        # BUG: Future timestamp accepted — logic comparing to "now" breaks
-        assert state.last_bar.time == future_time
+        with pytest.raises(ValueError, match="future"):
+            store.append(BarClosed(symbol="NIFTY", time=future_time, bar=bar))
+        assert len(store) == 0
 
     def test_fold_events_with_epoch_zero(self):
         """Events with Unix epoch 0 timestamp.
@@ -963,11 +951,8 @@ class TestPositionManagerEdgeCases:
             pm.manage_exit({}, None, pos, 0, 0, 0.0)  # type: ignore
 
     def test_execute_full_close_with_none_position_id(self):
-        """_execute_full_close with a position that has no _id crashes.
-
-        BUG: _execute_full_close does `pos_id = getattr(position, '_id', None) or getattr(position, 'id', None)`.
-        If position has no _id and no id attribute, pos_id is None, and `if pos_id and pos_id in self._closed_ids`
-        skips the guard. Then `self._closed_ids.add(None)` is called, adding None to the set.
+        """_execute_full_close with a position that has no _id raises ValueError
+        instead of silently adding None to _closed_ids.
         """
         from quant.execution.exits import ExitDecision
         from quant.position_manager import PositionManager
@@ -990,15 +975,13 @@ class TestPositionManagerEdgeCases:
         pos.pyramid_level = 0
 
         exit_dec = ExitDecision(True, "SL", 95.0)
-        # Should handle gracefully but will crash on self._closed_ids.add(None)
-        with pytest.raises((AttributeError, TypeError)):
+        with pytest.raises(ValueError, match="without an id"):
             pm._execute_full_close(pos, exit_dec, "t")
+        assert None not in pm._closed_ids, "None must never enter _closed_ids"
 
-    def test_execute_full_close_with_none_position_id_does_not_raise(self):
-        """Verify the _closed_ids.add(None) bug — it silently succeeds.
-
-        BUG: _execute_full_close doesn't crash, it just adds None to _closed_ids.
-        This test documents the silent failure mode.
+    def test_execute_full_close_with_none_position_id_refuses(self):
+        """_execute_full_close refuses a position without an id — a close that
+        cannot be guarded or reconciled must not proceed as a phantom.
         """
         from quant.execution.exits import ExitDecision
         from quant.position_manager import PositionManager
@@ -1017,10 +1000,10 @@ class TestPositionManagerEdgeCases:
         pos = MagicMock(spec=[])  # Empty spec — no attributes at all
         exit_dec = ExitDecision(True, "SL", 95.0)
 
-        # BUG: This does NOT raise — it silently adds None to _closed_ids
-        result = pm._execute_full_close(pos, exit_dec, "t")
-        # The position was never actually closed (OMS not called)
-        assert None in pm._closed_ids, "BUG: None was added to _closed_ids"
+        with pytest.raises(ValueError, match="without an id"):
+            pm._execute_full_close(pos, exit_dec, "t")
+        assert None not in pm._closed_ids
+        pm._oms.close.assert_not_called()
 
 
 class TestEventStoreExportImportBugs:
@@ -1046,10 +1029,17 @@ class TestEventStoreExportImportBugs:
         new_store = EventStore()
         new_store.import_(exported)
 
-        # Verify the PositionClosed fill.position.order is None
+        # FIXED (architectural review): the round-trip preserves the fill's
+        # order/signal — previously _dict_to_event rebuilt the closed position
+        # with order=None, silently dropping entry/sl/tp.
         closed_event = new_store.get_all()[1]
-        # BUG: order is None after roundtrip — signal data lost
-        assert closed_event.fill.position.order is None, "BUG: order=None after import"
+        assert closed_event.fill.position.order is not None, (
+            "order must survive the round-trip (signal data was being lost)"
+        )
+        sig = closed_event.fill.position.order.signal
+        assert sig.entry == 100.0
+        assert sig.sl == 95.0
+        assert sig.tp == 110.0
 
     def test_import_preserves_all_event_types(self):
         """Import should fail for unknown event types instead of silent base Event.
@@ -1090,9 +1080,8 @@ class TestApplyEventMissingFieldBugs:
         assert result.last_bar is None, "BUG: None bar stored in state"
 
     def test_apply_event_position_closed_with_missing_fill_position_id(self):
-        """apply_event PositionClosed where fill.position._id missing crashes.
-
-        BUG: apply_event accesses event.fill.position._id without checking.
+        """PositionClosed whose fill.position carries no id must raise
+        ValueError (malformed event) instead of crashing with AttributeError.
         """
         pos = _make_position()
         fill = _make_fill(pos)
@@ -1103,7 +1092,7 @@ class TestApplyEventMissingFieldBugs:
         state = EngineState(symbol="NIFTY", position=PositionState(
             id="p1", entry=100.0, size=1.0, sl=95.0, tp=110.0, side="LONG"
         ))
-        with pytest.raises(AttributeError):
+        with pytest.raises(ValueError, match="no id"):
             apply_event(state, event)
 
 
@@ -1111,24 +1100,20 @@ class TestApplyEventEdgeCases:
     """Attack: apply_event with malformed events."""
 
     def test_apply_event_position_opened_with_none_order(self):
-        """PositionOpened where position.order is None crashes.
-
-        BUG: _position_to_state accesses pos.order.signal which raises AttributeError
-        if pos.order is None.
+        """PositionOpened where position.order is None raises ValueError
+        (malformed event) instead of crashing with AttributeError.
         """
         pos = _make_position()
         # Set order to None via mock
         object.__setattr__(pos, 'order', None)  # Bypass frozen
         event = PositionOpened(symbol="NIFTY", time="t", position=pos)
         state = EngineState(symbol="NIFTY")
-        with pytest.raises(AttributeError):
+        with pytest.raises(ValueError, match="order with a signal"):
             apply_event(state, event)
 
     def test_apply_event_position_closed_with_none_fill_position(self):
-        """PositionClosed where fill.position is None crashes.
-
-        BUG: apply_event accesses event.fill.position._id which raises
-        AttributeError if fill.position is None.
+        """PositionClosed where fill.position is None must raise ValueError
+        (malformed event) instead of crashing with AttributeError.
         """
         pos = _make_position()
         fill = _make_fill(pos)
@@ -1138,7 +1123,7 @@ class TestApplyEventEdgeCases:
         state = EngineState(symbol="NIFTY", position=PositionState(
             id="p1", entry=100.0, size=1.0, sl=95.0, tp=110.0, side="LONG"
         ))
-        with pytest.raises(AttributeError):
+        with pytest.raises(ValueError, match="fill.position"):
             apply_event(state, event)
 
     def test_apply_event_bar_closed_with_none_bar(self):
@@ -1194,18 +1179,14 @@ class TestPositionToStateEdgeCases:
     """Attack: _position_to_state with invalid Position objects."""
 
     def test_position_to_state_with_none_position(self):
-        """_position_to_state(None) crashes.
-
-        BUG: No None check.
-        """
+        """_position_to_state(None) raises ValueError (malformed payload)."""
         from quant.transitions import _position_to_state
-        with pytest.raises(AttributeError):
+        with pytest.raises(ValueError, match="requires a position"):
             _position_to_state(None)
 
     def test_position_to_state_with_position_missing_signal(self):
-        """_position_to_state with position.order.signal=None crashes.
-
-        BUG: Accesses sig.entry without checking sig is None.
+        """_position_to_state with position.order.signal=None raises ValueError
+        (malformed payload) instead of crashing with AttributeError.
         """
         from quant.transitions import _position_to_state
         pos = MagicMock()
@@ -1214,7 +1195,7 @@ class TestPositionToStateEdgeCases:
         pos.size = 1.0
         pos.pyramid_level = 0
         pos.is_pyramid = False
-        with pytest.raises(AttributeError):
+        with pytest.raises(ValueError, match="order with a signal"):
             _position_to_state(pos)
 
 
@@ -1283,11 +1264,10 @@ class TestApplyEventSequenceNotIncremented:
         result = apply_event(state, event)
         assert result.sequence == 1
 
-    def test_apply_event_position_closed_wrong_id_doesnt_increment(self):
-        """PositionClosed with wrong ID returns state unchanged — but sequence?
-
-        BUG: If the close is a no-op (wrong ID), the sequence is NOT incremented.
-        But the event WAS applied (as a no-op). The sequence should increment.
+    def test_apply_event_position_closed_wrong_id_raises(self):
+        """PositionClosed with an ID matching neither the base nor a pyramid
+        raises — an event-production bug or reordering must not be silently
+        swallowed.
         """
         pos1 = _make_position(pos_id="base")
         pos2 = _make_position(pos_id="other")
@@ -1297,11 +1277,10 @@ class TestApplyEventSequenceNotIncremented:
         state = apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos1))
         assert state.sequence == 1
 
-        # Close with wrong ID — no-op but sequence should still increment?
+        # Close with wrong ID — must raise, not silently no-op
         event = PositionClosed(symbol="NIFTY", time="t2", fill=fill2)
-        result = apply_event(state, event)
-        # BUG: Sequence stays at 1 — inconsistent with other events
-        assert result.sequence == 1, "BUG: Sequence not incremented for no-op close"
+        with pytest.raises(ValueError, match="does not match open position"):
+            apply_event(state, event)
 
     def test_apply_event_unknown_event_doesnt_increment(self):
         """Unknown event types (base Event) don't increment sequence.
@@ -1423,23 +1402,23 @@ class TestEventStoreImportMalformedData:
         assert event.bar.low == 0.0
 
     def test_import_risk_updated_missing_fields(self):
-        """import_ RiskUpdated with missing risk fields creates defaults.
+        """import_ rejects unsigned RiskUpdated events — a forged risk event
+        (e.g., halted=False to bypass a halt) is indistinguishable from a
+        legacy fixture without checksum authentication, so position AND risk
+        events must be signed.
 
-        BUG: Missing fields become defaults, which may be invalid
-        (e.g., halted=False with halt_reason="")."""
+        FIXED: previously imported with silent defaults (trades_today=0,
+        halted=False) — a halt-bypass vector."""
         store = EventStore()
-        store.import_([{
-            "sequence": 1,
-            "symbol": "NIFTY",
-            "time": "t",
-            "event_type": "RiskUpdated",
-            "payload": {"risk": {}},  # Missing all fields
-        }])
-
-        event = store.get_all()[0]
-        # BUG: Default RiskState with trades_today=0, halted=False
-        assert event.risk.trades_today == 0
-        assert event.risk.halted is False
+        with pytest.raises(ValueError, match="checksum"):
+            store.import_([{
+                "sequence": 1,
+                "symbol": "NIFTY",
+                "time": "t",
+                "event_type": "RiskUpdated",
+                "payload": {"risk": {}},  # Missing all fields
+            }])
+        assert len(store) == 0
 
 
 class TestEventStoreAppendNonEventCrash:
@@ -1500,12 +1479,10 @@ class TestApplyEventSequenceIntegrity:
 class TestPositionClosedEventIdMismatch:
     """Attack: PositionClosed event with mismatched ID."""
 
-    def test_close_wrong_id_leaves_position_open(self):
-        """PositionClosed with wrong ID leaves position open.
-
-        BUG: The event is silently ignored, position remains open.
-        This is by design (pyramid closes have different IDs), but
-        there's no logging or warning.
+    def test_close_wrong_id_raises_position_stays_open(self):
+        """A close whose ID matches neither the base nor any OPEN pyramid is an
+        invariant violation — it raises rather than leaving the position open
+        forever without any signal.
         """
         pos1 = _make_position(pos_id="base-pos")
         pos2 = _make_position(pos_id="pyramid-pos")
@@ -1515,11 +1492,29 @@ class TestPositionClosedEventIdMismatch:
         state = apply_event(state, PositionOpened(symbol="NIFTY", time="t1", position=pos1))
         assert state.position is not None
 
-        # Close pyramid ID — BUG: silently ignored
-        state = apply_event(state, PositionClosed(symbol="NIFTY", time="t2", fill=fill2))
-        # Position is still open
-        assert state.position is not None, "BUG: Pyramid close ignored, base still open"
-        assert state.position.id == "base-pos"
+        # Close pyramid ID that was never opened — must raise
+        event = PositionClosed(symbol="NIFTY", time="t2", fill=fill2)
+        with pytest.raises(ValueError, match="does not match open position"):
+            apply_event(state, event)
+
+        # A REAL pyramid open then close still works (id matches state.pyramids)
+        pyramid_state = _make_position(pos_id="pyramid-pos")
+        pyramid_state = Position(
+            order=pyramid_state.order,
+            open_price=pyramid_state.open_price,
+            open_time=pyramid_state.open_time,
+            size=pyramid_state.size,
+            pyramid_level=1,
+            is_pyramid=True,
+            _id="pyramid-pos",
+        )
+        state2 = apply_event(
+            state, PositionOpened(symbol="NIFTY", time="t1b", position=pyramid_state)
+        )
+        assert len(state2.pyramids) == 1
+        state3 = apply_event(state2, event)
+        assert len(state3.pyramids) == 0
+        assert state3.position.id == "base-pos"
 
 
 class TestFoldDoesNotValidateEventFields:
@@ -1549,17 +1544,15 @@ class TestFoldDoesNotValidateEventFields:
         assert state.last_bar.low == 110.0
         assert state.last_bar.high < state.last_bar.low, "BUG: high < low accepted"
 
-    def test_fold_applies_bar_with_future_timestamp(self):
-        """fold() accepts bars with future timestamps.
-
-        BUG: No validation on bar.time — future timestamps accepted.
-        """
+    def test_fold_rejects_bar_with_future_timestamp(self):
+        """append() rejects bars with future timestamps (clock-skew guard)."""
         store = EventStore()
         future_bar = Bar(time="2099-12-31T23:59:59+05:30", close=100.0)
-        store.append(BarClosed(symbol="NIFTY", time="2099-12-31T23:59:59+05:30", bar=future_bar))
-
-        state = store.fold()
-        assert state.last_bar.time == "2099-12-31T23:59:59+05:30"
+        with pytest.raises(ValueError, match="future"):
+            store.append(BarClosed(
+                symbol="NIFTY", time="2099-12-31T23:59:59+05:30", bar=future_bar,
+            ))
+        assert len(store) == 0
 
 
 class TestInputValidationBugs:

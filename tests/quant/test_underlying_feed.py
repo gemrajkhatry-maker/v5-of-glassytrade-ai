@@ -13,6 +13,11 @@ from tests.helpers.synthetic import SyntheticGateway
 import quant.runtime as rt
 
 
+def _module_has_no_global_underlying_warned_flag() -> bool:
+    """No module-global warning flag: warning state is per-engine."""
+    return not hasattr(rt, "_UNDERLYING_WARNED")
+
+
 def test_derive_underlying_symbol_parses_option():
     eng = QuantEngine(SyntheticGateway([]), "CRUDEOIL 17 AUG 7450 CALL",
                       interval_seconds=1, market="MCX")
@@ -68,13 +73,18 @@ def test_underlying_feed_option_quotes_still_fire():
     assert eng._last_depth is not None, "option depth must still be captured"
 
 
-def test_no_underlying_feed_warns_once_and_falls_back():
-    """Option contract with no underlying gateway: one warning, AMT still runs
-    on the option premium (fallback)."""
-    rt._UNDERLYING_WARNED = False
+def test_no_underlying_feed_warns_once_per_engine_and_falls_back():
+    """Option contract with no underlying gateway: one per-engine warning, AMT
+    still runs on the option premium (fallback). No module-global flag."""
+    assert _module_has_no_global_underlying_warned_flag()
     option = SyntheticGateway(_quiet_option_ticks())
     eng = QuantEngine(option, "NIFTY 11 AUG 24600 CALL",
                       interval_seconds=1, market="NSE")
     trace = eng.run()
     assert any(isinstance(e, BarClosed) for e in trace), "fallback must still produce bars"
-    assert rt._UNDERLYING_WARNED is True, "startup warning must be emitted once"
+    # The warning state is per-engine: the engine that ran the fallback has
+    # set its own flag; a second engine must start unwarned.
+    assert eng._underlying_warned is True, "startup warning must be emitted once per engine"
+    eng2 = QuantEngine(SyntheticGateway(_quiet_option_ticks()), "NIFTY 11 AUG 24700 CALL",
+                       interval_seconds=1, market="NSE")
+    assert eng2._underlying_warned is False, "warning flag must not leak across engines"

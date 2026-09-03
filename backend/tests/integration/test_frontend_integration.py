@@ -142,7 +142,6 @@ class TestDTOContract:
         amt.lvns = [98, 102]
         amt.hvns = [100]
         amt.aggression = 0.5
-        amt.signal = None
         amt.setup = None
         amt.profile = []
         amt.aggressive_prints = []

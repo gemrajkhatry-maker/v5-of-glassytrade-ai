@@ -171,10 +171,10 @@ class AMTResult:
     lvns: tuple[float, ...] = ()
     hvns: tuple[float, ...] = ()
     aggression: float = 0.0
-    # DEPRECATED: signals now generated exclusively by SignalPipeline.
-    # This field is kept for backward compatibility but will always be None.
-    # Signal creation goes through app.domain.fabio_ai.services.entry_gates.signal_builder.
-    signal: "Signal | None" = None
+    # NOTE: AMTResult carries no ``signal`` field — entry signals are the
+    # exclusive output of the decision pipeline (quant.decision.*), never of
+    # the analysis layer. The WS DTO still emits a ``signal: None`` key for
+    # the legacy frontend contract; nothing reads it.
     setup: str | None = None
     profile: tuple[VolumeProfileLevel, ...] = ()
     aggressive_prints: tuple[AggressivePrint, ...] = ()
@@ -400,6 +400,3 @@ class AIAnalysisResult:
     reasoning: tuple[str, ...] = ()
     factor_breakdown: FactorBreakdown = field(default_factory=FactorBreakdown)
 
-
-# Avoid circular imports — Signal is defined in entities.py
-# The forward reference in AMTResult is resolved at runtime.

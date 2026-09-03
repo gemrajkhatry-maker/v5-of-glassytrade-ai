@@ -151,14 +151,23 @@ class DecisionContextBuilder:
 
     def _build_setup_evidence(self, amt_dto: dict, agent_direction: str | None,
                               nearest_leg_lvn: float) -> object | None:
-        """Construct SetupEvidence from AMT state."""
+        """Construct SetupEvidence from AMT state.
+
+        Evidence is derived EXCLUSIVELY from live DTO keys (triple-a phase /
+        acceptance, drive flags, rejection flags, absorption side, leg LVNs).
+        It is NOT derived from the analyzer's ``setup`` regime key
+        (``TREND_MODEL``/``MEAN_REVERSION``/``RESPONSIVE_FADE``) — that is a
+        market-regime taxonomy, not a playbook detection, and the legacy
+        ``setupType``/``setupDirection``/``cvdAgrees`` DTO reads removed here
+        had no producer (architectural review finding 5): a dead ``setupType``
+        read made the VA_FADE/LVN_SNIPER fall-through arms and the direction
+        fallback silently depend on a key that never arrived.
+        """
         from quant.decision.setup_state import SetupEvidence
-        setup_type = str(amt_dto.get("setupType") or "").upper()
-        setup_dir = str(amt_dto.get("setupDirection") or agent_direction or "").upper()
+        setup_dir = str(agent_direction or "").upper()
         cvd_val = float(amt_dto.get("cvdSlope") or 0.0)
         cvd_agrees = bool(
-            amt_dto.get("cvdAgrees")
-            or (setup_dir == "LONG" and cvd_val >= -0.2)
+            (setup_dir == "LONG" and cvd_val >= -0.2)
             or (setup_dir == "SHORT" and cvd_val <= 0.2)
         )
         rejection_at_high = bool(amt_dto.get("rejectionAtHigh"))
@@ -191,22 +200,20 @@ class DecisionContextBuilder:
                 rejection=rejection_at_high or rejection_at_low or bool(amt_dto.get("rejection")),
                 cvd_agrees=cvd_agrees,
             )
-        if rejection_at_high or rejection_at_low or setup_type == "VA_FADE":
-            direction = "SHORT" if rejection_at_high else ("LONG" if rejection_at_low else (setup_dir or "LONG"))
+        if rejection_at_high or rejection_at_low:
+            direction = "SHORT" if rejection_at_high else "LONG"
             return SetupEvidence(
                 setup_type="VA_FADE", direction=direction,
                 rejection=rejection_at_high or rejection_at_low or bool(amt_dto.get("rejection")),
                 acceptance=bool(amt_dto.get("acceptanceAbove") or amt_dto.get("acceptanceBelow") or amt_dto.get("acceptance", False)),
                 cvd_agrees=cvd_agrees,
             )
-        if nearest_leg_lvn > 0 and (amt_dto.get("absorptionSide") in ("SELL_ABSORBED", "BUY_ABSORBED") or setup_type == "LVN_SNIPER"):
-            direction = "LONG" if amt_dto.get("absorptionSide") == "SELL_ABSORBED" else ("SHORT" if amt_dto.get("absorptionSide") == "BUY_ABSORBED" else (setup_dir or "LONG"))
+        if nearest_leg_lvn > 0 and amt_dto.get("absorptionSide") in ("SELL_ABSORBED", "BUY_ABSORBED"):
+            direction = "LONG" if amt_dto.get("absorptionSide") == "SELL_ABSORBED" else "SHORT"
             return SetupEvidence(
                 setup_type="LVN_SNIPER", direction=direction,
                 level=nearest_leg_lvn, absorption=True, cvd_agrees=cvd_agrees,
             )
-        if setup_type and setup_type != "NONE":
-            return SetupEvidence(setup_type=setup_type, direction=setup_dir, cvd_agrees=cvd_agrees)
         return None
 
     def _extract_position(self, position, close_px: float, bar_index: int,

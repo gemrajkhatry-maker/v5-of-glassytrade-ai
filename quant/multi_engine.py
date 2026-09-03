@@ -12,6 +12,7 @@ import logging
 import re
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from quant.execution.live_oms import LiveOMS
 from quant.execution.oms import PaperOMS
 from quant.runtime import QuantEngine
 from quant.session_levels import SessionLevelStore
+from quant.state import project_state
 from quant.ws_adapter import view_state_to_ws
 
 logger = logging.getLogger(__name__)
@@ -199,6 +201,47 @@ _DEFAULT_CONFIG = {
 }
 
 
+def _engine_has_open_position(engine) -> bool:
+    """Real position truth for rotation/migration/switch guards.
+
+    QuantEngine never defined an ``engine._position`` attribute — the legacy
+    guards used ``getattr(engine, "_position", None)``, which is ALWAYS None
+    on a real engine, so dead/drifted contracts could be rotated or migrated
+    away WHILE holding a live position. The stopped engine's book was then
+    abandoned at the broker with no manager, and because the engine left the
+    coordinator's map, even the EOD square-off backstop could no longer see
+    it — an overnight orphan (architectural review, phase-5 hardening).
+
+    The authoritative position lives in the folded EngineState
+    (``state.position`` — what the run-loop gates on) plus the PositionManager
+    book (pyramid add-ons), which is the execution truth.
+    """
+    if engine is None:
+        return False
+    state = getattr(engine, "state", None)
+    if state is not None:
+        # A real QuantEngine ALWAYS carries a folded EngineState; when it says
+        # flat (position and pyramids empty) the engine IS flat — trust it
+        # (also keeps MagicMock engines from auto-answering "positioned").
+        if getattr(state, "position", None) is not None:
+            return True
+        if getattr(state, "pyramids", ()):
+            return True
+        return False
+    # Stub without a state attribute: consult the execution book directly.
+    pm_factory = getattr(engine, "_get_position_manager", None)
+    if callable(pm_factory):
+        try:
+            pm = engine._get_position_manager()
+        except Exception:
+            return False
+        if getattr(pm, "current_position", None) is not None:
+            return True
+        if getattr(pm, "pyramid_positions", None):
+            return True
+    return False
+
+
 def _signed_broker_qty(bp) -> float:
     """Normalize a broker position to a signed quantity (C6).
 
@@ -317,6 +360,23 @@ class QuantCoordinator:
                 self._stop_engines()
                 self._feed.set_symbols([])
                 return []
+            # Abandon-guard: stopping every engine while any holds an open
+            # position would orphan that book at the broker (unmanaged, and
+            # invisible to the EOD backstop once removed from the map). Refuse
+            # the rescan — the intraday exit rules will free the slots.
+            with self._lock:
+                holding = [
+                    sym for sym, eng in self._engines.items()
+                    if _engine_has_open_position(eng)
+                ]
+            if holding:
+                logger.warning(
+                    "QuantCoordinator: rescan refused — %d engine(s) hold open "
+                    "positions: %s (book would be abandoned unmanaged at the "
+                    "broker); retry when flat",
+                    len(holding), holding,
+                )
+                return []
             self._stop_engines()
             symbols = self._scan(force=True)
             self._refresh_gex()
@@ -329,6 +389,18 @@ class QuantCoordinator:
     def switch_symbol(self, old: str, new: str) -> bool:
         with self._lifecycle_lock:
             if old not in self._engines:
+                return False
+            if _engine_has_open_position(self._engines.get(old)):
+                # Abandon-guard: stopping this engine while it holds a
+                # position would leave the book at the broker with no
+                # manager, and the removed engine is invisible to the EOD
+                # square-off backstop. Refuse — retry once flat; the normal
+                # exit rules (SL/TP/session close) will free the slot.
+                logger.warning(
+                    "switch_symbol %s -> %s refused: %s holds an open position "
+                    "(book would be abandoned unmanaged at the broker)",
+                    old, new, old,
+                )
                 return False
             self._stop_engine(old)
             self._feed.subscribe(new)
@@ -356,8 +428,9 @@ class QuantCoordinator:
             if _is_futures_symbol(symbol):
                 continue
             engine = self._engines.get(symbol)
-            if engine is None or engine._position is not None:
-                # Do not migrate during active trade
+            if engine is None or _engine_has_open_position(engine):
+                # Do not migrate during active trade (real position truth —
+                # see _engine_has_open_position)
                 continue
 
             root = _canonical_root(symbol)
@@ -421,7 +494,9 @@ class QuantCoordinator:
                 continue
             with self._lock:
                 engine = self._engines.get(symbol)
-            if engine is None or getattr(engine, "_position", None) is not None:
+            if engine is None or _engine_has_open_position(engine):
+                # Never rotate a contract with an open book (real position
+                # truth — see _engine_has_open_position).
                 continue
 
             market = getattr(engine, "_market", None) or self.config.get("exchange", "NSE")
@@ -518,11 +593,82 @@ class QuantCoordinator:
             self.started = False
 
     def snapshot(self, symbol: str) -> dict:
+        """Compose the WS snapshot for one symbol.
+
+        Single-authority composition (architectural review finding 3):
+
+        - **Positions and risk** come from ``EventStore.fold() →
+          project_state()`` — the documented canonical path the run loop's
+          gates operate on (``engine.state`` is the same fold). A partial
+          (PositionReduced) now folds correctly, so the WS book can never
+          show a size the engine's gates disagree with.
+        - **Per-tick live fields** (ltp/oi/depth/AMT banner/decisions) and
+          **closed-trade history + equity math** come from the projector's
+          event view — values an event-fold cannot know without retaining
+          closed-trade history. StateProjector is reduced to a live cache;
+          it is never a position authority.
+        """
         with self._lock:
             engine = self._engines.get(symbol)
         if engine is None:
             return {"_symbol": symbol}
-        return view_state_to_ws(engine.projector.snapshot(symbol))
+        vs = project_state(engine.event_store.fold())
+        live = engine.projector.snapshot(symbol)
+        # Closed trades + balance/leverage from the projector's event view;
+        # positions OVERRIDDEN from the fold (single position authority).
+        portfolio = engine.projector._portfolio(live.portfolio, ltp=live.ltp)
+        fold_positions = list((vs.portfolio or {}).get("positions", []))
+        if live.ltp is not None and live.ltp > 0:
+            patched = []
+            for p in fold_positions:
+                p = dict(p)
+                if p.get("status") == "OPEN":
+                    p["pnl"] = round(
+                        (live.ltp - float(p.get("entryPrice", 0.0)))
+                        * float(p.get("size", 0.0)),
+                        2,
+                    )
+                    p["currentPrice"] = float(live.ltp)
+                patched.append(p)
+            fold_positions = patched
+        portfolio = {
+            **portfolio,
+            "positions": fold_positions,
+        }
+        # Recompute equity from the final position list (projector equity
+        # math used its own positions; ours may differ on drift).
+        closed_pnl = sum(
+            float(t.get("pnl", 0.0)) for t in portfolio.get("closedTrades", [])
+        )
+        open_pnl = sum(
+            float(p.get("pnl", 0.0)) for p in portfolio.get("positions", [])
+        )
+        portfolio["equity"] = round(
+            float(portfolio.get("balance", float(INITIAL_CAPITAL)))
+            + closed_pnl + open_pnl,
+            2,
+        )
+        vs = replace(
+            vs,
+            symbol=symbol,
+            portfolio=portfolio,
+            tick=live.tick if live.tick is not None else vs.tick,
+            ltp=live.ltp if live.ltp is not None else vs.ltp,
+            oi=live.oi if live.oi is not None else vs.oi,
+            depth=live.depth if live.depth is not None else vs.depth,
+            amt=live.amt if live.amt is not None else vs.amt,
+            quant_decision=(
+                live.quant_decision
+                if live.quant_decision is not None
+                else vs.quant_decision
+            ),
+            agent_decision=(
+                live.agent_decision
+                if live.agent_decision is not None
+                else vs.agent_decision
+            ),
+        )
+        return view_state_to_ws(vs)
 
     def symbols(self) -> list[str]:
         with self._lock:
@@ -740,7 +886,12 @@ class QuantCoordinator:
                         eng.symbol, "; ".join(result.discrepancies),
                     )
             except Exception:
-                logger.debug("periodic_reconcile skipped for %s", eng.symbol)
+                # Reconciliation failures must be visible to ops — a silent
+                # DEBUG log would hide drift detection outages. Log at WARNING
+                # so the watchdog failure surfaces in production logs.
+                logger.warning(
+                    "periodic_reconcile FAILED for %s", eng.symbol, exc_info=True
+                )
 
     def _eod_watchdog_loop(self, poll_sec: float = 30.0) -> None:
         """Background EOD square-off and dynamic symbol rotation watchdog.

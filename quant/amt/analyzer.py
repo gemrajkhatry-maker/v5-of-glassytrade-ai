@@ -31,7 +31,6 @@ from quant.contracts.value_objects import (
 )
 from quant.amt.models.observation import AMTObservation
 from quant.amt.triple_a import TripleAMachine
-from quant.contracts.entities import Signal
 from quant.contracts.constants import (
     LVN_MIN_PERSISTENCE_BARS,
     LVN_REMOVAL_THRESHOLD,
@@ -723,9 +722,6 @@ class AMTAnalyzer:
         # NPOC targets
         npoc_above, npoc_below = _compute_noc(npoc_tracker, underlying, current, tick_size)
 
-        # Signal Generation — DEPRECATED (backward compat)
-        signal = None
-
         # Dead-volume override
         _effective_market_state = _compute_eff(market_state, recent_data, current, cvd_source=cvd_source)
 
@@ -792,7 +788,7 @@ class AMTAnalyzer:
             current=current, data=data, symbol=symbol,
             profile=profile, poc=poc, vah=vah, val=val,
             lvns=lvns, hvns=hvns, aggression_score=aggression_score,
-            signal=signal, _setup=_setup, agg_prints=agg_prints,
+            _setup=_setup, agg_prints=agg_prints,
             effective_profile_shape=effective_profile_shape,
             cvd_state=cvd_state, cvd_div=cvd_div,
             recent_vwap=recent_vwap, session_vwap=session_vwap,
@@ -838,7 +834,7 @@ class AMTAnalyzer:
         )
 
     def _build_result(self, *, current, data, symbol, profile, poc, vah, val,
-                  lvns, hvns, aggression_score, signal, _setup, agg_prints,
+                  lvns, hvns, aggression_score, _setup, agg_prints,
                       effective_profile_shape, cvd_state, cvd_div,
                       recent_vwap, session_vwap, vwap_upper_1, vwap_lower_1,
                       vwap_upper_2, vwap_lower_2, vwap_deviation_sigmas,
@@ -868,7 +864,6 @@ class AMTAnalyzer:
             lvns=tuple(lvns),
             hvns=tuple(hvns),
             aggression=aggression_score,
-            signal=signal,
             setup=_setup.value,
             profile=tuple(profile),
             aggressive_prints=tuple(agg_prints),

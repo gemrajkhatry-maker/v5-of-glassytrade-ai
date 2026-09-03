@@ -1,5 +1,6 @@
 # tests/quant/coordinator/test_strike_migration.py
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 from quant.multi_engine import QuantCoordinator
 from quant.bars import Bar
@@ -20,7 +21,7 @@ def test_coordinator_migrates_drifted_strikes():
     
     # Mock option engine with old strike 24200 (drift = 800 pts > 2.5 * 50 = 125 pts)
     mock_opt_engine = MagicMock()
-    mock_opt_engine._position = None
+    mock_opt_engine.state = SimpleNamespace(position=None, pyramids=())
     
     coord._engines = {
         "NIFTY SEP FUT": mock_fut_engine,
@@ -81,7 +82,7 @@ def test_coordinator_migrates_compact_drifted_strikes():
     )
 
     mock_opt_engine = MagicMock()
-    mock_opt_engine._position = None
+    mock_opt_engine.state = SimpleNamespace(position=None, pyramids=())
 
     coord._engines = {
         "NIFTY SEP FUT": mock_fut_engine,
@@ -94,4 +95,33 @@ def test_coordinator_migrates_compact_drifted_strikes():
 
     assert "NIFTY24AUG24200CE" in drifted
     coord.rescan.assert_called_once()
+
+
+def test_coordinator_skips_drifted_strike_with_open_position():
+    """A drifted strike holding an open position is NEVER migrated/rescanned
+    (the real position authority — the folded EngineState)."""
+    coord = QuantCoordinator.__new__(QuantCoordinator)
+    coord._lock = MagicMock()
+    coord._lifecycle_lock = MagicMock()
+
+    mock_fut_engine = MagicMock()
+    mock_fut_engine._aggregator.current_bar = Bar(
+        time="t1", open=25000.0, high=25000.0, low=25000.0, close=25000.0,
+        volume=100, buy_volume=50, sell_volume=50, delta=0, oi=1000, vwap=25000.0,
+    )
+
+    mock_opt_engine = MagicMock()
+    mock_opt_engine.state = SimpleNamespace(position=object())  # open book
+
+    coord._engines = {
+        "NIFTY SEP FUT": mock_fut_engine,
+        "NIFTY 1 SEP 24200 CALL": mock_opt_engine,
+    }
+    coord.market_data = MagicMock()
+    coord.rescan = MagicMock()
+
+    drifted = coord.check_and_migrate_drifted_strikes(max_drift_steps=2.5)
+
+    assert drifted == [], "open book must never be migrated away"
+    coord.rescan.assert_not_called()
 

@@ -48,6 +48,9 @@ def _resolve_model_path(raw: str | None) -> str | None:
         candidate = _REPO_ROOT / raw
         if candidate.exists():
             return str(candidate)
+    # Support HuggingFace model repo IDs (e.g. keXjos/Qwen3.8-9B-mlx-4Bit)
+    if "/" in raw and not raw.startswith("."):
+        return raw
     return None
 
 

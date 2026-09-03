@@ -66,14 +66,15 @@ class LiveOMS:
         broker_pos = self._broker.execute_order(broker_signal, self._portfolio, signal.symbol)
 
         if broker_pos is None:
-            # Broker rejection is a normal trading event, not a system error.
-            # Log as warning and return None so the engine can skip the entry.
-            logger.warning(
-                "LiveOMS.submit: broker rejected signal for %s "
-                "(side=%s, entry=%s, qty=%s) — skipping entry",
-                signal.symbol, signal.type, signal.entry, size,
+            # Broker rejection: raise so the engine's submit-error path unwinds
+            # the portfolio-risk reservation and journals the failure. A silent
+            # None return previously let a phantom zero-size position through
+            # to PositionOpened. The engine catches this and stays alive.
+            raise RuntimeError(
+                f"LiveOMS.submit: broker rejected signal for {signal.symbol} "
+                f"(side={signal.type}, entry={signal.entry}, qty={size}) "
+                f"— broker rejected the order"
             )
-            return None
 
         # Map broker Position → engine Position
         fill_price = float(getattr(broker_pos, "entry_price", 0))
@@ -292,7 +293,19 @@ class LiveOMS:
         Routes through IBroker.execute_order() so the pyramid is a real broker
         order, not a ghost position. The base position's SL must be ratcheted
         to new_sl by the caller (runtime._check_pyramid) after this fills.
+
+        E9: pyramids are DISABLED under LiveOMS until end-to-end
+        submit→fill→linked-close is implemented. Creating an in-memory
+        pyramid Position here would be a ghost — it exists in the engine but
+        the broker has no matching order, so the close path would fail on a
+        position the broker never opened. Callers (PositionManager.
+        check_pyramid) catch this ValueError and skip the add-on.
         """
+        raise ValueError(
+            "E9: pyramids disabled under LiveOMS — submit→fill→linked-close "
+            "not implemented end-to-end; refusing to create a ghost pyramid "
+            "position"
+        )
         size = self._snap_to_lot(abs(size), self._lot_size)
         if size <= 0:
             raise ValueError(f"Pyramid size {size} is too small (< 1 lot)")

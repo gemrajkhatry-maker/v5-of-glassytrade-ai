@@ -437,7 +437,7 @@ class _FixedDecisionService:
     def __init__(self, signal: Signal) -> None:
         self._signal = signal
 
-    def evaluate(self, ctx):
+    def evaluate(self, ctx, *, allow_positioned: bool = False):
         return QuantDecision(True, self._signal, "Triple-A", "AGGRESSION", ())
 
 
@@ -450,8 +450,8 @@ class _FixedStrategy:
     def on_bar(self, bar, auction, amt_dto):
         pass
 
-    def should_enter(self, ctx):
-        return self._service.evaluate(ctx)
+    def should_enter(self, ctx, *, allow_positioned: bool = False):
+        return self._service.evaluate(ctx, allow_positioned=allow_positioned)
 
 def _run_with_signal(signal: Signal, lot_size: int = 1):
     eng = QuantEngine(

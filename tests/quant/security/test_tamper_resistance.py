@@ -173,13 +173,12 @@ class TestChecksumRecalculation:
     """
 
     def test_checksum_forgeable_without_secret(self):
-        """CRITICAL: Checksums use no secret — anyone can forge valid checksums.
+        """CRITICAL: checksums are HMAC-SHA256 keyed by a secret, so an attacker
+        who only knows the hash scheme CANNOT forge a valid chain.
 
-        An attacker can create a completely fake event log with valid checksums
-        by computing SHA-256(prev + event_data). No HMAC, no key, no nonce.
-
-        Expected: verify_chain() should reject forged checksums.
-        Actual: verify_chain() accepts them because it recomputes the same way.
+        The attacker below computes plain SHA-256 (no HMAC, no secret) over
+        the metadata shape they imagine the chain uses. verify_chain()
+        recomputes the real HMAC chain and must reject the forgery.
         """
         store = EventStore()
 
@@ -189,7 +188,7 @@ class TestChecksumRecalculation:
             _make_bar_close(symbol="FAKE", time="fake2"),
         ]
 
-        # Attacker computes valid checksums (no secret needed)
+        # Attacker computes checksums WITHOUT the secret (plain sha256 guess)
         prev = "GENESIS"
         for event in fake_events:
             data = json.dumps(
@@ -200,10 +199,11 @@ class TestChecksumRecalculation:
             store._events.append(event)
             store._checksums.append(prev)
 
-        # SECURE: This should be False — these are forged events
-        # But verify_chain() will return True because the math checks out
-        assert store.verify_chain() is True  # This PASSES — that's the bug
-        # The real assertion: there's no way to distinguish this from legit events
+        # SECURE: the forged chain must be rejected — no secret, no valid chain
+        assert store.verify_chain() is False, (
+            "CRITICAL: forged checksums accepted — the chain is forgeable "
+            "without the HMAC secret"
+        )
 
 
 # =============================================================================
@@ -271,14 +271,11 @@ class TestEventInjection:
             }
         ]
 
-        store.import_(malicious_payload)
-
-        # SECURE: This should be rejected
-        # Actual: Malicious position is imported
-        assert len(store._events) == 1
-        injected = store._events[0]
-        assert isinstance(injected, PositionOpened)
-        assert injected.position.size == 999999.0  # Huge position accepted
+        # SECURE: unsigned position events are indistinguishable from forgeries
+        # — import_ must reject them (checksum-authenticated logs only).
+        with pytest.raises(ValueError, match="checksum"):
+            store.import_(malicious_payload)
+        assert len(store._events) == 0
 
     def test_inject_risk_updated_with_halt_bypass(self):
         """Injecting RiskUpdated to bypass trading halts.
@@ -305,15 +302,10 @@ class TestEventInjection:
             }
         ]
 
-        store.import_(malicious_payload)
-
-        # SECURE: This should be rejected
-        # Actual: Fake risk state injected
-        assert len(store._events) == 1
-        injected = store._events[0]
-        assert isinstance(injected, RiskUpdated)
-        assert injected.risk.halted is False  # Halt bypassed
-        assert injected.risk.daily_pnl == 999999.0  # Fake PnL
+        # SECURE: unsigned risk events cannot be authenticated — reject.
+        with pytest.raises(ValueError, match="checksum"):
+            store.import_(malicious_payload)
+        assert len(store._events) == 0
 
 
 # =============================================================================
@@ -491,13 +483,10 @@ class TestStateMachineGuardBypass:
         store._events.append(malicious_close)
         store._checksums.append("fake")
 
-        # fold() should detect this as invalid
-        state = store.fold()
-
-        # SECURE: The position should still be open (close was invalid)
-        # But this is actually correct behavior — the close is ignored
-        # The bug is that there's no logging/alerting of the invalid close
-        assert state.position is not None  # Position still open
+        # SECURE: a close that matches neither the base nor any open pyramid
+        # is an invariant violation — fold() must raise, not silently ignore.
+        with pytest.raises(ValueError, match="does not match open position"):
+            store.fold()
 
     def test_double_position_open_raises(self):
         """Opening a position when one is already open should raise.

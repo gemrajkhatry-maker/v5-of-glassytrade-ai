@@ -43,9 +43,16 @@ class AmtScalpingStrategy:
         """No per-bar state to update — the strategy is stateless."""
         pass
 
-    def should_enter(self, ctx: DecisionContext) -> QuantDecision:
-        """Evaluate entry using the DecisionService (gates 1-4 + signal builder)."""
-        return self._decision_service.evaluate(ctx)
+    def should_enter(
+        self, ctx: DecisionContext, *, allow_positioned: bool = False
+    ) -> QuantDecision:
+        """Evaluate entry using the DecisionService (gates 1-4 + signal builder).
+
+        ``allow_positioned`` is forwarded to the DecisionService for the
+        thesis-flip exit check (opposing-signal evaluation against an open
+        position) — one seam for entries and exits.
+        """
+        return self._decision_service.evaluate(ctx, allow_positioned=allow_positioned)
 
     @property
     def exit_engine(self) -> ExitEngine:

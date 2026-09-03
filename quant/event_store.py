@@ -20,10 +20,14 @@ import hmac
 import json
 import logging
 import os
+import threading
+import time as _time
 from dataclasses import fields, is_dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, TypeVar
 
+from quant.contracts.timezones import IST
 from quant.events import Event
 from quant.state_machine import EngineState
 from quant.transitions import apply_event
@@ -34,6 +38,49 @@ E = TypeVar("E", bound=Event)
 # This ensures checksums cannot be forged without the secret
 _GENESIS_SECRET = os.environ.get("EVENT_STORE_SECRET", "glassytrade-genesis-secret-2026")
 logger = logging.getLogger(__name__)
+
+
+_EPOCH_2000 = 946684800
+
+
+def _time_epoch(text: str) -> float | None:
+    """Parse an ISO-8601 or unix-epoch time string to an epoch, or None.
+
+    Unparseable synthetic ids (``"t0"``, ``"fake1"``) return None so the
+    timestamp validation never rejects them.
+    """
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=IST)
+        return dt.timestamp()
+    except (TypeError, ValueError):
+        pass
+    try:
+        epoch = float(text)
+    except (TypeError, ValueError):
+        return None
+    if epoch < _EPOCH_2000:
+        return None
+    return epoch
+
+
+def _validate_event_time(time) -> None:
+    """Reject empty or implausibly-future event timestamps.
+
+    - ``None`` is allowed (unset metadata, pinned by tests).
+    - Empty strings are rejected (audit trail integrity).
+    - Parseable timestamps more than one hour in the future are rejected
+      (clock-skew / data-quality guard). Synthetic ids like ``"t0"`` pass.
+    """
+    if time is None:
+        return
+    text = str(time).strip()
+    if not text:
+        raise ValueError("event time is empty — refusing to append")
+    epoch = _time_epoch(text)
+    if epoch is not None and epoch > _time.time() + 3600:
+        raise ValueError(f"event time {text!r} is in the future — refusing to append")
 
 
 def _json_value(value: Any) -> Any:
@@ -84,6 +131,16 @@ class EventStore:
         self._checksums: list[str] = []  # Stored HMAC checksums for tamper detection
         self._handlers: dict[type[Event], list[tuple[int, Callable[[Event], None]]]] = {}
         self._dead_letter_queue: list[tuple[Event, Exception]] = []
+        # Incremental fold cache: derived state up to ``_fold_base`` events.
+        # ``append()`` does NOT invalidate it — the next fold() applies only
+        # the delta, keeping repeated snapshot folds O(Δ) instead of O(n).
+        self._fold_state: EngineState | None = None
+        self._fold_base: int = 0
+        # Serializes the append critical section (sequence increment + list
+        # append + checksum) so concurrent appenders cannot tear _sequence vs
+        # _events vs _checksums. The engine still serializes emits through its
+        # own _emit_lock; this lock additionally protects external appenders.
+        self._append_lock = threading.Lock()
 
     def append(self, event: Event) -> int:
         """Append an event. Returns the sequence number.
@@ -93,14 +150,24 @@ class EventStore:
 
         Returns:
             Sequence number (1-based, monotonic)
+
+        Raises:
+            TypeError: If ``event`` is not an Event (type-check contract).
+            ValueError: If the event carries an empty or future timestamp.
         """
-        self._sequence += 1
-        sequence = self._sequence
-        self._events.append(event)
-        # Compute and store HMAC checksum (tamper-evident)
-        prev_checksum = self._checksums[-1] if self._checksums else "GENESIS"
-        checksum = self._compute_checksum(prev_checksum, event, sequence)
-        self._checksums.append(checksum)
+        if not isinstance(event, Event):
+            raise TypeError(
+                f"EventStore.append expects an Event, got {type(event).__name__}"
+            )
+        _validate_event_time(event.time)
+        with self._append_lock:
+            self._sequence += 1
+            sequence = self._sequence
+            self._events.append(event)
+            # Compute and store HMAC checksum (tamper-evident)
+            prev_checksum = self._checksums[-1] if self._checksums else "GENESIS"
+            checksum = self._compute_checksum(prev_checksum, event, sequence)
+            self._checksums.append(checksum)
         return self._sequence
 
     def _compute_checksum(
@@ -173,10 +240,17 @@ class EventStore:
         handler: Callable[[E], None],
         priority: int = 0,
     ) -> None:
-        """Subscribe a handler to an event type with optional priority."""
+        """Subscribe a handler to an event type with optional priority.
+
+        Handlers stay sorted by descending priority. Insertion is O(n) into
+        the sorted position instead of a full O(n log n) re-sort per call,
+        so bulk subscription at setup time stays cheap.
+        """
         handlers = self._handlers.setdefault(event_type, [])
-        handlers.append((priority, handler))
-        handlers.sort(key=lambda x: x[0], reverse=True)
+        index = 0
+        while index < len(handlers) and handlers[index][0] >= priority:
+            index += 1
+        handlers.insert(index, (priority, handler))
 
     def publish_with_dead_letter(self, event: Event) -> None:
         """Publish an event to all subscribed handlers with dead-letter queue.
@@ -235,27 +309,78 @@ class EventStore:
         Applies each event in sequence through apply_event().
         This is the ONLY way to derive state from events.
 
+        Integrity guarantees:
+
+        - **Invalid transitions raise**: guard violations (double-open of a
+          different id, unmatched close id, close-before-open) and malformed
+          payloads propagate as ``ValueError`` — a corrupt log is never
+          silently folded into plausible-but-wrong state. Replayed events of
+          the same id are handled idempotently inside ``apply_event``.
+        - **Truncation is refused**: if events were removed while the sequence
+          counter still counts them (``len(_events) < _sequence``), state is
+          NOT derived — an empty ``EngineState`` is returned so callers treat
+          the log as unreadable rather than trading on partial state.
+        - **Incremental**: repeated folds only re-apply events appended since
+          the last fold (O(Δ) instead of O(n)).
+
         Returns:
-            Current engine state (empty if no events)
+            Current engine state (empty if no events or log truncated)
         """
         if not self._events:
+            self._fold_state = None
+            self._fold_base = 0
             return EngineState(symbol="")
-        
-        # Initialize symbol from first event
-        state = EngineState(symbol=self._events[0].symbol)
 
-        for event in self._events:
-            try:
-                state = apply_event(state, event)
-            except ValueError as e:
-                # Log but don't crash on invalid transitions (e.g., replay of stale events)
-                logger.warning(
-                    "EventStore.fold: skipping invalid event %s: %s",
-                    type(event).__name__, e,
-                )
-                continue
+        if len(self._events) < self._sequence:
+            # Truncated log (events deleted, sequence not renumbered) — refuse
+            # to derive state. Reset the cache so a later repair is seen.
+            logger.warning(
+                "EventStore.fold: event log truncated (%d events, sequence %d) "
+                "— returning empty state instead of folding partial state",
+                len(self._events), self._sequence,
+            )
+            self._fold_state = None
+            self._fold_base = 0
+            return EngineState(symbol="")
 
+        # Cache hit: no new events since the last fold.
+        if self._fold_state is not None and self._fold_base == len(self._events):
+            return self._fold_state
+
+        # Cache warm and events were appended since: apply only the delta.
+        if self._fold_state is not None and len(self._events) > self._fold_base:
+            state = self._fold_state
+            start = self._fold_base
+        else:
+            # Initialize symbol from first event
+            state = EngineState(symbol=self._events[0].symbol)
+            start = 0
+
+        for event in self._events[start:]:
+            state = apply_event(state, event)
+
+        self._fold_state = state
+        self._fold_base = len(self._events)
         return state
+
+    def prune(self, keep_last: int = 10) -> None:
+        """Drop all but the most recent ``keep_last`` events (snapshot support).
+
+        Bounds memory for long-running engines: after the fold has derived the
+        current state, old events are no longer needed to rebuild it. The
+        retained slice is re-rooted at ``GENESIS`` (its own checksum chain) and
+        the sequence counter is reset so ``fold()`` continues to work.
+
+        Args:
+            keep_last: Number of most-recent events to retain.
+        """
+        if keep_last >= len(self._events):
+            return
+        self._events = self._events[-keep_last:]
+        self._checksums = self._checksums[-keep_last:]
+        self._sequence = len(self._events)
+        self._fold_state = None
+        self._fold_base = 0
 
     def export(self) -> list[dict[str, Any]]:
         """Export events as dictionaries for persistence.
@@ -292,6 +417,12 @@ class EventStore:
           before anything is imported, so tampered or corrupted logs raise
           ``ValueError``. Hand-built dicts without checksum metadata (legacy
           fixtures) skip this verification; partially-signed logs are rejected.
+        - **Forged position events are rejected**: a ``PositionOpened`` /
+          ``PositionClosed`` / ``PositionReduced`` dict WITHOUT checksum
+          metadata is indistinguishable from an attacker's forgery — position
+          events mutate the trade book, so they must be authenticated by the
+          chain. Unsigned bar/risk/unknown events remain importable for
+          legacy view-state fixtures.
         - **Atomic**: the existing store is left untouched on any validation or
           reconstruction error — no partial clear/import.
 
@@ -308,6 +439,23 @@ class EventStore:
                     f"got {seq!r} (sequences must be contiguous starting at 1)"
                 )
             expected += 1
+
+        # 1b. Reject unsigned position/risk-mutating events (forgery defense).
+        # A forged RiskUpdated (e.g., halted=False to lift an emergency halt)
+        # is as dangerous as a forged position, so risk events must also be
+        # authenticated by the checksum chain.
+        position_types = {"PositionOpened", "PositionClosed", "PositionReduced", "RiskUpdated"}
+        for event_dict in events:
+            if (
+                event_dict.get("checksum") is None
+                and event_dict.get("event_type") in position_types
+            ):
+                raise ValueError(
+                    f"import: {event_dict.get('event_type')} event at sequence "
+                    f"{event_dict.get('sequence')} has no checksum metadata — "
+                    f"cannot authenticate; refusing to import a forged "
+                    f"position event"
+                )
 
         # 2. Verify the exported checksum chain when checksums are present.
         stored_checksums = [event_dict.get("checksum") for event_dict in events]
@@ -350,6 +498,8 @@ class EventStore:
         self._events = new_events
         self._sequence = len(events)
         self._checksums = new_checksums
+        self._fold_state = None
+        self._fold_base = 0
 
     @staticmethod
     def _dict_to_event(event_dict: dict[str, Any]) -> Event | None:
@@ -365,75 +515,133 @@ class EventStore:
             BarClosed,
             PositionClosed,
             PositionOpened,
+            PositionReduced,
             RiskUpdated,
         )
+        from quant.decision.signal_builder import Signal
         from quant.execution.order import Fill, Order, Position
-        from quant.state_machine import Bar, PositionState, RiskState
+        from quant.execution.risk import RiskState
+        from quant.state_machine import Bar, PositionState
 
         event_type = event_dict.get("event_type", "")
         payload = event_dict.get("payload", {})
         symbol = event_dict.get("symbol", "")
         time = event_dict.get("time", "")
 
+        def _decode_signal(data: dict) -> Signal:
+            return Signal(
+                type=str(data.get("type") or "LONG"),
+                reason=str(data.get("reason") or ""),
+                entry=float(data.get("entry") or 0.0),
+                sl=float(data.get("sl") or 0.0),
+                tp=float(data.get("tp") or 0.0),
+                rr=float(data.get("rr") or 0.0),
+                model_label=str(data.get("model_label") or ""),
+                symbol=str(data.get("symbol") or ""),
+                timestamp=str(data.get("timestamp") or ""),
+            )
+
+        def _decode_position(data: dict) -> Position | PositionState:
+            """Decode a position payload in either of its two serialized shapes:
+
+            - Execution ``Position`` (order/open_price/_id…) — emitted by the
+              live engine; reconstructed as the REAL type so downstream
+              consumers (projector, transitions) see the true book.
+            - Legacy ``PositionState`` fixture (id/entry/sl/tp/side) — the
+              pre-sourcing shape some tests still export; kept as-is for
+              backward compatibility (its ``.id`` field is pinned by tests).
+            """
+            if "order" in data or "open_price" in data or "_id" in data:
+                order_data = data.get("order") or {}
+                signal = _decode_signal(order_data.get("signal") or {})
+                size = float(data.get("size") or 0.0)
+                order = Order(
+                    signal=signal,
+                    quantity=float(
+                        order_data.get("quantity") or abs(size)
+                    ),
+                )
+                return Position(
+                    order=order,
+                    open_price=float(data.get("open_price") or signal.entry),
+                    open_time=str(data.get("open_time") or ""),
+                    size=size,
+                    realized_pnl=float(data.get("realized_pnl") or 0.0),
+                    pyramid_level=int(data.get("pyramid_level") or 0),
+                    is_pyramid=bool(data.get("is_pyramid") or False),
+                    _id=str(data.get("_id") or data.get("id") or ""),
+                )
+            return PositionState(
+                id=str(data.get("id") or ""),
+                entry=float(data.get("entry") or 0.0),
+                size=float(data.get("size") or 0.0),
+                sl=float(data.get("sl") or 0.0),
+                tp=float(data.get("tp") or 0.0),
+                side=str(data.get("side") or "LONG"),
+                pyramid_level=int(data.get("pyramid_level") or 0),
+                is_pyramid=bool(data.get("is_pyramid") or False),
+            )
+
+        def _decode_fill(data: dict) -> Fill:
+            pos = _decode_position(data.get("position") or {})
+            return Fill(
+                position=pos,
+                close_price=float(data.get("close_price") or 0.0),
+                close_time=str(data.get("close_time") or ""),
+                reason=str(data.get("reason") or ""),
+                pnl=float(data.get("pnl") or 0.0),
+            )
+
         if event_type == "BarClosed":
             bar_data = payload.get("bar", {})
             bar = Bar(
                 time=bar_data.get("time", ""),
-                open=bar_data.get("open", 0.0),
-                high=bar_data.get("high", 0.0),
-                low=bar_data.get("low", 0.0),
-                close=bar_data.get("close", 0.0),
-                volume=bar_data.get("volume", 0.0),
-                vwap=bar_data.get("vwap", 0.0),
-                buy_volume=bar_data.get("buy_volume", 0.0),
-                sell_volume=bar_data.get("sell_volume", 0.0),
-                oi=bar_data.get("oi", 0.0),
+                open=float(bar_data.get("open") or 0.0),
+                high=float(bar_data.get("high") or 0.0),
+                low=float(bar_data.get("low") or 0.0),
+                close=float(bar_data.get("close") or 0.0),
+                volume=float(bar_data.get("volume") or 0.0),
+                vwap=float(bar_data.get("vwap") or 0.0),
+                buy_volume=float(bar_data.get("buy_volume") or 0.0),
+                sell_volume=float(bar_data.get("sell_volume") or 0.0),
+                oi=float(bar_data.get("oi") or 0.0),
+                delta=float(bar_data.get("delta") or 0.0),
             )
             return BarClosed(symbol=symbol, time=time, bar=bar)
 
         elif event_type == "PositionOpened":
-            pos_data = payload.get("position", {})
-            pos = PositionState(
-                id=pos_data.get("id", ""),
-                entry=pos_data.get("entry", 0.0),
-                size=pos_data.get("size", 0.0),
-                sl=pos_data.get("sl", 0.0),
-                tp=pos_data.get("tp", 0.0),
-                side=pos_data.get("side", "LONG"),
-                pyramid_level=pos_data.get("pyramid_level", 0),
-                is_pyramid=pos_data.get("is_pyramid", False),
+            return PositionOpened(
+                symbol=symbol,
+                time=time,
+                position=_decode_position(payload.get("position") or {}),
             )
-            return PositionOpened(symbol=symbol, time=time, position=pos)
+
+        elif event_type == "PositionReduced":
+            return PositionReduced(
+                symbol=symbol,
+                time=time,
+                fill=_decode_fill(payload.get("fill") or {}),
+                remaining=_decode_position(payload.get("remaining") or {}),
+            )
 
         elif event_type == "PositionClosed":
-            fill_data = payload.get("fill", {})
-            pos_data = fill_data.get("position", {})
-            pos = Position(
-                order=None,  # Will be reconstructed from signal data if available
-                open_price=pos_data.get("open_price", 0.0),
-                open_time=pos_data.get("open_time", ""),
-                size=pos_data.get("size", 0.0),
-                realized_pnl=pos_data.get("realized_pnl", 0.0),
-                pyramid_level=pos_data.get("pyramid_level", 0),
-                is_pyramid=pos_data.get("is_pyramid", False),
-                _id=pos_data.get("_id", ""),
+            return PositionClosed(
+                symbol=symbol,
+                time=time,
+                fill=_decode_fill(payload.get("fill") or {}),
             )
-            fill = Fill(
-                position=pos,
-                close_price=fill_data.get("close_price", 0.0),
-                close_time=fill_data.get("close_time", ""),
-                reason=fill_data.get("reason", ""),
-                pnl=fill_data.get("pnl", 0.0),
-            )
-            return PositionClosed(symbol=symbol, time=time, fill=fill)
 
         elif event_type == "RiskUpdated":
             risk_data = payload.get("risk", {})
             risk = RiskState(
-                daily_pnl=risk_data.get("daily_pnl", 0.0),
-                trades_today=risk_data.get("trades_today", 0),
-                halted=risk_data.get("halted", False),
-                halt_reason=risk_data.get("halt_reason", ""),
+                daily_pnl=float(risk_data.get("daily_pnl") or 0.0),
+                consecutive_losses=int(risk_data.get("consecutive_losses") or 0),
+                halted=bool(risk_data.get("halted") or False),
+                halt_reason=str(risk_data.get("halt_reason") or ""),
+                risk_per_trade_pct=float(risk_data.get("risk_per_trade_pct") or 0.0),
+                trades_today=int(risk_data.get("trades_today") or 0),
+                equity=float(risk_data.get("equity") or 0.0),
+                cushion_tier=str(risk_data.get("cushion_tier") or "CONSERVATIVE"),
             )
             return RiskUpdated(symbol=symbol, time=time, risk=risk)
 

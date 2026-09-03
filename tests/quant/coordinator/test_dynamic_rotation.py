@@ -1,6 +1,7 @@
 """Tests for dynamic rotation of dead/drifted option symbols in QuantCoordinator."""
 
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from quant.multi_engine import QuantCoordinator
 from quant.bars import Bar
@@ -24,7 +25,9 @@ def test_rotate_dead_symbols_skips_futures():
 
 
 def test_rotate_dead_symbols_skips_open_positions():
-    """Option contracts with active open positions must NEVER be rotated."""
+    """Option contracts with active open positions must NEVER be rotated.
+    The guard keys off the REAL position authority (folded EngineState), not
+    the phantom ``engine._position`` attribute a real QuantEngine never had."""
     coord = QuantCoordinator.__new__(QuantCoordinator)
     coord._lock = MagicMock()
     coord._lifecycle_lock = MagicMock()
@@ -33,7 +36,7 @@ def test_rotate_dead_symbols_skips_open_positions():
     coord.config = {"exchange": "NSE"}
 
     mock_opt = MagicMock()
-    mock_opt._position = MagicMock()  # Active position!
+    mock_opt.state = SimpleNamespace(position=object())  # Active position!
 
     coord._engines = {"NIFTY 1 SEP 24100 PUT": mock_opt}
 
@@ -62,7 +65,7 @@ def test_rotate_dead_symbols_swaps_drifted_strike(mock_scan, mock_open):
 
     # Option strike at 24100 (drift = 400 pts > 2.5 * 50 = 125 pts)
     mock_opt = MagicMock()
-    mock_opt._position = None
+    mock_opt.state = SimpleNamespace(position=None, pyramids=())
     mock_opt._market = "NSE"
     mock_opt._last_tick_wall = 0.0
 
@@ -113,7 +116,7 @@ def test_rotate_dead_symbols_keeps_healthy_contract(mock_open):
     )
 
     mock_opt = MagicMock()
-    mock_opt._position = None
+    mock_opt.state = SimpleNamespace(position=None, pyramids=())
     mock_opt._market = "NSE"
     import time
     mock_opt._last_tick_wall = time.monotonic()  # fresh tick!

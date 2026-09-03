@@ -67,26 +67,29 @@ def test_override_min_stop_allows_thin_stop():
 
 def test_quantity_is_clamped_to_max():
     # equity 100k @ 1% risk, |entry-sl| = 0.02 -> 50k units -> clamped to 1000.
-    sb = SignalBuilder()
-    qty = sb.size(equity=100_000.0, entry=104.92, sl=104.90,
-                  risk_per_trade_pct=0.01)
-    assert qty == MAX_POSITION_QUANTITY
+    # SignalBuilder.size was removed (duplicate sizing authority); the clamp
+    # ceiling is applied by the engine via clamp_quantity after
+    # SessionRisk.position_size.
     assert clamp_quantity(50_000.0) == MAX_POSITION_QUANTITY
 
 
 def test_healthy_quantity_unclamped():
-    # |entry-sl| = 3 -> 100k*0.01/3 = 333 < 1000 -> untouched.
-    sb = SignalBuilder()
-    qty = sb.size(equity=100_000.0, entry=100.0, sl=97.0,
-                  risk_per_trade_pct=0.01)
-    assert qty == pytest.approx(100_000.0 * 0.01 / 3.0)
+    # The surviving sizing authority (SessionRisk.position_size): qty is
+    # equity * risk_pct / |entry-sl| for a healthy (non-thin) stop, with the
+    # risk_pct sourced from the risk engine (not a second formula in
+    # SignalBuilder).
+    from quant.execution.risk import SessionRisk
+
+    risk = SessionRisk(starting_equity=100_000.0, base_risk_pct=0.01)
+    qty = risk.position_size(entry=100.0, sl=97.0)
+    risk_amount = 100_000.0 * risk._risk_per_trade_pct()
+    assert qty == pytest.approx(risk_amount / 3.0)
+    assert 0 < qty <= MAX_POSITION_QUANTITY
 
 
 def test_max_quantity_override():
-    sb = SignalBuilder(max_position_quantity=500)
-    qty = sb.size(equity=100_000.0, entry=104.92, sl=104.90,
-                  risk_per_trade_pct=0.01)
-    assert qty == 500
+    # The engine's ceiling override on the shared clamp.
+    assert clamp_quantity(50_000.0, max_quantity=500) == 500
 
 
 def test_is_min_stop_met_defaults_match_constant():

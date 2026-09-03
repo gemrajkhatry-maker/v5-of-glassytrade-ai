@@ -1,8 +1,15 @@
 """State derivation — folds the quant event stream into the frontend view-state.
 
-Two paths:
-1. ``project_state(EngineState)`` — the canonical path from ``EventStore.fold()``.
-2. ``StateProjector`` — deprecated, emits ``DeprecationWarning``.
+One position authority, one live cache:
+
+1. ``project_state(EngineState)`` — canonical: derives the book (positions,
+   risk, ltp from the last closed bar) from ``EventStore.fold()``. This is
+   the state the engine's run-loop gates operate on.
+2. ``StateProjector`` — deprecated as a position authority; reduced to a
+   per-tick LIVE cache (ltp/oi/depth/forming candle between bar closes) and
+   a closed-trade/equity view accumulation. ``QuantCoordinator.snapshot()``
+   merges the fold-derived book with the projector's live fields — see
+   quant/multi_engine.py.
 
 The snapshot fields mirror the camelCase keys the WS adapter emits.
 """
@@ -73,10 +80,17 @@ def project_state(state: EngineState) -> ViewState:
 
 
 def _engine_portfolio(state: EngineState) -> dict:
-    """Build the frontend portfolio DTO from a folded EngineState."""
+    """Build the frontend portfolio DTO from a folded EngineState.
+
+    ``equity`` reflects the paper starting capital plus realized P&L
+    accumulated by the fold (PositionClosed events) plus the floating P&L of
+    any open position — parity with the StateProjector's portfolio formula so
+    the fold path and the live cache agree.
+    """
+    realized = float(getattr(state, "realized_pnl", 0.0) or 0.0)
     base = {
         "balance": float(INITIAL_CAPITAL),
-        "equity": float(INITIAL_CAPITAL),
+        "equity": round(float(INITIAL_CAPITAL) + realized, 2),
         "leverage": 10,
         "positions": [],
         "closedTrades": [],
@@ -103,7 +117,11 @@ def _engine_portfolio(state: EngineState) -> dict:
     }
     if ltp is not None:
         position_dto["currentPrice"] = ltp
-    return {**base, "positions": [position_dto]}
+    return {
+        **base,
+        "equity": round(float(INITIAL_CAPITAL) + realized + pnl, 2),
+        "positions": [position_dto],
+    }
 
 
 _EPOCH_2000 = 946684800
@@ -246,10 +264,19 @@ def _position_to_view(position: Any, fill: Any | None = None) -> dict:
 
 
 class StateProjector:
-    """Fold events per symbol into the latest frontend view-state.
+    """Per-symbol live view cache — NOT a position authority.
+
+    Kept for two jobs the event-fold cannot do without retaining closed-trade
+    history: per-tick live quotes/forming candles (``on_quote``) and the
+    closed-trade/equity accumulation (``PositionClosed``/``PositionReduced``
+    handling). ``QuantCoordinator.snapshot()`` composes the canonical book
+    from ``EventStore.fold() → project_state()`` with this cache's live
+    fields, so the projector's ``positions`` view is never the source of
+    truth for the book.
 
     .. deprecated::
-        Use ``EventStore.fold()`` → ``project_state()`` instead.
+        As a position/state authority. Use ``EventStore.fold()`` →
+        ``project_state()`` for the book; keep this only for live fields.
     """
 
     def __init__(self, interval_sec: int = 60) -> None:

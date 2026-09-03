@@ -118,7 +118,11 @@ class TestAMTAnalyzer:
         analyzer = AMTAnalyzer()
         result = analyzer.analyze([_make_candle(100)])
         assert result.market_state == "BALANCED"
-        assert result.signal is None
+        # The analysis result carries no signal field — signals are exclusive
+        # to the decision pipeline. The WS DTO still exposes signal: None.
+        from quant.amt.dto import amt_result_to_dto
+
+        assert amt_result_to_dto(result)["signal"] is None
 
     def test_empty_data(self):
         analyzer = AMTAnalyzer()

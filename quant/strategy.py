@@ -30,12 +30,20 @@ class TradingStrategy(Protocol):
             amt_dto: AMT analysis DTO
         """
         ...
-    def should_enter(self, ctx: "DecisionContext") -> "QuantDecision":
+    def should_enter(self, ctx: "DecisionContext", *, allow_positioned: bool = False) -> "QuantDecision":
         """Evaluate entry conditions and return a decision.
-        
+
+        ``allow_positioned=True`` is the thesis-flip exit evaluation (an
+        opposing-signal check against an OPEN position): it bypasses gate 2's
+        open-position blocker and the risk-halt entry block — a halt gates
+        ENTRIES, never the opposing-signal exit. Entries and positioned flips
+        must flow through the SAME strategy seam so a swapped-in strategy
+        governs both.
+
         Args:
             ctx: The decision context built by DecisionContextBuilder
-            
+            allow_positioned: Evaluate against an open position (thesis flip)
+
         Returns:
             A QuantDecision indicating whether to enter and with what signal
         """

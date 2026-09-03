@@ -441,7 +441,11 @@ class TestExceptionSwallowing:
     """
 
     def test_periodic_reconcile_exception_must_not_be_swallowed(self):
-        """ATTACK: Inject a bug in periodic_reconcile that raises."""
+        """ATTACK: Inject a bug in periodic_reconcile that raises.
+
+        FIXED: multi_engine._periodic_state_reconcile logs the failure at
+        WARNING with the traceback, so ops see reconciliation outages.
+        """
         store, pos = _make_golden_store()
         engine = _make_engine_with_store(store)
         engine.startup_reconcile()
@@ -452,32 +456,38 @@ class TestExceptionSwallowing:
 
         engine.periodic_reconcile = buggy_reconcile
 
-        # EXPECTED: The coordinator's _periodic_state_reconcile should log
-        # at WARNING or higher, not swallow silently at DEBUG.
-        # BUG: The except block logs at DEBUG level — invisible to ops.
         import logging
         import io
+        import threading
 
-        # Capture log output
+        from quant.multi_engine import QuantCoordinator
+
+        # Capture log output on the coordinator's logger at WARNING. The
+        # StreamHandler default formatter emits only the message, so pin a
+        # level-inclusive formatter to make the assertion meaningful.
         log_stream = io.StringIO()
         handler = logging.StreamHandler(log_stream)
-        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+        handler.setLevel(logging.WARNING)
         logger = logging.getLogger("quant.multi_engine")
         logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.WARNING)
 
-        # Simulate the coordinator's pattern
+        # Build a minimal coordinator bound to the buggy engine and run the
+        # REAL _periodic_state_reconcile path (not a simulation of it).
+        coord = QuantCoordinator.__new__(QuantCoordinator)
+        coord._lock = threading.Lock()
+        coord._engines = {"NIFTY": engine}
         try:
-            engine.periodic_reconcile()
-        except Exception:
-            logger.debug("periodic_reconcile skipped for %s", "NIFTY")
+            coord._periodic_state_reconcile()
+        finally:
+            logger.removeHandler(handler)
 
         log_output = log_stream.getvalue()
 
         # EXPECTED: Error should be logged at WARNING or higher
-        # BUG: It's logged at DEBUG — ops won't see it
         assert "WARNING" in log_output or "ERROR" in log_output or "CRITICAL" in log_output, (
-            "MAJOR BUG: Reconciliation exception logged at DEBUG level — "
+            "MAJOR BUG: Reconciliation exception swallowed below WARNING — "
             "ops will never see reconciliation failures. "
             f"Log output: {log_output!r}"
         )

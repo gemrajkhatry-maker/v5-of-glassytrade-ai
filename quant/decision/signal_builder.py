@@ -203,21 +203,9 @@ class SignalBuilder:
 
         return fallback_tp
 
-    def size(
-        self,
-        equity: float,
-        entry: float,
-        sl: float,
-        risk_per_trade_pct: float,
-    ) -> float:
-        """Compute fixed-fractional quantity and clamp to the max ceiling.
-
-        The clamp is applied in the sizing step (never silently in fills):
-        ``equity * risk_pct / |entry - sl|`` may explode on razor-thin stops,
-        so the result is capped at ``max_position_quantity``.
-        """
-        risk = abs(entry - sl)
-        if equity <= 0 or risk <= 0:
-            return 0.0
-        quantity = equity * risk_per_trade_pct / risk
-        return clamp_quantity(quantity, self.max_position_quantity)
+    # NOTE: no ``size`` method here — position sizing lives in
+    # ``quant.execution.risk.SessionRisk.position_size`` (the single sizing
+    # authority); the module-level ``clamp_quantity`` applies the ceiling at
+    # the engine's order-submission step. A second fixed-fractional formula
+    # in this class was removed because it duplicated that authority with a
+    # different clamp and risk source (architectural review finding).

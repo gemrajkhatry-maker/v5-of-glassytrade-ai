@@ -79,6 +79,12 @@ def _inject_long_with_pyramids(eng, auth, pyr_specs):
         r_i = (100.0 - 95.0) * size
         assert auth.register_open(r_i)
         pm._pyramid_open_risk[pyr._id] = r_i
+        # Mirror the live pyramid flow (check_pyramid emits PositionOpened for
+        # the add-on): the engine's fold must see the pyramid so its close
+        # event matches state.pyramids instead of raising a mismatch.
+        from quant.events import PositionOpened
+
+        eng._emit(PositionOpened(symbol="TEST", time=f"t{i}", position=pyr))
     return base, pm
 
 
@@ -172,8 +178,11 @@ def test_thesis_flip_close_books_each_addon_once():
         approved=True, signal=short_sig, gate_results=[], reason="APPROVED",
         phase="", block_reasons=[], model_label="",
     )
-    eng._decision_service = SimpleNamespace(
-        evaluate=lambda ctx, allow_positioned=False: stub_decision,
+    # The flip evaluates through the STRATEGY seam (the same should_enter
+    # entries use — see runtime._check_thesis_flip), so the approving stub
+    # replaces the strategy, not the engine's internal decision service.
+    eng._strategy = SimpleNamespace(
+        should_enter=lambda ctx, allow_positioned=False: stub_decision,
     )
     eng._build_context = lambda bar, amt_dto, cooldown_sec: object()
 

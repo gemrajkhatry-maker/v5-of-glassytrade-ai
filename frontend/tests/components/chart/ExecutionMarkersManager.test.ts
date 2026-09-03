@@ -62,6 +62,17 @@ describe('ExecutionMarkersManager', () => {
       const markers = generateEntryMarkers([]);
       expect(markers).toHaveLength(0);
     });
+
+    it('ignores positions with invalid or missing entryTime without producing NaN', () => {
+      const positions = [
+        { side: 'LONG', entryPrice: 50000, entryTime: '' } as any,
+        { side: 'LONG', entryPrice: 50000, entryTime: undefined } as any,
+        { side: 'LONG', entryPrice: 50000, entryTime: 'invalid-date' } as any,
+        { side: 'LONG', entryPrice: 50000, entryTime: NaN } as any,
+      ];
+      const markers = generateEntryMarkers(positions);
+      expect(markers).toHaveLength(0);
+    });
   });
 
   describe('generateClosedTradeMarkers', () => {

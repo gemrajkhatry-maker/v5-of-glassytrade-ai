@@ -13,6 +13,7 @@ is safe.
 
 from __future__ import annotations
 from quant.contracts.enums import MarketState
+from quant.state import _epoch_to_iso
 
 
 def amt_result_to_dto(r) -> dict:
@@ -168,8 +169,14 @@ def amt_result_to_dto(r) -> dict:
             "signalSource": getattr(r.vars_result, "signal_source", "") if getattr(r, "vars_result", None) else "",
         },
         # HalfTrend indicator — display-only line + Buy/Sell labels.
+        # The bar time is normalized to the same ISO-8601 IST string the WS
+        # candle tick carries (state._bar_to_tick) and the REST /halftrend rows
+        # (fetch_history already ISO). The frontend merges live points into the
+        # REST series by raw timestamp equality — an epoch-string live row never
+        # matched an ISO history row, so the live HalfTrend tail was silently
+        # dropped (and toISTTimestamp(epoch) == 0, so the chart skipped it).
         "halfTrend": {
-            "time": getattr(r.half_trend_result, "time", "") if getattr(r, "half_trend_result", None) else "",
+            "time": _epoch_to_iso(getattr(r.half_trend_result, "time", "")) if getattr(r, "half_trend_result", None) else "",
             "trend": int(getattr(r.half_trend_result, "trend", 0)) if getattr(r, "half_trend_result", None) else 0,
             "ht": float(getattr(r.half_trend_result, "ht", 0.0)) if getattr(r, "half_trend_result", None) else 0.0,
             # ATR channel is null until ATR(period) warms up (~100 bars) —

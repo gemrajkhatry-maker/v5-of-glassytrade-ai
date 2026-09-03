@@ -41,14 +41,20 @@ const IST_OFFSET = IST_OFFSET_SECONDS;
  * @returns Array of entry markers
  */
 export function generateEntryMarkers(positions: TradePosition[]): ChartMarker[] {
-  return positions.map(pos => ({
-    time: Math.floor(new Date(pos.entryTime).getTime() / 1000) + IST_OFFSET,
-    position: pos.side === 'LONG' ? 'belowBar' : 'aboveBar',
-    color: pos.side === 'LONG' ? '#10b981' : '#ef4444',
-    shape: pos.side === 'LONG' ? 'arrowUp' : 'arrowDown',
-    text: `${pos.side} @${pos.entryPrice.toFixed(2)}`,
-    size: 2 as const,
-  }));
+  const markers: ChartMarker[] = [];
+  (positions || []).forEach(pos => {
+    const time = toISTTimestamp(pos.entryTime);
+    if (time <= 0 || !Number.isFinite(time)) return;
+    markers.push({
+      time,
+      position: pos.side === 'LONG' ? 'belowBar' : 'aboveBar',
+      color: pos.side === 'LONG' ? '#10b981' : '#ef4444',
+      shape: pos.side === 'LONG' ? 'arrowUp' : 'arrowDown',
+      text: `${pos.side} @${pos.entryPrice.toFixed(2)}`,
+      size: 2 as const,
+    });
+  });
+  return markers;
 }
 
 /**
@@ -60,30 +66,36 @@ export function generateEntryMarkers(positions: TradePosition[]): ChartMarker[] 
 export function generateClosedTradeMarkers(closedTrades: TradePosition[]): ChartMarker[] {
   const markers: ChartMarker[] = [];
 
-  closedTrades.forEach(trade => {
+  (closedTrades || []).forEach(trade => {
     // Entry marker (smaller size to differentiate from open positions)
-    markers.push({
-      time: Math.floor(new Date(trade.entryTime).getTime() / 1000) + IST_OFFSET,
-      position: trade.side === 'LONG' ? 'belowBar' : 'aboveBar',
-      color: trade.side === 'LONG' ? '#10b981' : '#ef4444',
-      shape: trade.side === 'LONG' ? 'arrowUp' : 'arrowDown',
-      text: `${trade.side} @${trade.entryPrice.toFixed(2)}`,
-      size: 1 as const,
-    });
+    const entryTime = toISTTimestamp(trade.entryTime);
+    if (entryTime > 0 && Number.isFinite(entryTime)) {
+      markers.push({
+        time: entryTime,
+        position: trade.side === 'LONG' ? 'belowBar' : 'aboveBar',
+        color: trade.side === 'LONG' ? '#10b981' : '#ef4444',
+        shape: trade.side === 'LONG' ? 'arrowUp' : 'arrowDown',
+        text: `${trade.side} @${trade.entryPrice.toFixed(2)}`,
+        size: 1 as const,
+      });
+    }
 
     // Exit marker
     if (trade.exitTime && trade.exitPrice) {
-      const reason = trade.closeReason || 'EXIT';
-      const pnlStr = trade.pnl >= 0 ? `+${trade.pnl.toFixed(2)}` : trade.pnl.toFixed(2);
-      
-      markers.push({
-        time: new Date(trade.exitTime).getTime() / 1000 + IST_OFFSET,
-        position: trade.side === 'LONG' ? 'aboveBar' : 'belowBar',
-        color: trade.pnl >= 0 ? '#10b981' : '#ef4444',
-        shape: 'circle',
-        text: `${reason} ${pnlStr}`,
-        size: 1 as const,
-      });
+      const exitTime = toISTTimestamp(trade.exitTime);
+      if (exitTime > 0 && Number.isFinite(exitTime)) {
+        const reason = trade.closeReason || 'EXIT';
+        const pnlStr = trade.pnl >= 0 ? `+${trade.pnl.toFixed(2)}` : trade.pnl.toFixed(2);
+        
+        markers.push({
+          time: exitTime,
+          position: trade.side === 'LONG' ? 'aboveBar' : 'belowBar',
+          color: trade.pnl >= 0 ? '#10b981' : '#ef4444',
+          shape: 'circle',
+          text: `${reason} ${pnlStr}`,
+          size: 1 as const,
+        });
+      }
     }
   });
 
@@ -117,8 +129,10 @@ export function generateIBBreakMarker(
     const crossedDown = breakDir === 'DOWN' && prev.close >= breakLevel && curr.close < breakLevel;
     
     if (crossedUp || crossedDown) {
+      const time = toISTTimestamp(curr.time);
+      if (time <= 0 || !Number.isFinite(time)) continue;
       return {
-        time: new Date(curr.time).getTime() / 1000 + IST_OFFSET,
+        time,
         position: breakDir === 'UP' ? 'belowBar' : 'aboveBar',
         color: breakDir === 'UP' ? '#10b981' : '#ef4444',
         shape: breakDir === 'UP' ? 'arrowUp' : 'arrowDown',
@@ -142,7 +156,7 @@ export function generateCVDDivergenceMarkers(
   data: OHLCData[],
   amt: AMTAnalysis | null
 ): ChartMarker[] {
-  if (!amt?.cvdDivergence || data.length === 0) {
+  if (!amt?.cvdDivergence || !data || data.length === 0) {
     return [];
   }
 
@@ -153,10 +167,12 @@ export function generateCVDDivergenceMarkers(
   // Add markers on the last N candles
   for (let i = data.length - recentCount; i < data.length; i++) {
     const candle = data[i];
+    const time = toISTTimestamp(candle.time);
+    if (time <= 0 || !Number.isFinite(time)) continue;
     const isInitial = i === (data.length - recentCount);
     
     markers.push({
-      time: new Date(candle.time).getTime() / 1000 + IST_OFFSET,
+      time,
       position: isBearishDiv ? 'aboveBar' : 'belowBar',
       color: isInitial ? '#f97316' : 'rgba(249, 115, 22, 0.4)',
       shape: 'circle',
@@ -179,13 +195,17 @@ export function generateAcceptanceRejectionMarkers(
   data: OHLCData[],
   amt: AMTAnalysis | null
 ): ChartMarker[] {
-  if (!amt || data.length === 0) {
+  if (!amt || !data || data.length === 0) {
+    return [];
+  }
+
+  const lastCandle = data[data.length - 1];
+  const lastTime = toISTTimestamp(lastCandle.time);
+  if (lastTime <= 0 || !Number.isFinite(lastTime)) {
     return [];
   }
 
   const markers: ChartMarker[] = [];
-  const lastCandle = data[data.length - 1];
-  const lastTime = new Date(lastCandle.time).getTime() / 1000 + IST_OFFSET;
 
   // Acceptance above VAH
   if (amt.acceptanceAbove) {
@@ -397,7 +417,7 @@ export function halfTrendSignalMarkers(points: HalfTrendPoint[]): ChartMarker[] 
   const markers: ChartMarker[] = [];
   for (const p of points) {
     const time = toISTTimestamp(p.time);
-    if (time <= 0) continue;
+    if (time <= 0 || !Number.isFinite(time)) continue;
     if (p.buy) {
       markers.push({
         time,
@@ -462,13 +482,16 @@ export function generateAllExecutionMarkers(
   // LuxAlgo VARS Reclaim markers
   markers.push(...generateVARSReclaimMarkers(data, amt));
 
+  // Sanitize: ensure all markers have valid finite time > 0
+  const validMarkers = markers.filter(m => Number.isFinite(m.time) && m.time > 0);
+
   // Limit markers for performance (optional)
   const maxMarkers = options.maxMarkers || 100;
-  if (markers.length > maxMarkers) {
+  if (validMarkers.length > maxMarkers) {
     // Keep most recent markers by sorting by time descending
-    markers.sort((a, b) => b.time - a.time);
-    return markers.slice(0, maxMarkers);
+    validMarkers.sort((a, b) => b.time - a.time);
+    return validMarkers.slice(0, maxMarkers);
   }
 
-  return markers;
+  return validMarkers;
 }
