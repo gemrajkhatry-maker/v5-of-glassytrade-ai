@@ -191,6 +191,28 @@ def test_unhalt_via_dependency_no_coordinator():
         _live_app.dependency_overrides.pop(get_coordinator, None)
 
 
+def test_unhalt_via_lifespan_sync():
+    # Lifespan-sync path: set_coordinator(fake) then hit route with NO
+    # dependency override — proves the DI singleton (not app.state) serves it.
+    from app.api.dependencies import get_coordinator as _get_coord
+    from app.api.dependencies import set_coordinator
+
+    _live_app.dependency_overrides.pop(_get_coord, None)
+    previous = _get_coord()
+    set_coordinator(_UnhaltingCoordinator(unhalted=2))
+    try:
+        c = TestClient(_live_app)
+        resp = c.post("/api/trading/risk/unhalt")
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "status": "ok",
+            "unhalted_engines": 2,
+            "message": "Cleared risk halts across 2 engines",
+        }
+    finally:
+        set_coordinator(previous)
+
+
 def test_ws_portfolio_always_full_contract_shape(client):
     """The portfolio DTO must carry balance/equity/leverage + arrays on EVERY
     message — the frontend reduces over these fields unconditionally."""

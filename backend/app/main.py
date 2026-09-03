@@ -266,6 +266,8 @@ def create_application() -> FastAPI:
 
             coordinator = container.resolve(QuantCoordinator)
             app.state.coordinator = coordinator
+            from app.api.dependencies import set_coordinator as _set_coordinator
+            _set_coordinator(coordinator)
             coordinator.start()
             end_phase("trading_engine", "ok")
             logger.info("QuantCoordinator started — serving %s", coordinator.symbols())

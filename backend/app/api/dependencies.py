@@ -39,6 +39,12 @@ def init_singletons(
     _coordinator = coordinator
 
 
+def set_coordinator(coordinator) -> None:
+    """Sync the coordinator singleton after lifespan boot (lifespan runs after factory init)."""
+    global _coordinator
+    _coordinator = coordinator
+
+
 # FastAPI dependency functions
 def get_broker() -> "IBroker":
     """Dependency: Broker adapter."""
