@@ -237,12 +237,17 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     });
 
     // HalfTrend overlay: ht trend line + ATR channel rails (backend data).
+    // The overlay is display-only: autoscaleInfoProvider: () => null makes
+    // these series invisible to the price scale, so a bad value can never
+    // stretch the axis and crush the candles (design-level guard, not a
+    // per-value patch).
     const htLineSeries = chart.addLineSeries({
       color: '#2962ff',
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => null,
     });
     const atrHighSeries = chart.addLineSeries({
       color: '#f23645',
@@ -251,6 +256,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => null,
     });
     const atrLowSeries = chart.addLineSeries({
       color: '#2962ff',
@@ -259,6 +265,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => null,
     });
 
     chartRef.current = chart;

@@ -4,7 +4,13 @@ import ChartScene from '../../components/ChartScene';
 import { OHLCData, ChartConfig } from '../../types';
 
 // Captures the HalfTrend overlay line-series mocks for render assertions.
-const halfTrendLineMocks: { setData: ReturnType<typeof vi.fn> }[] = [];
+const halfTrendLineMocks: {
+  setData: ReturnType<typeof vi.fn>;
+  options?: {
+    autoscaleInfoProvider?: () => unknown;
+    [k: string]: unknown;
+  };
+}[] = [];
 
 // Mock lightweight-charts
 vi.mock('lightweight-charts', () => ({
@@ -24,8 +30,11 @@ vi.mock('lightweight-charts', () => ({
         applyOptions: vi.fn(),
       })),
     })),
-    addLineSeries: vi.fn(() => {
-      const mock = { setData: vi.fn(), applyOptions: vi.fn() };
+    addLineSeries: vi.fn((options?: {
+      autoscaleInfoProvider?: () => unknown;
+      [k: string]: unknown;
+    }) => {
+      const mock = { setData: vi.fn(), applyOptions: vi.fn(), options };
       halfTrendLineMocks.push(mock);
       return mock;
     }),
@@ -99,6 +108,24 @@ describe('ChartScene', () => {
     // channel rails skip the null row and carry the two remaining points
     expect(halfTrendLineMocks[1].setData.mock.calls[0][0]).toHaveLength(1);
     expect(halfTrendLineMocks[2].setData.mock.calls[0][0]).toHaveLength(1);
+  });
+
+  it('makes the HalfTrend overlay autoscale-inert (design-level scale guard)', () => {
+    render(
+      <ChartScene
+        data={mockData}
+        config={defaultConfig}
+        positions={[]}
+        halfTrendSeries={[{ time: '2024-01-01T10:00:00Z', trend: 0, ht: 24950, atrHigh: null, atrLow: null, buy: false, sell: false }]}
+      />
+    );
+    expect(halfTrendLineMocks).toHaveLength(3);
+    // Every overlay series must opt out of autoscale: a rogue value in the
+    // overlay can never stretch the price axis and crush the candles.
+    for (const mock of halfTrendLineMocks) {
+      expect(mock.options?.autoscaleInfoProvider).toBeDefined();
+      expect(mock.options?.autoscaleInfoProvider?.()).toBeNull();
+    }
   });
 
   it('renders without crashing', () => {
