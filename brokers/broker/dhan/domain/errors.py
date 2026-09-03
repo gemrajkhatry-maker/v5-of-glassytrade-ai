@@ -519,7 +519,7 @@ class DhanWebSocketMessageError(DhanWebSocketError):
 # Configuration Errors
 # =============================================================================
 
-class DhanConfigError(DhanError):
+class DhanConfigError(DhanError, ValueError):
     """
     Configuration error.
     
