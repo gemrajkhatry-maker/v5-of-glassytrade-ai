@@ -279,6 +279,52 @@ export function generateVARSReclaimMarkers(
 }
 
 /**
+ * Generate ChartArt Fractal Breakout (half-trend) BUY/SELL markers on the
+ * latest candle. All calculation happens in the backend; the frontend only
+ * renders the labels.
+ */
+export function generateFractalMarkers(
+  data: OHLCData[],
+  amt: AMTAnalysis | null
+): ChartMarker[] {
+  if (!amt?.fractal || !data || data.length === 0) {
+    return [];
+  }
+
+  const f = amt.fractal;
+  if (!f.buySignal && !f.sellSignal) {
+    return [];
+  }
+
+  const markers: ChartMarker[] = [];
+  const lastTime = toISTTimestamp(data[data.length - 1].time);
+
+  if (f.buySignal) {
+    markers.push({
+      time: lastTime,
+      position: 'belowBar',
+      color: '#089981',
+      shape: 'arrowUp',
+      text: `FRACTAL BUY @${f.lastFractalPrice.toFixed(2)}`,
+      size: 2 as const,
+    });
+  }
+
+  if (f.sellSignal) {
+    markers.push({
+      time: lastTime,
+      position: 'aboveBar',
+      color: '#f23645',
+      shape: 'arrowDown',
+      text: `FRACTAL SELL`,
+      size: 2 as const,
+    });
+  }
+
+  return markers;
+}
+
+/**
  * Generate all execution markers for chart display
  * 
  * @param positions - Open positions
@@ -317,6 +363,9 @@ export function generateAllExecutionMarkers(
 
   // LuxAlgo VARS Reclaim markers
   markers.push(...generateVARSReclaimMarkers(data, amt));
+
+  // ChartArt Fractal Breakout (half-trend) BUY/SELL markers
+  markers.push(...generateFractalMarkers(data, amt));
 
   // Limit markers for performance (optional)
   const maxMarkers = options.maxMarkers || 100;

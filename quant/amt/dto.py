@@ -167,6 +167,16 @@ def amt_result_to_dto(r) -> dict:
             "bearishReclaim": getattr(r.vars_result, "bearish_reclaim", False) if getattr(r, "vars_result", None) else False,
             "signalSource": getattr(r.vars_result, "signal_source", "") if getattr(r, "vars_result", None) else "",
         },
+        # ChartArt Fractal Breakout (half-trend) — BUY/SELL labels for UI
+        "fractal": {
+            "fractalTop": bool(getattr(r.fractal_result, "fractal_top", False)) if getattr(r, "fractal_result", None) else False,
+            "lastFractalPrice": float(getattr(r.fractal_result, "last_fractal_price", 0.0)) if getattr(r, "fractal_result", None) else 0.0,
+            "fractalAverage": float(getattr(r.fractal_result, "fractal_average", 0.0)) if getattr(r, "fractal_result", None) else 0.0,
+            "trend": bool(getattr(r.fractal_result, "fractal_trend", False)) if getattr(r, "fractal_result", None) else False,
+            "breakout": bool(getattr(r.fractal_result, "fractal_breakout", False)) if getattr(r, "fractal_result", None) else False,
+            "buySignal": bool(getattr(r.fractal_result, "buy_signal", False)) if getattr(r, "fractal_result", None) else False,
+            "sellSignal": bool(getattr(r.fractal_result, "sell_signal", False)) if getattr(r, "fractal_result", None) else False,
+        },
         "footprints": {
             k: {
                 "time": v.time,

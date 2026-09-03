@@ -300,6 +300,10 @@ class AMTAnalyzer:
         self._triple_a = TripleAMachine()
         from quant.amt.market.vars_detector import VARSDetector
         self._vars_detector = VARSDetector()
+        # ChartArt Fractal Breakout (half-trend) — backend-only calculation,
+        # UI renders the BUY/SELL labels from the DTO.
+        from quant.amt.market.fractal_half_trend import FractalHalfTrendDetector
+        self._fractal_detector = FractalHalfTrendDetector()
         self._session_market = "NSE"
         self._last_resolve_key = ""
 
@@ -344,6 +348,7 @@ class AMTAnalyzer:
             self._cvd_tracker.reset()
             self._triple_a.reset()
             self._vars_detector.reset()
+            self._fractal_detector.reset()
             self._vwap.reset()
         return self._vwap.update(current, typical_price)
 
@@ -776,6 +781,9 @@ class AMTAnalyzer:
             prior_poc=prior_poc,
         )
 
+        # ChartArt fractal half-trend: trend/breakout/BUY-SELL labels
+        fractal_result = self._fractal_detector.update(current)
+
         result = self._build_result(
             current=current, data=data, symbol=symbol,
             profile=profile, poc=poc, vah=vah, val=val,
@@ -811,6 +819,7 @@ class AMTAnalyzer:
             _footprints=_footprints, _contested_zone=_contested_zone,
             _triple=_triple, _effective_market_state=_effective_market_state,
             gex=gex, vars_result=vars_result,
+            fractal_result=fractal_result,
         )
 
         # Squeeze detection (Fabio Playbook #4): runs on the assembled result
@@ -841,7 +850,8 @@ class AMTAnalyzer:
                       _drive_number, _drive_entry_valid, cvd_source,
                       state_result, value_migration,
                       _footprints, _contested_zone, _triple,
-                      _effective_market_state, gex=None, vars_result=None) -> AMTResult:
+                      _effective_market_state, gex=None, vars_result=None,
+                      fractal_result=None) -> AMTResult:
         """Assemble AMTResult from computed pipeline outputs.
 
         Pure data mapping — extracted from analyze() for readability.
@@ -960,6 +970,7 @@ class AMTAnalyzer:
             absorption_cluster_low=_triple.cluster_low,
             gex=gex,
             vars_result=vars_result,
+            fractal_result=fractal_result,
         )
 
     # -------------------------------------------------------------------

@@ -133,8 +133,16 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       prev.breakDirection === amtAnalysis.breakDirection &&
       prev.breakLevel === amtAnalysis.breakLevel &&
       prev.ibComplete === amtAnalysis.ibComplete;
+    // Fractal half-trend BUY/SELL labels (backend-calculated) must still
+    // propagate to the marker layer when only the flags flip.
+    const fractalSame =
+      prev.fractal?.buySignal === amtAnalysis.fractal?.buySignal &&
+      prev.fractal?.sellSignal === amtAnalysis.fractal?.sellSignal &&
+      prev.fractal?.trend === amtAnalysis.fractal?.trend &&
+      prev.fractal?.breakout === amtAnalysis.fractal?.breakout &&
+      prev.fractal?.lastFractalPrice === amtAnalysis.fractal?.lastFractalPrice;
 
-    if (profileSame && legSame && printsSame && levelsSame) {
+    if (profileSame && legSame && printsSame && levelsSame && fractalSame) {
       return prev; // Return old reference to skip redraw
     }
 
