@@ -325,6 +325,24 @@ export function generateFractalMarkers(
 }
 
 /**
+ * Build lightweight-charts line-series data for the ChartArt fractal top
+ * line. Calculation (top price + direction) is done in the backend; the
+ * frontend only colors the segments: +1 green (higher top / uptrend),
+ * -1 red (lower top / downtrend), 0 blue (first/neutral top).
+ */
+export function fractalLineData(
+  fractal: AMTAnalysis['fractal']
+): { time: number; value: number; color: string }[] {
+  if (!fractal?.line || fractal.line.length === 0) return [];
+
+  return fractal.line.map(p => ({
+    time: toISTTimestamp(p.time),
+    value: p.price,
+    color: p.dir > 0 ? '#089981' : p.dir < 0 ? '#f23645' : '#2962ff',
+  }));
+}
+
+/**
  * Generate all execution markers for chart display
  * 
  * @param positions - Open positions

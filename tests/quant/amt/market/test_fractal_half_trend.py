@@ -186,3 +186,52 @@ class TestResultContract:
     def test_n_time_is_floored_at_one(self):
         det = FractalHalfTrendDetector(n_time=0)
         assert det.n_time == 1
+
+
+class TestFractalLine:
+    """Pine: fractal_top_line = change(fractal_top) != 0 ? price : na,
+    plotted with offset=-2 (anchored at the PEAK bar's position)."""
+
+    def test_line_point_per_top_aligned_to_peak_time(self):
+        det = FractalHalfTrendDetector()
+        for i, h in enumerate([10.0, 9.0, 12.0, 11.0, 11.5]):
+            res = det.update(_bar(h, h - 0.5, h, f"2026-09-03T09:{10 + i:02d}:00+05:30"))
+        # fractal confirmed at bar 4; peak bar is index 2 (09:12)
+        assert res.fractal_top is True
+        assert len(res.fractal_line) == 1
+        pt_time, pt_price, pt_dir = res.fractal_line[0]
+        assert pt_time == "2026-09-03T09:12:00+05:30"
+        assert pt_price == pytest.approx(11.25)  # hl2 of confirmation bar
+        assert pt_dir == 0  # first top — neutral
+
+    def test_line_direction_up_and_down_across_tops(self):
+        det = FractalHalfTrendDetector()
+        # Rising tops then falling top; verify dir field tracks direction
+        for i, h in enumerate(_RISING):
+            res = det.update(_bar(h, h - 0.5, h, f"2026-09-03T09:{i:02d}:00+05:30"))
+        assert len(res.fractal_line) >= 3
+        assert res.fractal_line[0][2] == 0   # 11.25 anchor — first
+        assert res.fractal_line[1][2] == 1   # 13.25 > 11.25 — up
+        assert res.fractal_line[2][2] == 1   # 15.25 > 13.25 — up
+        # extend with a lower peak to get a down point
+        res2 = det.update(_bar(14.8, 14.3, 14.8, f"2026-09-03T09:{len(_RISING):02d}:00+05:30"))
+        # not a top yet (needs 2 more confirm bars) — feed them
+        res3 = det.update(_bar(14.0, 13.5, 14.0, f"2026-09-03T09:{len(_RISING) + 1:02d}:00+05:30"))
+        assert len(res3.fractal_line) == len(res.fractal_line) + 1
+        assert res3.fractal_line[-1][2] == -1  # lower top than previous
+
+    def test_line_capped(self):
+        det = FractalHalfTrendDetector(max_line_points=4)
+        # Build many tops quickly with alternating rally/pullback pattern
+        for i in range(60):
+            h = 10.0 + (i % 2) * 4.0
+            det.update(_bar(h, h - 0.5, h, f"t{i}"))
+        assert len(det._fractal_line) <= 4
+
+    def test_line_cleared_on_reset(self):
+        det = FractalHalfTrendDetector()
+        for h in [10.0, 9.0, 12.0, 11.0, 11.5]:
+            det.update(_bar(h, h - 0.5, h, "t"))
+        assert len(det._fractal_line) == 1
+        det.reset()
+        assert len(det._fractal_line) == 0

@@ -6,6 +6,7 @@ import {
   generateCVDDivergenceMarkers,
   generateAcceptanceRejectionMarkers,
   generateFractalMarkers,
+  fractalLineData,
   generateAllExecutionMarkers,
   ChartMarker,
 } from '../../../components/chart/ExecutionMarkersManager';
@@ -336,7 +337,7 @@ describe('ExecutionMarkersManager', () => {
       expect(generateFractalMarkers(data, {} as any)).toHaveLength(0);
       expect(generateFractalMarkers([], {
         fractal: { buySignal: true, sellSignal: false } as any,
-      })).toHaveLength(0);
+      } as any)).toHaveLength(0);
     });
 
     it('included in generateAllExecutionMarkers output', () => {
@@ -348,6 +349,30 @@ describe('ExecutionMarkersManager', () => {
       } as any;
       const markers = generateAllExecutionMarkers([], [], data, amt, { mode: 'STANDARD' });
       expect(markers.find(m => m.text.startsWith('FRACTAL BUY'))).toBeDefined();
+    });
+  });
+
+  describe('fractalLineData', () => {
+    it('maps backend top points to colored line segments', () => {
+      const pts = fractalLineData({
+        line: [
+          { time: '2024-01-01T09:20:00Z', price: 49950.5, dir: 0 },
+          { time: '2024-01-01T09:30:00Z', price: 50000.25, dir: 1 },
+          { time: '2024-01-01T09:40:00Z', price: 49975.0, dir: -1 },
+        ],
+      } as any);
+      expect(pts).toHaveLength(3);
+      expect(pts[0].color).toBe('#2962ff');
+      expect(pts[1].color).toBe('#089981');
+      expect(pts[2].color).toBe('#f23645');
+      expect(pts[1].value).toBe(50000.25);
+      expect(pts[1].time).toBeGreaterThan(pts[0].time);
+    });
+
+    it('returns empty when no line points', () => {
+      expect(fractalLineData({ line: [] } as any)).toHaveLength(0);
+      expect(fractalLineData(undefined)).toHaveLength(0);
+      expect(fractalLineData({} as any)).toHaveLength(0);
     });
   });
 });

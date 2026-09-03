@@ -359,6 +359,14 @@ export interface FractalState {
   breakout: boolean;
   buySignal: boolean;
   sellSignal: boolean;
+  // Confirmed fractal top line points: {time, price, dir}
+  line?: FractalLinePoint[];
+}
+
+export interface FractalLinePoint {
+  time: string;
+  price: number;
+  dir: -1 | 0 | 1;
 }
 
 export interface VARSState {

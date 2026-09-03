@@ -62,6 +62,11 @@ class FractalHalfTrendResult:
     # strategy.close — trend was UP n_time bars ago, now flipped (SELL label
     # on the UI; long-only strategy, so the exit is the "sell" event).
     sell_signal: bool = False
+    # Fractal top line points (Pine: fractal_top_line plotted with
+    # offset=-2) — one per confirmed top, aligned to the peak bar's time.
+    # Each point is (peak_time, price, direction) where direction is
+    # +1 (higher top than previous), -1 (lower top), or 0 (first top).
+    fractal_line: tuple[tuple[str, float, int], ...] = ()
 
 
 class FractalHalfTrendDetector:
@@ -76,9 +81,11 @@ class FractalHalfTrendDetector:
         self,
         n_time: int = 3,
         use_longer_average: bool = True,
+        max_line_points: int = 120,
     ) -> None:
         self.n_time = max(1, int(n_time))
         self.use_longer_average = bool(use_longer_average)
+        self.max_line_points = max(2, int(max_line_points))
         self.reset()
 
     def reset(self) -> None:
@@ -95,6 +102,11 @@ class FractalHalfTrendDetector:
         self._trend_history: list[bool] = []
         # Recent highs, oldest -> newest, for the 5-bar fractal window.
         self._highs: list[float] = []
+        # Recent bar times, oldest -> newest (to anchor line points at the
+        # peak bar — two bars before the confirmation bar).
+        self._times: list[str] = []
+        # Confirmed top line points: (peak_time, price, direction).
+        self._fractal_line: list[tuple[str, float, int]] = []
         self._prev_bar: "OHLC | FloatOHLC | None" = None
 
     def update(self, candle: "OHLC | FloatOHLC") -> FractalHalfTrendResult:
@@ -117,6 +129,9 @@ class FractalHalfTrendDetector:
         self._highs.append(high)
         if len(self._highs) > 8:
             self._highs = self._highs[-8:]
+        self._times.append(str(candle.time))
+        if len(self._times) > 8:
+            self._times = self._times[-8:]
 
         fractal_top = False
         if len(self._highs) >= 5:
@@ -133,6 +148,17 @@ class FractalHalfTrendDetector:
             )
         if fractal_top:
             self._fractal_prices.append(price)
+            # Line point: Pine plots the confirmed top's price two bars back
+            # (offset=-2) so it sits on the PEAK bar; direction = higher or
+            # lower top than the previous one (0 for the first top).
+            prev_anchor = self._fractal_prices[-2] if len(self._fractal_prices) >= 2 else 0.0
+            direction = 0
+            if prev_anchor > 0:
+                direction = 1 if price > prev_anchor else -1
+            peak_time = self._times[-3] if len(self._times) >= 3 else str(candle.time)
+            self._fractal_line.append((peak_time, price, direction))
+            if len(self._fractal_line) > self.max_line_points:
+                self._fractal_line = self._fractal_line[-self.max_line_points:]
         if len(self._fractal_prices) > 256:
             self._fractal_prices = self._fractal_prices[-256:]
 
@@ -200,4 +226,5 @@ class FractalHalfTrendDetector:
             fractal_breakout=breakout,
             buy_signal=buy_signal,
             sell_signal=sell_signal,
+            fractal_line=tuple(self._fractal_line),
         )
