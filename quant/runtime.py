@@ -933,19 +933,6 @@ class QuantEngine:
 
         if decision.approved and decision.signal is not None:
             signal = decision.signal
-            logger.info(
-                "⚡ [APPROVED SIGNAL] %s: %s @ %.2f (SL=%.2f, TP=%.2f, RR=%.2f) — %s | trades_today=%d equity=₹%.0f",
-                self.symbol,
-                signal.type,
-                signal.entry,
-                signal.sl,
-                signal.tp,
-                signal.rr,
-                decision.reason,
-                risk_st.trades_today,
-                risk_st.equity,
-            )
-            self._emit(SignalApproved(symbol=self.symbol, time=bar.time, signal=signal))
             # ponytail: underlying observer engines stream charts/data but must not submit orders
             if not getattr(self, "_execution_enabled", True):
                 logger.debug(
@@ -1018,6 +1005,22 @@ class QuantEngine:
                         self._portfolio_risk.release(reserved, symbol=self.symbol)
                     self._open_trade_risk = 0.0
                 return
+            logger.info(
+                "⚡ [SIGNAL EXECUTED] %s: %s %s @ %.2f (SL=%.2f, TP=%.2f, RR=%.2f) — %s | trades_today=%d equity=₹%.0f",
+                self.symbol,
+                signal.type,
+                signal.symbol,
+                signal.entry,
+                signal.sl,
+                signal.tp,
+                signal.rr,
+                decision.reason,
+                risk_st.trades_today,
+                risk_st.equity,
+            )
+            # Contract (quant/execution/ports.py): every SignalApproved must
+            # route through an IOMS — emit only after a successful submit.
+            self._emit(SignalApproved(symbol=self.symbol, time=bar.time, signal=signal))
             self._entry_bar_index = self._bar_index
             pm = self._get_position_manager()
             pm.current_position = position
