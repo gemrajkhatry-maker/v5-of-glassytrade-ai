@@ -1046,3 +1046,61 @@ class TestDhanBrokerLoopLock:
         assert hasattr(b1, "_loop_lock")
         assert hasattr(b2, "_loop_lock")
         assert b1._loop_lock is not b2._loop_lock, "Each instance must have its own lock"
+
+
+class TestPerServiceCircuitBreakers:
+    """One shared breaker lets a WS/quote failure starve history.
+
+    Prod incident 2026-09-04: a startup 429 burst tripped the single shared
+    DhanCircuitBreaker and it never recovered (half-open needs 3 consecutive
+    successes; any background failure re-opens). All history fetches then
+    failed fast while the API itself was healthy.
+    """
+
+    def test_factory_gives_each_service_its_own_breaker(self):
+        from brokers.broker.dhan.application.broker import DhanBroker
+        from brokers.broker.dhan.application.config import DhanConfig
+        from brokers.broker.dhan.infrastructure.resilience import DhanCircuitBreaker
+
+        cfg = DhanConfig(client_id="A", access_token="B")
+        made: dict = {}
+
+        def factory(category: str):
+            cb = DhanCircuitBreaker()
+            made[category] = cb
+            return cb
+
+        b = DhanBroker(config=cfg, circuit_breaker_factory=factory)
+
+        assert set(made) == {
+            "market_data", "historical", "streaming",
+            "options", "orders", "portfolio",
+        }
+        assert b._historical._circuit_breaker is not b._market_data._circuit_breaker
+
+    def test_market_data_trip_does_not_starve_history(self):
+        import asyncio
+        from brokers.broker.dhan.application.broker import DhanBroker
+        from brokers.broker.dhan.application.config import DhanConfig
+        from brokers.broker.dhan.infrastructure.resilience import DhanCircuitBreaker
+
+        cfg = DhanConfig(client_id="A", access_token="B")
+        b = DhanBroker(
+            config=cfg,
+            circuit_breaker_factory=lambda category: DhanCircuitBreaker(),
+        )
+
+        md_cb = b._market_data._circuit_breaker
+        hist_cb = b._historical._circuit_breaker
+        for _ in range(5):
+            md_cb.record_failure()
+        assert md_cb.is_open
+
+        async def _ok():
+            return "history-flows"
+
+        async def probe():
+            return await hist_cb.execute(lambda: _ok())
+
+        assert asyncio.run(probe()) == "history-flows"
+        assert hist_cb.is_closed

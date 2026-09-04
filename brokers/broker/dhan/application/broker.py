@@ -27,6 +27,7 @@ from typing import (
     Optional,
     AsyncIterator,
     Any,
+    Callable,
 )
 
 import pandas as pd
@@ -99,6 +100,7 @@ class DhanBroker(IBrokerPort):
         auth_provider: Optional[IAuthProvider] = None,
         rate_limiter: Optional[IRateLimiter] = None,
         circuit_breaker: Optional[ICircuitBreaker] = None,
+        circuit_breaker_factory: Optional[Callable[[str], Optional[ICircuitBreaker]]] = None,
     ) -> None:
         self._config = config
         self._http_client = http_client
@@ -117,22 +119,34 @@ class DhanBroker(IBrokerPort):
         self._instrument_cache: Dict[str, DhanInstrument] = {}
         self._option_symbol_cache: Dict[str, str] = {}
 
-        # Create service instances (share deps via base class constructor)
-        svc_kwargs = dict(
-            config=config,
-            http_client=http_client,
-            symbol_mapper=symbol_mapper,
-            rate_limiter=rate_limiter,
-            circuit_breaker=circuit_breaker,
-            option_symbol_cache=self._option_symbol_cache,
-            ensure_initialized=self._ensure_initialized,
-        )
-        self._market_data = MarketDataService(**svc_kwargs)
-        self._historical = HistoricalService(**svc_kwargs)
-        self._streaming = StreamingService(**svc_kwargs)
-        self._options = OptionsService(**svc_kwargs)
-        self._orders = OrderService(**svc_kwargs)
-        self._portfolio = PortfolioService(**svc_kwargs)
+        # Create service instances (share deps via base class constructor).
+        # Each service gets its OWN circuit breaker when a factory is given:
+        # one shared breaker lets a WS/quote failure starve history (a single
+        # half-open failure re-opens it, so 3 consecutive successes never
+        # accumulate under background traffic). Without a factory the injected
+        # breaker is shared as before (test seam preserved).
+        def _svc_kwargs(category: str) -> dict:
+            cb = (
+                circuit_breaker_factory(category)
+                if circuit_breaker_factory is not None
+                else circuit_breaker
+            )
+            return dict(
+                config=config,
+                http_client=http_client,
+                symbol_mapper=symbol_mapper,
+                rate_limiter=rate_limiter,
+                circuit_breaker=cb,
+                option_symbol_cache=self._option_symbol_cache,
+                ensure_initialized=self._ensure_initialized,
+            )
+
+        self._market_data = MarketDataService(**_svc_kwargs("market_data"))
+        self._historical = HistoricalService(**_svc_kwargs("historical"))
+        self._streaming = StreamingService(**_svc_kwargs("streaming"))
+        self._options = OptionsService(**_svc_kwargs("options"))
+        self._orders = OrderService(**_svc_kwargs("orders"))
+        self._portfolio = PortfolioService(**_svc_kwargs("portfolio"))
 
         logger.debug(f"DhanBroker initialized with config: {config!r}")
 
@@ -237,7 +251,9 @@ class DhanBroker(IBrokerPort):
         rate_limiter = TokenBucketRateLimiter()
 
         from brokers.broker.dhan.infrastructure.resilience import DhanCircuitBreaker
-        circuit_breaker = DhanCircuitBreaker()
+
+        def _new_breaker(category: str) -> DhanCircuitBreaker:
+            return DhanCircuitBreaker()
 
         # Connect auth_provider to HTTP + WS clients for runtime refresh
         auth_provider._http = http_client
@@ -251,7 +267,7 @@ class DhanBroker(IBrokerPort):
             symbol_mapper=symbol_mapper,
             auth_provider=auth_provider,
             rate_limiter=rate_limiter,
-            circuit_breaker=circuit_breaker,
+            circuit_breaker_factory=_new_breaker,
         )
 
     # =========================================================================
