@@ -49,10 +49,14 @@ def _normalized(state):
     pos = state.position
     if pos is not None:
         pos = replace(pos, id="")
+    normalized_closed = tuple(
+        {**tr, "id": ""} for tr in state.closed_trades
+    )
     return replace(
         state,
         position=pos,
         pyramids=tuple(replace(p, id="") for p in state.pyramids),
+        closed_trades=normalized_closed,
     )
 
 

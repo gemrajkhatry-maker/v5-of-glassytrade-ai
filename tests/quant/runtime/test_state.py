@@ -179,11 +179,8 @@ def test_portfolio_open_then_close():
     v2 = _fold_view(store)
     port2 = v2.portfolio
     assert port2["positions"] == []
-    # The fold retains only realized P&L (EngineState.realized_pnl) — it never
-    # accumulated closed-trade rows (that was StateProjector.on_event, removed).
-    # Row history lives in the trade store (PositionStorageBridge.save_trade);
-    # the trade's economics must still fold into equity (+20.0 here).
-    assert port2["closedTrades"] == []
+    assert len(port2["closedTrades"]) == 1
+    assert port2["closedTrades"][0]["id"] == pos._id
     assert port2["equity"] == 1_000_020.0
 
 

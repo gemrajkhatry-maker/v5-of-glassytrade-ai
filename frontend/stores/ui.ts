@@ -22,6 +22,12 @@ interface UIState {
     /** Show HalfTrend overlay (trend line, ATR channels, Buy/Sell labels) */
     showHalfTrend: boolean;
     
+    /** Show HARSI oscillator subplot */
+    showHARSI: boolean;
+    
+    /** HARSI oscillator subplot height in px */
+    harsiHeight: number;
+    
     /** Current page */
     currentPage: 'trading' | 'journal';
     
@@ -57,6 +63,15 @@ interface UIActions {
     /** Set HalfTrend overlay visibility */
     setHalfTrendVisible: (visible: boolean) => void;
     
+    /** Toggle HARSI subplot */
+    toggleHARSI: () => void;
+    
+    /** Set HARSI subplot visibility */
+    setHARSIVisible: (visible: boolean) => void;
+    
+    /** Set HARSI subplot height */
+    setHarsiHeight: (height: number) => void;
+    
     /** Set current page */
     setCurrentPage: (page: 'trading' | 'journal') => void;
     
@@ -79,6 +94,8 @@ export const useUIStore = create<UIStore>()(
             vpMode: 'session',
             showVolumeProfile: true,
             showHalfTrend: true,
+            showHARSI: true,
+            harsiHeight: 180,
             currentPage: 'trading',
             workspaceName: 'Default',
             
@@ -122,6 +139,18 @@ export const useUIStore = create<UIStore>()(
             setHalfTrendVisible: (visible) => set((state) => {
                 state.showHalfTrend = visible;
             }),
+
+            toggleHARSI: () => set((state) => {
+                state.showHARSI = !state.showHARSI;
+            }),
+
+            setHARSIVisible: (visible) => set((state) => {
+                state.showHARSI = visible;
+            }),
+
+            setHarsiHeight: (height) => set((state) => {
+                state.harsiHeight = height;
+            }),
             
             setCurrentPage: (page) => set((state) => {
                 state.currentPage = page;
@@ -138,6 +167,8 @@ export const useUIStore = create<UIStore>()(
                 state.vpMode = 'session';
                 state.showVolumeProfile = true;
                 state.showHalfTrend = true;
+                state.showHARSI = true;
+                state.harsiHeight = 180;
                 state.currentPage = 'trading';
             }),
         })),
@@ -151,6 +182,8 @@ export const useUIStore = create<UIStore>()(
                 vpMode: state.vpMode,
                 showVolumeProfile: state.showVolumeProfile,
                 showHalfTrend: state.showHalfTrend,
+                showHARSI: state.showHARSI,
+                harsiHeight: state.harsiHeight,
                 workspaceName: state.workspaceName,
             }),
         }
@@ -184,6 +217,16 @@ export const selectVpMode = (state: UIStore): string => {
 /** Select HalfTrend overlay visibility */
 export const selectShowHalfTrend = (state: UIStore): boolean => {
     return state.showHalfTrend;
+};
+
+/** Select HARSI subplot visibility */
+export const selectShowHARSI = (state: UIStore): boolean => {
+    return state.showHARSI;
+};
+
+/** Select HARSI subplot height */
+export const selectHarsiHeight = (state: UIStore): number => {
+    return state.harsiHeight || 180;
 };
 
 /** Select current page */

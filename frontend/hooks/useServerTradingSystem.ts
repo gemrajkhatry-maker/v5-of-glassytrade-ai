@@ -274,13 +274,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     }, []);
 
     // ----------------------------------------------------------------
-    // 1.5. REST history warm-up — fetches 500 candles per symbol on startup
+    // 1.5. REST history warm-up — fetches 500 candles per symbol
     // Candles are merged with any live ticks that already streamed in.
-    const warmHistoryForSymbols = useCallback((symbols: string[], interval: string) => {
-        const intv = interval || '5m';
-        for (const sym of symbols) {
-            const flightKey = `${sym}:${intv}`;
-            if (inFlightHistoryRef.current.has(flightKey)) continue;
+    const fetchSingleSymbolHistory = useCallback((sym: string, intv: string) => {
+        const flightKey = `${sym}:${intv}`;
+        if (!inFlightHistoryRef.current.has(flightKey)) {
             inFlightHistoryRef.current.add(flightKey);
             const path = `/api/market/history/${encodeURIComponent(sym)}`;
             const url = `${backendUrl(path)}?interval=${encodeURIComponent(intv)}&limit=500`;
@@ -305,7 +303,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         if (history.length === 0) return prev;
                         const lastHistory = history[history.length - 1];
                         const lastHistoryMs = new Date(lastHistory.time).getTime();
-                        // ponytail: same-timestamp → replace with live tick's OHLC if live is newer (preserves forming bar)
+                        // same-timestamp → replace with live tick's OHLC if live is newer (preserves forming bar)
                         const existingByTime = new Map(inst.data.map(c => [new Date(c.time).getTime(), c] as const));
                         let merged: OHLCData[];
                         if (existingByTime.has(lastHistoryMs)) {
@@ -325,10 +323,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 .catch(() => {
                     inFlightHistoryRef.current.delete(flightKey);
                 });
+        }
 
-            // HalfTrend overlay series (backend-computed, REST history)
-            const htFlightKey = `${sym}:${intv}:halftrend`;
-            if (inFlightHistoryRef.current.has(htFlightKey)) continue;
+        // HalfTrend overlay series (backend-computed, REST history)
+        const htFlightKey = `${sym}:${intv}:halftrend`;
+        if (!inFlightHistoryRef.current.has(htFlightKey)) {
             inFlightHistoryRef.current.add(htFlightKey);
             const htUrl = `${backendUrl(`/api/market/halftrend/${encodeURIComponent(sym)}`)}?interval=${encodeURIComponent(intv)}&limit=500`;
             fetch(htUrl)
@@ -342,9 +341,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                             ...prev,
                             [sym]: {
                                 ...inst,
-                                // Prune pre-warm-up rows here too: a server_mode
-                                // refresh after a reconnect must not re-introduce
-                                // null/0-rail points the onopen sweep just removed.
                                 halfTrendSeries: pruneHalfTrendSeries(rows.map((r: any) => ({
                                     time: String(r.time),
                                     trend: r.trend === 1 ? 1 : 0,
@@ -364,6 +360,22 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 });
         }
     }, []);
+
+    const warmHistoryForSymbols = useCallback((symbols: string[], interval: string) => {
+        const intv = interval || '5m';
+        const active = activeSymbolRef.current;
+        // Priority 1: Fetch active symbol immediately
+        if (active && symbols.includes(active)) {
+            fetchSingleSymbolHistory(active, intv);
+        }
+        // Priority 2: Stagger background symbols spaced by 200ms to prevent Dhan HTTP 429 rate limit
+        const backgroundSymbols = symbols.filter(s => s !== active);
+        backgroundSymbols.forEach((sym, idx) => {
+            setTimeout(() => {
+                fetchSingleSymbolHistory(sym, intv);
+            }, 200 * (idx + 1));
+        });
+    }, [fetchSingleSymbolHistory]);
 
     // Re-warm history when interval changes (e.g. 5m -> 1m)
     useEffect(() => {
@@ -752,6 +764,9 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             if (pruned === inst.halfTrendSeries) return prev;
             return { ...prev, [activeSymbol]: { ...inst, halfTrendSeries: pruned } };
         });
+
+        // Ensure newly active symbol has history immediately
+        fetchSingleSymbolHistory(activeSymbol, config.interval || '5m');
 
         const timer = setTimeout(() => {
             if (subscribeGenRef.current !== gen) return;

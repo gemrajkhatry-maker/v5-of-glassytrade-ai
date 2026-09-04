@@ -44,7 +44,9 @@ vi.mock('lightweight-charts', () => ({
       [k: string]: unknown;
     }) => {
       const mock = { setData: vi.fn(), applyOptions: vi.fn(), options };
-      halfTrendLineMocks.push(mock);
+      if (options?.autoscaleInfoProvider !== undefined) {
+        halfTrendLineMocks.push(mock);
+      }
       return mock;
     }),
     remove: vi.fn(),
@@ -332,5 +334,48 @@ describe('ChartScene', () => {
     );
 
     expect(screen.getByText('STANDARD CANDLESTICKS')).toBeInTheDocument();
+  });
+
+  it('renders JayRogers HARSI oscillator subplot by default', () => {
+    render(
+      <ChartScene
+        data={mockData}
+        config={defaultConfig}
+        positions={[]}
+      />
+    );
+
+    expect(screen.getByText('HARSI •')).toBeInTheDocument();
+    expect(screen.getByText('Heikin Ashi RSI (14, 1)')).toBeInTheDocument();
+    expect(screen.getByText('• RSI (7)')).toBeInTheDocument();
+    expect(screen.getByText('OB: +20 / +30')).toBeInTheDocument();
+    expect(screen.getByText('OS: -20 / -30')).toBeInTheDocument();
+  });
+
+  it('renders TradingView-style draggable divider when HARSI is visible', () => {
+    render(
+      <ChartScene
+        data={mockData}
+        config={defaultConfig}
+        positions={[]}
+      />
+    );
+
+    const separator = screen.getByRole('separator');
+    expect(separator).toBeInTheDocument();
+    expect(separator).toHaveAttribute('title', 'Drag to resize panes • Double-click to reset');
+  });
+
+  it('omits draggable divider and subplot when showHARSI is false', () => {
+    render(
+      <ChartScene
+        data={mockData}
+        config={{ ...defaultConfig, showHARSI: false }}
+        positions={[]}
+      />
+    );
+
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+    expect(screen.queryByText('HARSI •')).not.toBeInTheDocument();
   });
 });

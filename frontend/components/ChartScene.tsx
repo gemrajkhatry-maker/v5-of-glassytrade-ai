@@ -11,7 +11,7 @@ import {
   IPriceLine,
   SeriesMarker,
 } from 'lightweight-charts';
-import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, ChartMode, AggressivePrint, HalfTrendPoint } from '../types';
+import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, ChartMode, AggressivePrint, HalfTrendPoint, QuantDecisionAnalysis, LLMHistoryEntry } from '../types';
 import { IST_OFFSET_SECONDS } from '../constants';
 import DecisionCard from './chart/DecisionCard';
 
@@ -35,11 +35,17 @@ import {
   transformToVolumeData,
   validateVolumeData,
 } from './chart/VolumeSeriesManager';
+import {
+  computeHARSI,
+} from './chart/HARSIManager';
+import { useUIStore, selectHarsiHeight } from '../stores/ui';
 interface ChartSceneProps {
   data: OHLCData[];
   config: ChartConfig;
   positions: TradePosition[];
   closedTrades?: TradePosition[];
+  quantDecision?: QuantDecisionAnalysis | null;
+  decisionHistory?: LLMHistoryEntry[];
   agentDecision?: AgentDecision | null;
   amtAnalysis?: AMTAnalysis | null;
   halfTrendSeries?: HalfTrendPoint[];
@@ -88,6 +94,8 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   config,
   positions,
   closedTrades = [],
+  quantDecision,
+  decisionHistory = [],
   agentDecision,
   amtAnalysis,
   halfTrendSeries = [],
@@ -111,6 +119,75 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     const prevIntervalRef = useRef<string | undefined>(undefined);
     const prevActiveDataRef = useRef<OHLCData[] | null>(null);
     const prevDataLenRef = useRef<number>(0);
+
+    // HARSI Subplot Refs & Resizing
+    const harsiContainerRef = useRef<HTMLDivElement>(null);
+    const harsiChartRef = useRef<IChartApi | null>(null);
+    const harsiCandleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+    const harsiRsiLineRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const harsiRsiHistRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+    const isSyncingRef = useRef<boolean>(false);
+
+    // Draggable Splitter Divider State (TradingView Style)
+    const storeHarsiHeight = useUIStore(selectHarsiHeight);
+    const setStoreHarsiHeight = useUIStore(s => s.setHarsiHeight);
+    const [subplotHeight, setSubplotHeight] = useState<number>(() => storeHarsiHeight || 180);
+    const [isDraggingDivider, setIsDraggingDivider] = useState(false);
+    const sceneContainerRef = useRef<HTMLDivElement>(null);
+    const dragStartYRef = useRef<number>(0);
+    const dragStartHeightRef = useRef<number>(180);
+
+    // Keep subplot height in sync if store updates externally
+    useEffect(() => {
+      if (!isDraggingDivider && storeHarsiHeight && storeHarsiHeight !== subplotHeight) {
+        setSubplotHeight(storeHarsiHeight);
+      }
+    }, [storeHarsiHeight, isDraggingDivider]);
+
+    const handleDividerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      setIsDraggingDivider(true);
+      dragStartYRef.current = e.clientY;
+      dragStartHeightRef.current = subplotHeight;
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        if (!sceneContainerRef.current) return;
+        const containerRect = sceneContainerRef.current.getBoundingClientRect();
+        const deltaY = dragStartYRef.current - moveEvent.clientY; // Dragging UP increases height
+        const targetHeight = dragStartHeightRef.current + deltaY;
+        const minH = 70;
+        const maxH = Math.max(minH, containerRect.height - 160);
+        const clamped = Math.round(Math.max(minH, Math.min(maxH, targetHeight)));
+        setSubplotHeight(clamped);
+      };
+
+      const handlePointerUp = (upEvent: PointerEvent) => {
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', handlePointerUp);
+        setIsDraggingDivider(false);
+
+        if (sceneContainerRef.current) {
+          const containerRect = sceneContainerRef.current.getBoundingClientRect();
+          const deltaY = dragStartYRef.current - upEvent.clientY;
+          const targetHeight = dragStartHeightRef.current + deltaY;
+          const minH = 70;
+          const maxH = Math.max(minH, containerRect.height - 160);
+          const finalHeight = Math.round(Math.max(minH, Math.min(maxH, targetHeight)));
+          setSubplotHeight(finalHeight);
+          setStoreHarsiHeight(finalHeight);
+        }
+      };
+
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp);
+    };
+
+    const handleDividerDoubleClick = () => {
+      // TradingView standard: double click resets to default height
+      setSubplotHeight(180);
+      setStoreHarsiHeight(180);
+    };
+
     // Shared redraw trigger so the ResizeObserver can repaint the overlay
     // without leaving a blank canvas during a sidebar slide.
     const drawOverlayRef = useRef<(() => void) | null>(null);
@@ -148,14 +225,19 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     return amtAnalysis;
   }, [amtAnalysis]);
 
-  // Interval-scoped data fetching (ensures 1m and 5m load their exact independent candle feeds)
+  // Interval-scoped data fetching (only when a secondary micro-timeframe like 1m is requested)
   const [scopedData, setScopedData] = useState<OHLCData[] | null>(null);
 
   useEffect(() => {
     if (!symbol) return;
     const targetInterval = config.interval || '5m';
+    // If target is standard 5m, the parent useServerTradingSystem manages the authoritative data
+    if (targetInterval !== '1m') {
+      setScopedData(null);
+      return;
+    }
     let cancelled = false;
-    const url = `/api/market/history/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(targetInterval)}&limit=500`;
+    const url = `/api/market/history/${encodeURIComponent(symbol)}?interval=1m&limit=500`;
     fetch(url)
       .then(res => (res.ok ? res.json() : null))
       .then(body => {
@@ -181,9 +263,9 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
   }, [symbol, config.interval]);
 
   const activeData = useMemo(() => {
-    if (scopedData && scopedData.length > 0) return scopedData;
+    if (config.interval === '1m' && scopedData && scopedData.length > 0) return scopedData;
     return data;
-  }, [scopedData, data]);
+  }, [config.interval, scopedData, data]);
 
   // Stabilize data reference — only update when activeData reference or length changes.
   // Prevents canvas overlay from redrawing on every intra-candle tick update while correctly switching on interval change.
@@ -330,6 +412,197 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       initializedRef.current = false;
     };
   }, []); // Only runs once on mount
+
+  // 1b. Initialize HARSI Subplot Chart
+  useEffect(() => {
+    if (config.showHARSI === false || !harsiContainerRef.current) return;
+
+    const harsiChart = createChart(harsiContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: 'transparent' },
+        textColor: '#6b7a99',
+      },
+      grid: {
+        vertLines: { color: 'rgba(42, 53, 80, 0.2)' },
+        horzLines: { color: 'rgba(42, 53, 80, 0.2)' },
+      },
+      width: harsiContainerRef.current.clientWidth,
+      height: harsiContainerRef.current.clientHeight,
+      crosshair: {
+        mode: CrosshairMode.Normal,
+      },
+      timeScale: {
+        borderColor: '#2a3550',
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 5,
+        fixLeftEdge: false,
+        fixRightEdge: false,
+      },
+      rightPriceScale: {
+        borderColor: '#2a3550',
+        autoScale: true,
+      },
+    });
+
+    const rsiHistSeries = harsiChart.addHistogramSeries({
+      priceScaleId: 'right',
+      priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+    });
+
+    const harsiCandleSeries = harsiChart.addCandlestickSeries({
+      upColor: '#26a69a',
+      downColor: '#ef5350',
+      borderVisible: true,
+      upBorderColor: '#26a69a',
+      downBorderColor: '#ef5350',
+      wickUpColor: '#94a3b8',
+      wickDownColor: '#94a3b8',
+      priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+    });
+
+    const rsiLineSeries = harsiChart.addLineSeries({
+      color: '#fac832',
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true,
+      priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+    });
+
+    // Reference lines for OB/OS and Zero Median
+    harsiCandleSeries.createPriceLine({
+      price: 30,
+      color: 'rgba(239, 68, 68, 0.7)',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      axisLabelVisible: true,
+      title: 'OB Ext',
+    });
+    harsiCandleSeries.createPriceLine({
+      price: 20,
+      color: 'rgba(148, 163, 184, 0.5)',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      axisLabelVisible: true,
+      title: 'OB',
+    });
+    harsiCandleSeries.createPriceLine({
+      price: 0,
+      color: 'rgba(249, 115, 22, 0.8)',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: '0',
+    });
+    harsiCandleSeries.createPriceLine({
+      price: -20,
+      color: 'rgba(148, 163, 184, 0.5)',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      axisLabelVisible: true,
+      title: 'OS',
+    });
+    harsiCandleSeries.createPriceLine({
+      price: -30,
+      color: 'rgba(16, 185, 129, 0.7)',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      axisLabelVisible: true,
+      title: 'OS Ext',
+    });
+
+    harsiChart.priceScale('right').applyOptions({
+      autoScale: true,
+      scaleMargins: { top: 0.1, bottom: 0.1 },
+    });
+
+    harsiChartRef.current = harsiChart;
+    harsiCandleSeriesRef.current = harsiCandleSeries;
+    harsiRsiLineRef.current = rsiLineSeries;
+    harsiRsiHistRef.current = rsiHistSeries;
+
+    // Time scale synchronization
+    const onMainLogicalRange = (range: any) => {
+      if (isSyncingRef.current || !range || !harsiChartRef.current) return;
+      isSyncingRef.current = true;
+      try {
+        harsiChartRef.current.timeScale().setVisibleLogicalRange(range);
+      } catch {}
+      isSyncingRef.current = false;
+    };
+
+    const onHarsiLogicalRange = (range: any) => {
+      if (isSyncingRef.current || !range || !chartRef.current) return;
+      isSyncingRef.current = true;
+      try {
+        chartRef.current.timeScale().setVisibleLogicalRange(range);
+      } catch {}
+      isSyncingRef.current = false;
+    };
+
+    chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(onMainLogicalRange);
+    harsiChart.timeScale().subscribeVisibleLogicalRangeChange(onHarsiLogicalRange);
+
+    const currentRange = chartRef.current?.timeScale().getVisibleLogicalRange();
+    if (currentRange) {
+      try {
+        harsiChart.timeScale().setVisibleLogicalRange(currentRange);
+      } catch {}
+    }
+
+    let harsiRaf = 0;
+    const resizeObserver = new ResizeObserver(entries => {
+      if (!entries[0]?.contentRect) return;
+      const { width, height } = entries[0].contentRect;
+      if (width === 0 || height === 0) return;
+      cancelAnimationFrame(harsiRaf);
+      harsiRaf = requestAnimationFrame(() => {
+        harsiChart.applyOptions({ width, height });
+      });
+    });
+    resizeObserver.observe(harsiContainerRef.current);
+
+    return () => {
+      cancelAnimationFrame(harsiRaf);
+      resizeObserver.disconnect();
+      chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(onMainLogicalRange);
+      harsiChart.timeScale().unsubscribeVisibleLogicalRangeChange(onHarsiLogicalRange);
+      harsiChart.remove();
+      harsiChartRef.current = null;
+      harsiCandleSeriesRef.current = null;
+      harsiRsiLineRef.current = null;
+      harsiRsiHistRef.current = null;
+    };
+  }, [config.showHARSI]);
+
+  // 1c. Feed HARSI Subplot Data
+  useEffect(() => {
+    if (config.showHARSI === false || !harsiCandleSeriesRef.current) return;
+
+    if (!activeData || activeData.length === 0) {
+      harsiCandleSeriesRef.current.setData([]);
+      harsiCandleSeriesRef.current.setMarkers([]);
+      harsiRsiLineRef.current?.setData([]);
+      harsiRsiHistRef.current?.setData([]);
+      return;
+    }
+
+    const candlePoints = transformToCandleData(activeData);
+    const result = computeHARSI(candlePoints);
+
+    harsiCandleSeriesRef.current.setData(result.candles as any);
+    harsiCandleSeriesRef.current.setMarkers(result.markers as any);
+    harsiRsiLineRef.current?.setData(result.rsiLine as any);
+    harsiRsiHistRef.current?.setData(result.rsiHist as any);
+
+    const mainRange = chartRef.current?.timeScale().getVisibleLogicalRange();
+    if (mainRange && harsiChartRef.current) {
+      try {
+        harsiChartRef.current.timeScale().setVisibleLogicalRange(mainRange);
+      } catch {}
+    }
+  }, [activeData, config.showHARSI, symbol, config.interval]);
 
   // 2. Realtime Subscription via EventBus
   useEffect(() => {
@@ -1084,6 +1357,8 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     const markerOptions: ExecutionMarkersOptions = {
       mode: mode as any,
       maxMarkers: 100,
+      quantDecision,
+      decisionHistory,
     };
 
     const allMarkers = generateAllExecutionMarkers(
@@ -1170,7 +1445,22 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       activePriceLinesRef.current.set(pos.id, lines);
     });
 
-  }, [symbol, positions, closedTrades, stableAmtAnalysis, halfTrendSeries, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
+  }, [
+    symbol,
+    positions,
+    closedTrades,
+    quantDecision,
+    decisionHistory,
+    stableAmtAnalysis,
+    halfTrendSeries,
+    stableData,
+    config.bullColor,
+    config.bearColor,
+    config.showVolumeProfile,
+    config.showHalfTrend,
+    config.vpMode,
+    mode,
+  ]);
 
   // 6. HalfTrend overlay — ht trend line + ATR channel rails.
   useEffect(() => {
@@ -1189,43 +1479,118 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
   }, [symbol, halfTrendSeries, config.showHalfTrend]);
 
   return (
-    <div className="w-full h-full relative bg-[#0f172a] overflow-hidden">
-      <div ref={chartContainerRef} className="w-full h-full relative z-10" />
-      <canvas ref={overlayRef} className="absolute inset-0 z-20 pointer-events-none" />
+    <div
+      ref={sceneContainerRef}
+      className={`w-full h-full relative bg-[#0f172a] flex flex-col overflow-hidden ${
+        isDraggingDivider ? 'cursor-row-resize select-none' : ''
+      }`}
+    >
+      {/* Primary Candlestick Chart Area */}
+      <div className={`relative w-full flex-1 min-h-0 overflow-hidden ${isDraggingDivider ? 'pointer-events-none' : ''}`}>
+        <div ref={chartContainerRef} className="w-full h-full relative z-10" />
+        <canvas ref={overlayRef} className="absolute inset-0 z-20 pointer-events-none" />
 
-      {/* Chart Mode Indicator */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur px-3 py-1 rounded-full border border-white/5 text-[10px] text-white/50 z-30 pointer-events-none uppercase tracking-wider">
-        STANDARD CANDLESTICKS
+        {/* Chart Mode Indicator */}
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur px-3 py-1 rounded-full border border-white/5 text-[10px] text-white/50 z-30 pointer-events-none uppercase tracking-wider">
+          STANDARD CANDLESTICKS
+        </div>
+
+        {/* Empty State / Live Stream Status Overlay */}
+        {activeData.length === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center z-25 pointer-events-none p-6 text-center">
+            <div className="p-6 rounded-2xl bg-black/40 backdrop-blur-xl border border-white/10 max-w-md space-y-3 shadow-2xl">
+              <div className="flex items-center justify-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs font-bold font-mono uppercase tracking-widest text-emerald-400">
+                  Live Market Feed Connected
+                </span>
+              </div>
+              <div className="text-sm font-extrabold text-white tracking-wide font-mono">
+                {symbol || 'Awaiting Contract'}
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Connected to Dhan WebSocket gameloop. Live 0.5s price delta, depth, and order book imbalance are actively streaming.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Current Decision Card */}
+        {(agentDecision?.direction || agentDecision?.rationale) && (
+          <div className="absolute top-4 right-4 z-40 w-72 max-h-[80%] overflow-hidden">
+            <DecisionCard
+              direction={agentDecision.direction || 'FLAT'}
+              regime={agentDecision.regime || ''}
+              rationale={agentDecision.rationale || ''}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Empty State / Live Stream Status Overlay */}
-      {activeData.length === 0 && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-25 pointer-events-none p-6 text-center">
-          <div className="p-6 rounded-2xl bg-black/40 backdrop-blur-xl border border-white/10 max-w-md space-y-3 shadow-2xl">
-            <div className="flex items-center justify-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs font-bold font-mono uppercase tracking-widest text-emerald-400">
-                Live Market Feed Connected
-              </span>
-            </div>
-            <div className="text-sm font-extrabold text-white tracking-wide font-mono">
-              {symbol || 'Awaiting Contract'}
-            </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Connected to Dhan WebSocket gameloop. Live 0.5s price delta, depth, and order book imbalance are actively streaming.
-            </p>
+      {/* TradingView-style Draggable Splitter Divider */}
+      {config.showHARSI !== false && (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          tabIndex={0}
+          title="Drag to resize panes • Double-click to reset"
+          onPointerDown={handleDividerPointerDown}
+          onDoubleClick={handleDividerDoubleClick}
+          className={`w-full h-2 relative flex items-center justify-center cursor-row-resize select-none z-30 group transition-colors duration-150 ${
+            isDraggingDivider ? 'bg-purple-500/30' : 'bg-[#0b1329] hover:bg-purple-500/20'
+          }`}
+        >
+          {/* Subtle horizontal line */}
+          <div
+            className={`w-full h-[1px] transition-colors duration-150 ${
+              isDraggingDivider ? 'bg-purple-400' : 'bg-slate-700/70 group-hover:bg-purple-400/80'
+            }`}
+          />
+
+          {/* TradingView Grip Handle Pill */}
+          <div
+            className={`absolute flex items-center justify-center px-2 py-0.5 rounded-full bg-[#0b1329] border shadow-sm transition-all duration-150 ${
+              isDraggingDivider
+                ? 'border-purple-400 scale-110 shadow-purple-500/20'
+                : 'border-slate-700/80 group-hover:border-purple-400/80 group-hover:scale-105'
+            }`}
+          >
+            <div
+              className={`w-6 h-1 rounded-full transition-colors duration-150 ${
+                isDraggingDivider ? 'bg-purple-400' : 'bg-slate-500 group-hover:bg-purple-400'
+              }`}
+            />
           </div>
         </div>
       )}
 
-      {/* Current Decision Card */}
-      {(agentDecision?.direction || agentDecision?.rationale) && (
-        <div className="absolute top-4 right-4 z-40 w-72 max-h-[80%] overflow-hidden">
-          <DecisionCard
-            direction={agentDecision.direction || 'FLAT'}
-            regime={agentDecision.regime || ''}
-            rationale={agentDecision.rationale || ''}
-          />
+      {/* JayRogers HARSI Subplot Pane */}
+      {config.showHARSI !== false && (
+        <div
+          style={{ height: `${subplotHeight}px` }}
+          className={`w-full relative bg-[#080e1e]/90 flex flex-col flex-shrink-0 z-10 ${
+            isDraggingDivider ? 'pointer-events-none' : ''
+          }`}
+        >
+          {/* Subplot Header / Legend Bar */}
+          <div className="h-5 px-3 py-0.5 flex items-center justify-between text-[10px] font-mono text-slate-400 border-b border-white/5 bg-[#0d1527]/90 select-none">
+            <div className="flex items-center gap-2">
+              <span className="text-purple-400 font-bold tracking-wider">HARSI •</span>
+              <span className="text-slate-300">Heikin Ashi RSI (14, 1)</span>
+              <span className="text-amber-400 font-semibold">• RSI (7)</span>
+              <span className="text-slate-500">Median: 0</span>
+              <span className="text-emerald-400/90 font-bold ml-1">▲ BUY</span>
+              <span className="text-slate-600">/</span>
+              <span className="text-rose-400/90 font-bold">▼ SELL</span>
+            </div>
+            <div className="flex items-center gap-2 text-[9px]">
+              <span className="text-red-400/90 font-mono">OB: +20 / +30</span>
+              <span className="text-slate-600">•</span>
+              <span className="text-emerald-400/90 font-mono">OS: -20 / -30</span>
+            </div>
+          </div>
+          {/* Subplot Chart Container */}
+          <div ref={harsiContainerRef} className="w-full flex-1 relative" />
         </div>
       )}
     </div>
@@ -1238,9 +1603,12 @@ function chartSceneAreEqual(prev: ChartSceneProps, next: ChartSceneProps): boole
     if (prev.mode !== next.mode) return false;
     if (prev.symbol !== next.symbol) return false;
     if (prev.config !== next.config) return false;
+    if (prev.config.showHARSI !== next.config.showHARSI) return false;
     if (prev.data.length !== next.data.length) return false;
     if (prev.positions.length !== next.positions.length) return false;
     if ((prev.closedTrades?.length ?? 0) !== (next.closedTrades?.length ?? 0)) return false;
+    if (prev.quantDecision !== next.quantDecision) return false;
+    if ((prev.decisionHistory?.length ?? 0) !== (next.decisionHistory?.length ?? 0)) return false;
     if (prev.agentDecision !== next.agentDecision) return false;
     if (prev.amtAnalysis !== next.amtAnalysis) return false;
     // HalfTrend is fed as its own prop (not part of amtAnalysis) — the

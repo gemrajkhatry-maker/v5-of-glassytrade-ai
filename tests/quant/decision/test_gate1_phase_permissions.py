@@ -49,16 +49,24 @@ _EVIDENCE = SetupEvidence(
 
 def _ctx(bar_time: str, setup_type: str = "TRIPLE_A") -> DecisionContext:
     info = get_session_info(bar_time, market="NSE")
-    evidence = (
-        _EVIDENCE
-        if setup_type == "TRIPLE_A"
-        else SetupEvidence(
+    if setup_type == "TRIPLE_A":
+        evidence = _EVIDENCE
+    elif setup_type == "SECOND_DRIVE":
+        evidence = SetupEvidence(
+            setup_type="SECOND_DRIVE",
+            direction="SHORT",
+            drive_number=2,
+            d1_rejected=True,
+            rejection=True,
+            cvd_agrees=True,
+        )
+    else:
+        evidence = SetupEvidence(
             setup_type="VA_FADE",
             direction="SHORT",
             rejection=True,
             cvd_agrees=True,
         )
-    )
     return DecisionContext(
         bar=_make_bar(bar_time),
         symbol="NIFTY",
@@ -92,6 +100,13 @@ def test_midday_blocks_momentum_setup():
 def test_midday_allows_reversion_setup():
     """Phase 3 favors mean reversion: VA_FADE passes the phase permission."""
     ctx = _ctx("2026-08-19T12:45:00+05:30", setup_type="VA_FADE")
+    result = gate_session_phase(ctx)
+    assert result.passed is True
+
+
+def test_midday_allows_second_drive_reversion():
+    """Phase 3 favors mean reversion: SECOND_DRIVE reclaim passes Gate 1."""
+    ctx = _ctx("2026-08-19T12:45:00+05:30", setup_type="SECOND_DRIVE")
     result = gate_session_phase(ctx)
     assert result.passed is True
 

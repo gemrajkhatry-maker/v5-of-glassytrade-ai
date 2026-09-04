@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Any
 
 from quant.contracts.aggregates import INITIAL_CAPITAL
-from quant.contracts.timezones import IST
+from quant.contracts.timezones import IST, epoch_to_iso
 from quant.decision.decision_service import QuantDecision
 from quant.execution.order import Fill, Position
 from quant.execution.risk import RiskState
@@ -72,12 +72,13 @@ def _engine_portfolio(state: EngineState) -> dict:
     any open position.
     """
     realized = float(getattr(state, "realized_pnl", 0.0) or 0.0)
+    closed = list(getattr(state, "closed_trades", ()) or [])
     base = {
         "balance": float(INITIAL_CAPITAL),
         "equity": round(float(INITIAL_CAPITAL) + realized, 2),
         "leverage": 10,
         "positions": [],
-        "closedTrades": [],
+        "closedTrades": closed,
     }
     if state.position is None:
         return base
@@ -86,6 +87,11 @@ def _engine_portfolio(state: EngineState) -> dict:
     size = float(pos.size)
     ltp = float(state.last_bar.close) if state.last_bar else None
     pnl = round((ltp - entry) * size, 2) if ltp else 0.0
+    entry_time = str(getattr(pos, "entry_time", "") or "")
+    if not entry_time and state.last_bar:
+        entry_time = str(state.last_bar.time or "")
+    if not entry_time:
+        entry_time = datetime.now(tz=IST).isoformat()
     position_dto = {
         "id": pos.id,
         "symbol": state.symbol,
@@ -96,7 +102,7 @@ def _engine_portfolio(state: EngineState) -> dict:
         "stopLoss": float(pos.sl),
         "takeProfit": float(pos.tp),
         "pnl": pnl,
-        "entryTime": "",
+        "entryTime": _epoch_to_iso(entry_time),
         "status": "OPEN",
     }
     if ltp is not None:
@@ -111,31 +117,9 @@ def _engine_portfolio(state: EngineState) -> dict:
 _EPOCH_2000 = 946684800
 
 
-def _epoch_to_iso(time_str: str) -> str:
-    """Normalize a quant tick/bar time to the WS ISO-8601 IST contract.
-
-    Live ticks are unix-epoch strings (``"1786095001"`` or ``"1786095001.0"``).
-    ``int()`` rejects the float form Dhan history still emits — that used to
-    pass through unchanged, after which ``time[:10]`` was treated as a calendar
-    date and VWAP/CVD/Triple-A reset every bar.
-    """
-    text = str(time_str or "").strip()
-    if not text:
-        return time_str
-    try:
-        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=IST)
-        return dt.astimezone(IST).isoformat()
-    except (TypeError, ValueError):
-        pass
-    try:
-        epoch = float(text)
-    except (TypeError, ValueError):
-        return time_str
-    if epoch < _EPOCH_2000:
-        return time_str
-    return datetime.fromtimestamp(epoch, tz=IST).isoformat()
+def _epoch_to_iso(time_str: str | float | int | None) -> str:
+    """Normalize a quant tick/bar time to the WS ISO-8601 IST contract."""
+    return epoch_to_iso(time_str)
 
 
 def session_date_key(time_str: str) -> str:

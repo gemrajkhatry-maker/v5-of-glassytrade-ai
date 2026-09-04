@@ -42,6 +42,7 @@ export const DEFAULT_CHART_CONFIG = {
   showVolumeProfile: true,
   vpMode: 'combined' as const,
   showHalfTrend: true,
+  showHARSI: true,
   trend: 'volatile' as const,
 };
 

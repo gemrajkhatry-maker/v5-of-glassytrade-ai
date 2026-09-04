@@ -4,8 +4,8 @@ from quant.decision.result import GateResult
 # Momentum-family setups require the phase table's trend-continuation
 # permission; reversion-family setups require the reversion permission.
 # Mirrors quant/decision/setup_state.py SetupType taxonomy.
-_MOMENTUM_SETUPS = frozenset({"TRIPLE_A", "SECOND_DRIVE", "LVN_SNIPER"})
-_REVERSION_SETUPS = frozenset({"VA_FADE"})
+_MOMENTUM_SETUPS = frozenset({"TRIPLE_A", "LVN_SNIPER"})
+_REVERSION_SETUPS = frozenset({"VA_FADE", "SECOND_DRIVE"})
 
 
 def gate_session_phase(ctx: DecisionContext) -> GateResult:

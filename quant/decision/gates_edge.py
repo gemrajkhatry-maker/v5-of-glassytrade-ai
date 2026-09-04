@@ -36,9 +36,9 @@ def _check_guards(ctx: DecisionContext) -> GateResult | None:
         return GateResult(3, False, "Dead market — no edge")
     close_px = float(ctx.bar.close) if ctx.bar else 0.0
     if ctx.agent_direction == "LONG" and ctx.vwap_upper_2 > 0 and close_px > ctx.vwap_upper_2:
-        return GateResult(3, False, f"Anti-Climax: LONG rejected at +{ctx.vwap_std:.1f}σ extension")
+        return GateResult(3, False, f"Anti-Climax: LONG rejected at +{abs(ctx.vwap_std):.1f}σ extension")
     if ctx.agent_direction == "SHORT" and ctx.vwap_lower_2 > 0 and close_px < ctx.vwap_lower_2:
-        return GateResult(3, False, f"Anti-Climax: SHORT rejected at -{ctx.vwap_std:.1f}σ extension")
+        return GateResult(3, False, f"Anti-Climax: SHORT rejected at -{abs(ctx.vwap_std):.1f}σ extension")
     if getattr(ctx, "drive_number", 0) >= 3 and not getattr(ctx, "drive_entry_valid", False):
         return GateResult(3, False, f"Drive count exhausted ({ctx.drive_number})")
     cvd_slope = ctx.cvd_slope

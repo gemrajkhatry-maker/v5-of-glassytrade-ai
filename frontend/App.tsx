@@ -10,7 +10,7 @@ import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTra
 import JournalPage from './components/JournalPage';
 import ModelStateBanner from './components/ModelStateBanner';
 import { useKeyboardNavigation, getDefaultTradingHotkeys } from './hooks/useKeyboardNavigation';
-import { useUIStore, selectChartMode, selectSidebarOpen, selectRightSidebarOpen, selectVpMode, selectShowHalfTrend } from './stores/ui';
+import { useUIStore, selectChartMode, selectSidebarOpen, selectRightSidebarOpen, selectVpMode, selectShowHalfTrend, selectShowHARSI } from './stores/ui';
 
 const simpleId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
@@ -29,6 +29,8 @@ function App() {
     const setVpMode = useUIStore(s => s.setVpMode);
     const showHalfTrend = useUIStore(selectShowHalfTrend);
     const setHalfTrendVisible = useUIStore(s => s.setHalfTrendVisible);
+    const showHARSI = useUIStore(selectShowHARSI);
+    const setHARSIVisible = useUIStore(s => s.setHARSIVisible);
     const [timeframe, setTimeframe] = useState<'1m' | '5m' | 'split'>('5m');
     const currentSymbolIndex = useRef(0);
 
@@ -96,8 +98,9 @@ function App() {
         vpMode: vpMode || config.vpMode,
         showVolumeProfile: vpMode !== 'off',
         showHalfTrend,
+        showHARSI,
         symbol: activeInstrument?.symbol || config.symbol,
-    }), [config, vpMode, showHalfTrend, activeInstrument?.symbol, timeframe]);
+    }), [config, vpMode, showHalfTrend, showHARSI, activeInstrument?.symbol, timeframe]);
 
     // --- Rendering ---
 
@@ -171,6 +174,8 @@ function App() {
                                         config={{ ...effectiveConfig, interval: '5m', showVolumeProfile: true }}
                                         positions={activeInstrument.portfolio.positions}
                                         closedTrades={activeInstrument.portfolio.closedTrades}
+                                        quantDecision={activeInstrument.quantDecisionAnalysis}
+                                        decisionHistory={activeInstrument.llmHistory}
                                         agentDecision={activeInstrument.agentDecision}
                                         amtAnalysis={activeInstrument.amtAnalysis}
                                         halfTrendSeries={activeInstrument.halfTrendSeries}
@@ -190,6 +195,8 @@ function App() {
                                         config={{ ...effectiveConfig, interval: '1m', showVolumeProfile: false }}
                                         positions={activeInstrument.portfolio.positions}
                                         closedTrades={activeInstrument.portfolio.closedTrades}
+                                        quantDecision={activeInstrument.quantDecisionAnalysis}
+                                        decisionHistory={activeInstrument.llmHistory}
                                         agentDecision={activeInstrument.agentDecision}
                                         amtAnalysis={activeInstrument.amtAnalysis}
                                         halfTrendSeries={activeInstrument.halfTrendSeries}
@@ -206,6 +213,8 @@ function App() {
                                 config={effectiveConfig}
                                 positions={activeInstrument.portfolio.positions}
                                 closedTrades={activeInstrument.portfolio.closedTrades}
+                                quantDecision={activeInstrument.quantDecisionAnalysis}
+                                decisionHistory={activeInstrument.llmHistory}
                                 agentDecision={activeInstrument.agentDecision}
                                 amtAnalysis={activeInstrument.amtAnalysis}
                                 halfTrendSeries={activeInstrument.halfTrendSeries}
@@ -323,6 +332,31 @@ function App() {
                                         }}
                                         className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${showHalfTrend === on
                                             ? 'bg-glassy-ai-primary/20 text-glassy-ai-primary border border-glassy-ai-primary/40'
+                                            : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'
+                                            }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                                </div>
+                            </div>
+
+                            {/* HARSI Oscillator Subplot */}
+                            <div className="flex flex-col gap-1">
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-purple-400 pl-1">HARSI</span>
+                                <div className="flex bg-glassy-bg-tertiary backdrop-blur-md rounded-sm p-1 gap-1 border border-glassy-border-default">
+                                {([
+                                    { on: true, label: 'On' },
+                                    { on: false, label: 'Off' },
+                                ] as const).map(({ on, label }) => (
+                                    <button
+                                        key={label}
+                                        onClick={() => {
+                                            setHARSIVisible(on);
+                                            setConfig(s => ({ ...s, showHARSI: on }));
+                                        }}
+                                        className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${showHARSI === on
+                                            ? 'bg-purple-500/20 text-purple-400 border border-purple-500/40'
                                             : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'
                                             }`}
                                     >

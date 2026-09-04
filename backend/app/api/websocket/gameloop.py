@@ -376,6 +376,15 @@ async def _coordinator_viewer_loop(
                         ws, {"status": "symbol_switched", "symbol": symbol}
                     ):
                         return
+                    # Send fresh full snapshot for newly switched symbol so client has complete state
+                    try:
+                        fresh_snap = await asyncio.to_thread(coordinator.snapshot, symbol)
+                        copied = copy.deepcopy(fresh_snap)
+                        previous_states[symbol] = copied
+                        if not await _safe_send(ws, {**copied, "_type": "full"}):
+                            return
+                    except Exception:
+                        logger.exception("Error sending switch snapshot for %s", symbol)
 
                 # Broadcast deltas for all active symbols continuously (computed off the event loop)
                 deltas, previous_states = await asyncio.to_thread(

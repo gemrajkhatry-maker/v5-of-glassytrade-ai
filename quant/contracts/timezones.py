@@ -31,3 +31,28 @@ MCX_SESSION_CLOSE = time(23, 30)
 def today_ist() -> date:
     """Current calendar date in IST — the exchange's date."""
     return datetime.now(tz=IST).date()
+
+
+_EPOCH_2000 = 946684800
+
+
+def epoch_to_iso(time_str: str | float | int | None) -> str:
+    """Normalize a timestamp or epoch to an ISO-8601 IST string."""
+    text = str(time_str or "").strip()
+    if not text:
+        return ""
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=IST)
+        return dt.astimezone(IST).isoformat()
+    except (TypeError, ValueError):
+        pass
+    try:
+        epoch = float(text)
+    except (TypeError, ValueError):
+        return text
+    if epoch < _EPOCH_2000:
+        return text
+    return datetime.fromtimestamp(epoch, tz=IST).isoformat()
+

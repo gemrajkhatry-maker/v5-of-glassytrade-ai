@@ -9,7 +9,7 @@ let volumeSeriesMock: any;
 
 vi.mock('lightweight-charts', () => ({
   createChart: vi.fn(() => {
-    candleSeriesMock = {
+    const thisCandleSeries = {
       setData: vi.fn(),
       update: vi.fn(),
       removePriceLine: vi.fn(),
@@ -17,20 +17,26 @@ vi.mock('lightweight-charts', () => ({
       setMarkers: vi.fn(),
       applyOptions: vi.fn(),
     };
-    volumeSeriesMock = {
+    if (!candleSeriesMock) {
+      candleSeriesMock = thisCandleSeries;
+    }
+    const thisVolumeSeries = {
       setData: vi.fn(),
       update: vi.fn(),
       priceScale: vi.fn(() => ({
         applyOptions: vi.fn(),
       })),
     };
+    if (!volumeSeriesMock) {
+      volumeSeriesMock = thisVolumeSeries;
+    }
     const lineSeriesMock = {
       setData: vi.fn(),
       applyOptions: vi.fn(),
     };
     return {
-      addCandlestickSeries: vi.fn(() => candleSeriesMock),
-      addHistogramSeries: vi.fn(() => volumeSeriesMock),
+      addCandlestickSeries: vi.fn(() => thisCandleSeries),
+      addHistogramSeries: vi.fn(() => thisVolumeSeries),
       addLineSeries: vi.fn(() => lineSeriesMock),
       remove: vi.fn(),
       applyOptions: vi.fn(),
@@ -69,6 +75,8 @@ const sampleData: OHLCData[] = [
 describe('ChartScene Dual-Timeframe & Tick Isolation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    candleSeriesMock = null;
+    volumeSeriesMock = null;
     global.fetch = vi.fn().mockImplementation(() =>
       Promise.resolve({
         ok: true,

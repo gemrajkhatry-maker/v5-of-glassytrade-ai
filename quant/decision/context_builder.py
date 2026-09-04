@@ -106,7 +106,13 @@ class DecisionContextBuilder:
         triple_a_sig = str(amt_dto.get("tripleASignal") or "").upper()
         cvd_val = float(amt_dto.get("cvdSlope") or 0.0)
 
+        cvd_threshold = 0.3 if str(market).upper() == "MCX" else 0.5
         if break_type == "INITIATIVE" and break_dir in ("UP", "DOWN"):
+            # ponytail: CVD strongly opposing the break indicates absorption/exhaustion trap (Fabio Gap #2/#7)
+            if break_dir == "DOWN" and cvd_val > cvd_threshold:
+                return "LONG"
+            if break_dir == "UP" and cvd_val < -cvd_threshold:
+                return "SHORT"
             return "LONG" if break_dir == "UP" else "SHORT"
         if triple_a_sig in ("LONG", "SHORT"):
             return triple_a_sig
@@ -116,7 +122,6 @@ class DecisionContextBuilder:
             return "LONG"
         if obi <= -0.20 and close_px < vwap_lower_1:
             return "SHORT"
-        cvd_threshold = 0.3 if str(market).upper() == "MCX" else 0.5
         if cvd_val > cvd_threshold and (close_px > vah or ofi > 0.10):
             return "LONG"
         if cvd_val < -cvd_threshold and (close_px < val or ofi < -0.10):
@@ -306,6 +311,9 @@ class DecisionContextBuilder:
         agent_direction = self._resolve_direction(amt_dto, close_px, vah, val, obi, ofi, vwap_upper_1, vwap_lower_1, market=market)
         nearest_leg_lvn = self._nearest_leg_lvn(amt_dto, close_px)
         setup_evidence = self._build_setup_evidence(amt_dto, agent_direction, nearest_leg_lvn)
+        # ponytail: a confirmed structural setup evidence establishes the trade direction
+        if setup_evidence and getattr(setup_evidence, "direction", None) and getattr(setup_evidence, "is_complete", lambda: False)():
+            agent_direction = setup_evidence.direction
         pos = self._extract_position(position, close_px, bar_index, entry_bar_index)
         _si_dir, _si_mag, _si_low, _si_high = _latest_stacked_imbalance(amt_dto)
         _buy_wall_below, _sell_wall_above = _print_levels_from_dto(amt_dto, bar)

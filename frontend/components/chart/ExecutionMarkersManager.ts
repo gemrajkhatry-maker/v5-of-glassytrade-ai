@@ -25,20 +25,29 @@ export interface ChartMarker {
 }
 
 export interface ExecutionMarkersOptions {
-  mode: 'STANDARD';
+  mode: 'STANDARD' | 'FOOTPRINT' | 'RANGE';
   maxMarkers?: number; // Limit markers for performance
+  quantDecision?: any | null;
+  decisionHistory?: any[];
 }
 
 /**
  * Generate entry markers from open positions
  * 
  * @param positions - Open trade positions
+ * @param fallbackTime - Optional fallback IST timestamp if pos.entryTime is missing
  * @returns Array of entry markers
  */
-export function generateEntryMarkers(positions: TradePosition[]): ChartMarker[] {
+export function generateEntryMarkers(
+  positions: TradePosition[],
+  fallbackTime?: number
+): ChartMarker[] {
   const markers: ChartMarker[] = [];
   (positions || []).forEach(pos => {
-    const time = toISTTimestamp(pos.entryTime);
+    let time = toISTTimestamp(pos.entryTime);
+    if ((time <= 0 || !Number.isFinite(time)) && fallbackTime && fallbackTime > 0) {
+      time = fallbackTime;
+    }
     if (time <= 0 || !Number.isFinite(time)) return;
     markers.push({
       time,
@@ -293,6 +302,87 @@ export function generateVARSReclaimMarkers(
   return markers;
 }
 
+/**
+ * Generate Triple-A (Absorption -> Accumulation -> Aggression) signal markers
+ */
+export function generateTripleAMarkers(
+  data: OHLCData[],
+  amt: AMTAnalysis | null
+): ChartMarker[] {
+  if (!amt || !data || data.length === 0) return [];
+  const signal = (amt as any).tripleASignal;
+  if (!signal || (signal !== 'LONG' && signal !== 'SHORT')) return [];
+
+  const lastCandle = data[data.length - 1];
+  const time = toISTTimestamp(lastCandle.time);
+  if (time <= 0 || !Number.isFinite(time)) return [];
+
+  const phase = (amt as any).tripleAPhase || 'AGG';
+  const isLong = signal === 'LONG';
+
+  return [{
+    time,
+    position: isLong ? 'belowBar' : 'aboveBar',
+    color: isLong ? '#06b6d4' : '#f43f5e',
+    shape: isLong ? 'arrowUp' : 'arrowDown',
+    text: `3A ${signal} (${phase})`,
+    size: 2 as const,
+  }];
+}
+
+/**
+ * Generate AMT Quant Decision and historical signal markers
+ */
+export function generateDecisionSignalMarkers(
+  data: OHLCData[],
+  quantDecision?: any | null,
+  decisionHistory?: any[]
+): ChartMarker[] {
+  const markers: ChartMarker[] = [];
+
+  // Historical decisions
+  (decisionHistory || []).forEach(h => {
+    if (h.direction === 'LONG' || h.direction === 'SHORT') {
+      const time = toISTTimestamp(h.timestamp);
+      if (time > 0 && Number.isFinite(time)) {
+        const isLong = h.direction === 'LONG';
+        markers.push({
+          time,
+          position: isLong ? 'belowBar' : 'aboveBar',
+          color: isLong ? '#10b981' : '#ef4444',
+          shape: isLong ? 'arrowUp' : 'arrowDown',
+          text: `AMT ${h.direction}`,
+          size: 1 as const,
+        });
+      }
+    }
+  });
+
+  // Current active quant decision
+  if (quantDecision?.signal && (quantDecision.signal.type === 'LONG' || quantDecision.signal.type === 'SHORT')) {
+    const isLong = quantDecision.signal.type === 'LONG';
+    const entryPx = Number(quantDecision.signal.entry) || 0;
+    const pxStr = entryPx > 0 ? ` @${entryPx.toFixed(2)}` : '';
+    const label = quantDecision.approved ? 'AMT DECISION' : 'AMT SIGNAL';
+
+    if (data && data.length > 0) {
+      const lastTime = toISTTimestamp(data[data.length - 1].time);
+      if (lastTime > 0 && Number.isFinite(lastTime)) {
+        markers.push({
+          time: lastTime,
+          position: isLong ? 'belowBar' : 'aboveBar',
+          color: isLong ? '#10b981' : '#ef4444',
+          shape: isLong ? 'arrowUp' : 'arrowDown',
+          text: `${label} ${quantDecision.signal.type}${pxStr}`,
+          size: 2 as const,
+        });
+      }
+    }
+  }
+
+  return markers;
+}
+
 /** Pine HalfTrend colors. */
 export const HALF_TREND_UP_COLOR = '#2962ff'; // Pine buyColor (blue)
 export const HALF_TREND_DOWN_COLOR = '#f23645'; // Pine sellColor (red)
@@ -455,12 +545,19 @@ export function generateAllExecutionMarkers(
   options: ExecutionMarkersOptions
 ): ChartMarker[] {
   const markers: ChartMarker[] = [];
+  const fallbackTime = data && data.length > 0 ? toISTTimestamp(data[data.length - 1].time) : undefined;
 
   // Entry markers from open positions
-  markers.push(...generateEntryMarkers(positions));
+  markers.push(...generateEntryMarkers(positions, fallbackTime));
 
   // Entry + exit markers from closed trades
   markers.push(...generateClosedTradeMarkers(closedTrades));
+
+  // AMT Decision and Signal markers
+  markers.push(...generateDecisionSignalMarkers(data, options?.quantDecision, options?.decisionHistory));
+
+  // Triple-A markers
+  markers.push(...generateTripleAMarkers(data, amt));
 
   // IB break marker
   const ibBreak = generateIBBreakMarker(data, amt);
@@ -477,16 +574,30 @@ export function generateAllExecutionMarkers(
   // LuxAlgo VARS Reclaim markers
   markers.push(...generateVARSReclaimMarkers(data, amt));
 
+  // Deduplicate overlapping markers with same time, position, and text
+  const seen = new Set<string>();
+  const deduped: ChartMarker[] = [];
+  for (const m of markers) {
+    const key = `${m.time}_${m.position}_${m.text}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(m);
+    }
+  }
+
   // Sanitize: ensure all markers have valid finite time > 0
-  const validMarkers = markers.filter(m => Number.isFinite(m.time) && m.time > 0);
+  const validMarkers = deduped.filter(m => Number.isFinite(m.time) && m.time > 0);
 
   // Limit markers for performance (optional)
-  const maxMarkers = options.maxMarkers || 100;
+  const maxMarkers = options?.maxMarkers || 100;
   if (validMarkers.length > maxMarkers) {
     // Keep most recent markers by sorting by time descending
     validMarkers.sort((a, b) => b.time - a.time);
-    return validMarkers.slice(0, maxMarkers);
+    const sliced = validMarkers.slice(0, maxMarkers);
+    sliced.sort((a, b) => a.time - b.time);
+    return sliced;
   }
 
+  validMarkers.sort((a, b) => a.time - b.time);
   return validMarkers;
 }

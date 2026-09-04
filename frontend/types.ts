@@ -170,6 +170,8 @@ export interface ChartConfig {
   vpMode?: 'session' | 'leg' | 'combined' | 'off';
   /** Show the HalfTrend overlay: trend line, ATR channel rails, Buy/Sell labels. */
   showHalfTrend?: boolean;
+  /** Show the JayRogers Heikin Ashi RSI Oscillator (HARSI) lower subplot pane. */
+  showHARSI?: boolean;
   trend?: 'bullish' | 'bearish' | 'sideways' | 'volatile';
 }
 

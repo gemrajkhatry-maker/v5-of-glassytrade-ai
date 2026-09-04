@@ -6,6 +6,8 @@ import {
   generateCVDDivergenceMarkers,
   generateAcceptanceRejectionMarkers,
   generateAllExecutionMarkers,
+  generateTripleAMarkers,
+  generateDecisionSignalMarkers,
   halfTrendLivePoint,
   mergeHalfTrendPoint,
   halfTrendSeriesData,
@@ -386,6 +388,87 @@ describe('ExecutionMarkersManager', () => {
       expect(varsMarker?.shape).toBe('arrowUp');
       expect(varsMarker?.position).toBe('belowBar');
     });
+
+    it('generates Triple-A markers from amtAnalysis', () => {
+      const data = [{ time: '2024-01-01T09:15:00Z', close: 50000 }] as any[];
+      const amt = {
+        tripleAPhase: 'AGGRESSION',
+        tripleASignal: 'LONG',
+      } as any;
+
+      const markers = generateAllExecutionMarkers([], [], data, amt, { mode: 'STANDARD' });
+      const m = markers.find(x => x.text.includes('3A LONG'));
+      expect(m).toBeDefined();
+      expect(m?.shape).toBe('arrowUp');
+      expect(m?.position).toBe('belowBar');
+    });
+
+    it('generates AMT Decision and historical signal markers', () => {
+      const data = [{ time: '2024-01-01T09:15:00Z', close: 50000 }] as any[];
+      const quantDecision = {
+        approved: true,
+        signal: { type: 'LONG', entry: 50000.0, sl: 49950.0, tp: 50100.0, rr: 2.0 },
+      };
+      const decisionHistory = [
+        { timestamp: new Date('2024-01-01T09:15:00Z').getTime(), direction: 'LONG' },
+      ];
+
+      const markers = generateAllExecutionMarkers([], [], data, null, {
+        mode: 'STANDARD',
+        quantDecision,
+        decisionHistory,
+      });
+
+      const decMarker = markers.find(x => x.text.includes('AMT DECISION LONG'));
+      expect(decMarker).toBeDefined();
+      expect(decMarker?.shape).toBe('arrowUp');
+      expect(decMarker?.color).toBe('#10b981');
+
+      const histMarker = markers.find(x => x.text === 'AMT LONG');
+      expect(histMarker).toBeDefined();
+    });
   });
 
+  describe('generateTripleAMarkers', () => {
+    it('generates marker when tripleASignal is LONG', () => {
+      const data = [{ time: '2024-01-01T09:15:00Z', close: 50000 }] as any[];
+      const amt = { tripleAPhase: 'AGGRESSION', tripleASignal: 'LONG' } as any;
+      const markers = generateTripleAMarkers(data, amt);
+      expect(markers).toHaveLength(1);
+      expect(markers[0].text).toBe('3A LONG (AGGRESSION)');
+      expect(markers[0].shape).toBe('arrowUp');
+      expect(markers[0].position).toBe('belowBar');
+    });
+
+    it('generates marker when tripleASignal is SHORT', () => {
+      const data = [{ time: '2024-01-01T09:15:00Z', close: 50000 }] as any[];
+      const amt = { tripleAPhase: 'AGGRESSION', tripleASignal: 'SHORT' } as any;
+      const markers = generateTripleAMarkers(data, amt);
+      expect(markers).toHaveLength(1);
+      expect(markers[0].text).toBe('3A SHORT (AGGRESSION)');
+      expect(markers[0].shape).toBe('arrowDown');
+      expect(markers[0].position).toBe('aboveBar');
+    });
+
+    it('returns empty when no tripleASignal', () => {
+      const data = [{ time: '2024-01-01T09:15:00Z', close: 50000 }] as any[];
+      const amt = { tripleAPhase: 'WAITING', tripleASignal: null } as any;
+      expect(generateTripleAMarkers(data, amt)).toHaveLength(0);
+    });
+  });
+
+  describe('generateDecisionSignalMarkers', () => {
+    it('generates marker from active quant decision', () => {
+      const data = [{ time: '2024-01-01T09:15:00Z', close: 50000 }] as any[];
+      const qd = {
+        approved: false,
+        signal: { type: 'SHORT', entry: 50000.0 },
+      };
+      const markers = generateDecisionSignalMarkers(data, qd);
+      expect(markers).toHaveLength(1);
+      expect(markers[0].text).toBe('AMT SIGNAL SHORT @50000.00');
+      expect(markers[0].shape).toBe('arrowDown');
+      expect(markers[0].position).toBe('aboveBar');
+    });
+  });
 });

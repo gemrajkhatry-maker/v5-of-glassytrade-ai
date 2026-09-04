@@ -112,7 +112,6 @@ class DecisionService:
         if fade:
             import logging
             log = logging.getLogger(__name__)
-            log.info(f"FADE EVAL {ctx.symbol}: fade={fade} agent_dir={ctx.agent_direction} rr={fade.rr} min_rr={self.min_rr}")
         if fade and (ctx.agent_direction in (fade.direction, None)) and fade.rr >= self.min_rr:
             if not is_min_stop_met(fade.entry, fade.sl):
                 return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)

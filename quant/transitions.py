@@ -23,6 +23,7 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 
+from quant.contracts.timezones import epoch_to_iso
 from quant.state_machine import EngineState, PositionState
 from quant.events import (
     Event,
@@ -78,16 +79,23 @@ def _position_to_state(pos) -> PositionState:
 
     # Otherwise, extract from execution.order.Position
     _validate_position_payload(pos)
-    sig = pos.order.signal
+    sig = getattr(pos, "order", None) and getattr(pos.order, "signal", None)
+    entry_time = str(
+        getattr(pos, "open_time", "")
+        or getattr(pos, "entry_time", "")
+        or (sig.timestamp if sig else "")
+        or ""
+    )
     return PositionState(
         id=pos._id,
-        entry=float(sig.entry),
+        entry=float(sig.entry) if sig else float(getattr(pos, "open_price", 0.0) or getattr(pos, "entry_price", 0.0)),
         size=float(pos.size),
-        sl=float(sig.sl),
-        tp=float(sig.tp),
+        sl=float(sig.sl) if sig else float(getattr(pos, "stop_loss", 0.0)),
+        tp=float(sig.tp) if sig else float(getattr(pos, "take_profit", 0.0)),
         side="LONG" if pos.size > 0 else "SHORT",
         pyramid_level=int(getattr(pos, "pyramid_level", 0)),
         is_pyramid=bool(getattr(pos, "is_pyramid", False)),
+        entry_time=entry_time,
     )
 
 
@@ -102,6 +110,40 @@ def _close_id(fill) -> str | None:
     if closed_id is None:
         raise ValueError("PositionClosed fill.position has no id")
     return closed_id
+
+
+def _build_closed_trade_dto(fill, time_str: str = "") -> dict:
+    """Build a closed trade DTO for the chart and portfolio history."""
+    pos = getattr(fill, "position", None)
+    pos_id = str(getattr(pos, "_id", None) or getattr(pos, "id", "") or "")
+    sig = getattr(pos, "order", None) and getattr(pos.order, "signal", None)
+    side = getattr(pos, "side", "") or (sig.type if sig else ("LONG" if getattr(pos, "size", 0) > 0 else "SHORT"))
+    entry_px = float(getattr(pos, "open_price", 0.0) or getattr(pos, "entry_price", 0.0) or (sig.entry if sig else 0.0))
+    size_val = float(getattr(pos, "size", 0.0))
+    sl = float(getattr(pos, "stop_loss", 0.0) or (sig.sl if sig else 0.0))
+    tp = float(getattr(pos, "take_profit", 0.0) or (sig.tp if sig else 0.0))
+    pnl_val = float(getattr(fill, "pnl", 0.0))
+    open_t = str(getattr(pos, "open_time", "") or getattr(pos, "entry_time", "") or (sig.timestamp if sig else "") or "")
+    close_t = str(getattr(fill, "close_time", "") or time_str or "")
+    close_px = float(getattr(fill, "close_price", 0.0))
+    reason = str(getattr(fill, "reason", "EXIT"))
+
+    return {
+        "id": pos_id,
+        "symbol": str(getattr(pos, "symbol", "") or (sig.symbol if sig else "")),
+        "side": side,
+        "source": "AMT",
+        "entryPrice": entry_px,
+        "size": size_val,
+        "stopLoss": sl,
+        "takeProfit": tp,
+        "pnl": pnl_val,
+        "entryTime": epoch_to_iso(open_t),
+        "status": "CLOSED",
+        "exitPrice": close_px,
+        "exitTime": epoch_to_iso(close_t),
+        "closeReason": reason,
+    }
 
 
 def apply_event(state: EngineState, event: Event) -> EngineState:
@@ -130,6 +172,8 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
 
     elif isinstance(event, PositionOpened):
         pos_state = _position_to_state(event.position)
+        if not isinstance(event.position, PositionState) and not pos_state.entry_time and getattr(event, "time", None):
+            pos_state = replace(pos_state, entry_time=epoch_to_iso(event.time))
 
         # Check if this is a pyramid add-on
         if pos_state.is_pyramid:
@@ -181,6 +225,8 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
     elif isinstance(event, PositionClosed):
         closed_id = _close_id(event.fill)
         realized = state.realized_pnl + float(event.fill.pnl)
+        closed_dto = _build_closed_trade_dto(event.fill, getattr(event, "time", ""))
+        new_closed = (state.closed_trades + (closed_dto,))[-50:]
 
         # Pyramid close: ID matches one of the pyramids.
         pyramid_ids = {p.id for p in state.pyramids}
@@ -192,6 +238,7 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
                 pyramids=new_pyramids,
                 sequence=state.sequence + 1,
                 realized_pnl=realized,
+                closed_trades=new_closed,
             )
 
         # Base position close: ID must match.
@@ -203,7 +250,11 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
                 f"position {state.position.id!r} — close would be silently "
                 f"dropped otherwise"
             )
-        return replace(state.without_position(), realized_pnl=realized)
+        return replace(
+            state.without_position(),
+            realized_pnl=realized,
+            closed_trades=new_closed,
+        )
 
     elif isinstance(event, RiskUpdated):
         return state.with_risk(event.risk)

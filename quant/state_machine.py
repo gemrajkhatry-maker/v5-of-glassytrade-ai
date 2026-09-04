@@ -25,6 +25,7 @@ class PositionState:
     side: str  # "LONG" | "SHORT"
     pyramid_level: int = 0
     is_pyramid: bool = False
+    entry_time: str = ""
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,9 @@ class EngineState:
     
     # Cooldown tracking
     last_close_bar: int = -1
+
+    # Closed trades history (last N closed positions)
+    closed_trades: tuple[dict, ...] = ()
     
     # Immutable transitions
     def with_bar(self, bar: Bar) -> EngineState:

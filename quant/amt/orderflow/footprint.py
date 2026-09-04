@@ -343,11 +343,10 @@ def detect_contested_zone(candles: list[FootprintCandle], window: int = 2) -> bo
     if not buy_stacked_prices or not sell_stacked_prices:
         return False
 
-    # Check for actual price zone overlap: do opposing stacked imbalances collide within 5 ticks / 0.1%?
+    # ponytail: opposing stacked imbalances collide at the same price zone within 5 ticks (0.25-0.50 pts)
     for bp in buy_stacked_prices:
         for sp in sell_stacked_prices:
-            thresh = max(0.25, bp * 0.001)
-            if abs(bp - sp) <= thresh:
+            if abs(bp - sp) <= 0.50:
                 return True
 
     return False

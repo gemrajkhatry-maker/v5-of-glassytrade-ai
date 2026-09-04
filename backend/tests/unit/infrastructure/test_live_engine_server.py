@@ -33,7 +33,8 @@ def test_view_state_to_ws_has_frontend_snapshot_keys():
     eng = QuantEngine(FakeGateway(_ticks()), "NIFTY", interval_seconds=60)
     eng.run()
 
-    ws = view_state_to_ws(eng.projector.snapshot("NIFTY"))
+    from quant.state import project_state
+    ws = view_state_to_ws(project_state(eng.event_store.fold()))
 
     expected = {
         "_symbol",
