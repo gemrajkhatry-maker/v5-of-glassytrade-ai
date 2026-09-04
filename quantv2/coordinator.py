@@ -20,7 +20,8 @@ class Coordinator:
         self._last[symbol] = price
         eng.risk_cap = self._headroom(symbol)
         out = eng.on_tick(ts, price, volume, delta)
-        eng.last_decision = out
+        if out is not None:
+            eng.last_decision = out
         return out
 
     def eod_flatten(self, reason: str = "EOD") -> int:

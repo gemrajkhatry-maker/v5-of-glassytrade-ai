@@ -51,3 +51,25 @@ def test_live_port_delegates_and_last_decision_recorded():
     eng = c.engines["X"]
     assert eng.last_decision is out
     assert snapshot(c)["X"]["last_decision"] is out
+
+def test_midbar_tick_keeps_last_decision():
+    from quantv2.engine import Engine
+    from quantv2.oms import PaperOMS
+    from quantv2.coordinator import Coordinator
+    c = Coordinator()
+    c.add(Engine(symbol="X", interval_sec=60, oms=PaperOMS(), equity=100000.0))
+    c.on_tick("X", 0, 100.0, 1.0, 0.0)
+    closed = c.on_tick("X", 60, 100.0, 1.0, 0.0)
+    c.on_tick("X", 90, 100.1, 1.0, 0.0)
+    assert c.engines["X"].last_decision is closed
+
+def test_broker_port_contract():
+    from quantv2.broker import BrokerPort
+    from quantv2.oms import PaperOMS
+    from quantv2.types import Signal
+    class GoodPort:
+        def submit(self, signal, qty):
+            return PaperOMS().submit(signal, qty)
+    port: BrokerPort = GoodPort()
+    sig = Signal(type="LONG", entry=1.0, sl=0.9, tp=1.2, rr=2.0, setup="T", symbol="X", timestamp="t")
+    assert port.submit(sig, 1).qty == 1.0

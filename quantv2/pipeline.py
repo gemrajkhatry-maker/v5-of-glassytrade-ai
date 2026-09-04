@@ -39,4 +39,6 @@ def decide(ctx: Context, *, session_open: bool, can_trade: bool, cooldown_s: flo
         pos = oms.submit(sig, qty)
     except Exception:
         return Decision(False, "SUBMIT_FAILED")
+    if pos is None:
+        return Decision(False, "SUBMIT_FAILED")
     return Decision(True, setup, sig, pos)

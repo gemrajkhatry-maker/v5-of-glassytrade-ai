@@ -1,10 +1,17 @@
 from __future__ import annotations
+from typing import Protocol, runtime_checkable
 from quantv2.types import Signal
 from quantv2.oms import Position
 
 
 class LiveNotEnabled(Exception):
     pass
+
+
+@runtime_checkable
+class BrokerPort(Protocol):
+    """Live broker port contract: submit MUST return a quantv2 Position or raise."""
+    def submit(self, signal, qty: float): ...
 
 
 class BrokerAdapter:

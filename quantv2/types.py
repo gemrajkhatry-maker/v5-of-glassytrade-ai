@@ -1,5 +1,9 @@
 from __future__ import annotations
+from typing import TYPE_CHECKING
 from dataclasses import dataclass, field
+
+if TYPE_CHECKING:
+    from quantv2.oms import Position
 
 @dataclass(frozen=True)
 class Bar:
@@ -38,4 +42,4 @@ class Decision:
     approved: bool
     reason: str
     signal: Signal | None = None
-    position: object | None = None
+    position: "Position | None" = None

@@ -27,6 +27,16 @@ def test_portfolio_cap_rejects():
     d = decide(ctx, session_open=True, can_trade=True, cooldown_s=0.0, position_open=False, equity=100000.0, oms=PaperOMS(), open_risk=999999.0, risk_cap=1000.0)
     assert d.approved is False and d.reason == "PORTFOLIO_CAP"
 
+def test_none_submit_rejects():
+    class NoneOMS:
+        def submit(self, signal, qty):
+            return None
+    b = Bar(time="t", open=100.0, high=101.0, low=98.0, close=100.0, volume=5.0)
+    ctx = Context(symbol="X", bar=b, tick=0.05, vah=101.0, val=99.0, poc=100.8, cvd_slope=0.3,
+                  extra={"triple_phase": "AGGRESSION", "triple_signal": "LONG", "acceptance": True})
+    d = decide(ctx, session_open=True, can_trade=True, cooldown_s=0.0, position_open=False, equity=100000.0, oms=NoneOMS())
+    assert d.approved is False and d.reason == "SUBMIT_FAILED"
+
 def test_approved_carries_submitted_position():
     b = Bar(time="t", open=100.0, high=101.0, low=98.0, close=100.0, volume=5.0)
     ctx = Context(symbol="X", bar=b, tick=0.05, vah=101.0, val=99.0, poc=100.8, cvd_slope=0.3,
