@@ -26,12 +26,16 @@ class Coordinator:
     def eod_flatten(self, reason: str = "EOD") -> int:
         n = 0
         for symbol, eng in self.engines.items():
-            if eng.position is not None:
+            if eng.position is None:
+                continue
+            try:
                 eng.oms.close(eng.position, self._last.get(symbol, eng.position.entry), reason)
-                eng.position = None
-                eng.trail = {}
-                eng.open_risk = 0.0
-                n += 1
+            except Exception:
+                continue
+            eng.position = None
+            eng.trail = {}
+            eng.open_risk = 0.0
+            n += 1
         return n
 
     def load_state(self, state: dict) -> None:

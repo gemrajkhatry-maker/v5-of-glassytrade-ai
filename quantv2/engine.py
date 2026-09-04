@@ -65,7 +65,10 @@ class Engine:
             elapsed_min = self._elapsed_min(bar.time, self.position.opened_at)
             d, self.trail = evaluate_exit(self.position, bar, self.trail, self.exit_cfg, elapsed_min=elapsed_min)
             if d.should_exit:
-                self.oms.close(self.position, d.price, d.reason)
+                try:
+                    self.oms.close(self.position, d.price, d.reason)
+                except Exception:
+                    return Decision(False, "EXIT_RETRY")
                 self.position = None
                 self.trail = {}
                 self.open_risk = 0.0

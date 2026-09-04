@@ -29,3 +29,15 @@ def test_engine_time_stop_skips_malformed_timestamps():
     eng.position = Position(pid="p3", symbol="X", side="LONG", qty=10.0, entry=100.0, sl=90.0, tp=200.0, setup="T", opened_at="garbage")
     d = eng.on_bar(Bar(time="2026-01-01T09:46:00+05:30", open=100.0, high=100.5, low=99.9, close=100.2))
     assert d.reason == "HOLDING" and eng.position is not None
+
+
+class FailingCloseOMS(PaperOMS):
+    def close(self, pos, price, reason):
+        raise RuntimeError("broker down")
+
+
+def test_close_raise_keeps_position():
+    eng = Engine(symbol="X", interval_sec=60, oms=FailingCloseOMS(), equity=100000.0)
+    eng.position = Position(pid="p1", symbol="X", side="LONG", qty=1.0, entry=100.0, sl=99.0, tp=102.0, setup="T", opened_at="t")
+    d = eng.on_bar(Bar(time="2026-09-04T10:01:00+05:30", open=99.0, high=100.0, low=98.0, close=98.5))
+    assert d.approved is False and d.reason == "EXIT_RETRY" and eng.position is not None
