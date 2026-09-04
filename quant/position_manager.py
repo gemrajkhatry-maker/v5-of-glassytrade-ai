@@ -574,11 +574,11 @@ class PositionManager:
         # so a refusal leaves no counted-but-unreserved ghost pyramid.
         add_risk = abs(float(pyramid_pos.order.signal.entry) - float(new_sl)) * max(1.0, abs(pyramid_size))
         if self._portfolio_risk is not None:
-            ok, why = self._portfolio_risk.can_accept(add_risk)
+            ok, why = self._portfolio_risk.can_accept(add_risk, symbol=self.symbol, is_pyramid=True)
             if not ok:
                 logger.info("🛑 [PYRAMID RISK] %s refused: %s", self.symbol, why)
                 return
-            if not self._portfolio_risk.register_open(add_risk):
+            if not self._portfolio_risk.register_open(add_risk, symbol=self.symbol, is_pyramid=True):
                 logger.info("🛑 [PYRAMID RISK] %s refused at register", self.symbol)
                 return
             self._pyramid_open_risk[pyramid_pos._id] = add_risk

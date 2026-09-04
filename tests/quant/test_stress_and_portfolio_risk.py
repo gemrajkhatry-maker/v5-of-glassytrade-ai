@@ -212,3 +212,59 @@ def test_session_risk_sizes_from_portfolio_equity():
     # Fresh engine starts in CONSERVATIVE tier (0.25% base risk).
     expected = int((980_000 * 0.0025) // 5.0)  # risk budget / per-unit risk
     assert qty_portfolio == expected
+
+
+def test_portfolio_risk_enforces_single_active_position_per_root():
+    """Verify that PortfolioRiskAuthority prevents concurrent positions on the same root."""
+    auth = PortfolioRiskAuthority(starting_equity=1_000_000.0)
+
+    # 1. Open trade on SILVERM PUT option
+    sym1 = "SILVERM 24 SEP 235000 PUT"
+    ok, why = auth.can_accept(5000.0, symbol=sym1)
+    assert ok is True
+    assert auth.register_open(5000.0, symbol=sym1) is True
+    assert auth.active_symbol_for_root("SILVERM") == sym1
+
+    # 2. Another strike of SILVERM or SILVERM futures must be rejected
+    sym2 = "SILVERM 24 SEP 236000 PUT"
+    ok, why = auth.can_accept(5000.0, symbol=sym2)
+    assert ok is False
+    assert "concurrent root position: SILVERM already active" in why
+    assert auth.register_open(5000.0, symbol=sym2) is False
+
+    fut_sym = "SILVERM NOV FUT"
+    ok, why = auth.can_accept(5000.0, symbol=fut_sym)
+    assert ok is False
+    assert "concurrent root position" in why
+
+    # 3. Pyramid on the SAME position is allowed
+    ok, why = auth.can_accept(2500.0, symbol=sym1, is_pyramid=True)
+    assert ok is True
+    assert auth.register_open(2500.0, symbol=sym1, is_pyramid=True) is True
+
+    # 4. Uncorrelated root (e.g. CRUDEOIL or NATURALGAS) is accepted
+    crude = "CRUDEOIL 8600 CALL"
+    ok, why = auth.can_accept(4000.0, symbol=crude)
+    assert ok is True
+    assert auth.register_open(4000.0, symbol=crude) is True
+
+    # 5. Partial close or pyramid close does not release root
+    auth.record_close(2500.0, 1000.0, symbol=sym1, is_full_close=False)
+    assert auth.active_symbol_for_root("SILVERM") == sym1
+    ok, _ = auth.can_accept(5000.0, symbol=sym2)
+    assert ok is False
+
+    # 6. Full close releases the root
+    auth.record_close(5000.0, 2000.0, symbol=sym1, is_full_close=True)
+    assert auth.active_symbol_for_root("SILVERM") is None
+
+    # Now sym2 can enter cleanly
+    ok, why = auth.can_accept(5000.0, symbol=sym2)
+    assert ok is True
+    assert auth.register_open(5000.0, symbol=sym2) is True
+    assert auth.active_symbol_for_root("SILVERM") == sym2
+
+    # 7. Release on OMS failure unwinds root reservation
+    auth.release(5000.0, symbol=sym2)
+    assert auth.active_symbol_for_root("SILVERM") is None
+

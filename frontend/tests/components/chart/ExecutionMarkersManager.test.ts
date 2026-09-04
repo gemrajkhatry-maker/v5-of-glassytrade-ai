@@ -470,5 +470,58 @@ describe('ExecutionMarkersManager', () => {
       expect(markers[0].shape).toBe('arrowDown');
       expect(markers[0].position).toBe('aboveBar');
     });
+
+    it('filters quant decision by currentSymbol', () => {
+      const data = [{ time: '2024-01-01T09:15:00Z', close: 14.5 }] as any[];
+      const qd = {
+        approved: true,
+        signal: { type: 'LONG', entry: 14.5, symbol: 'NATURALGAS 23 SEP 275 PUT' },
+      };
+      // Different symbol
+      expect(generateDecisionSignalMarkers(data, qd, [], 'NATURALGAS SEP FUT')).toHaveLength(0);
+      // Matching symbol
+      expect(generateDecisionSignalMarkers(data, qd, [], 'NATURALGAS 23 SEP 275 PUT')).toHaveLength(1);
+    });
+
+    it('suppresses out-of-scale underlying signal entry on option chart', () => {
+      // Option candle is trading at 14.50, but underlying decision is 280.20
+      const data = [{ time: '2024-01-01T09:15:00Z', close: 14.5 }] as any[];
+      const qd = {
+        approved: true,
+        signal: { type: 'LONG', entry: 280.20 },
+      };
+      const markers = generateDecisionSignalMarkers(data, qd);
+      expect(markers).toHaveLength(0);
+    });
+
+    it('suppresses out-of-scale IB break level on option chart', () => {
+      const data = [
+        { time: '2024-01-01T09:15:00Z', close: 14.0 },
+        { time: '2024-01-01T09:20:00Z', close: 15.0 },
+      ] as any[];
+      // Break level 280.0 from underlying futures
+      const amt = { breakDirection: 'UP', breakLevel: 280.0 } as any;
+      expect(generateIBBreakMarker(data, amt)).toBeNull();
+    });
+
+    it('filters entry markers and closed trade markers by currentSymbol', () => {
+      const positions = [
+        { id: '1', symbol: 'NATURALGAS SEP FUT', side: 'LONG', entryPrice: 280, entryTime: '2024-01-01T09:30:00Z' },
+        { id: '2', symbol: 'NATURALGAS 23 SEP 275 PUT', side: 'LONG', entryPrice: 15, entryTime: '2024-01-01T09:30:00Z' },
+      ] as any[];
+      const closedTrades = [
+        { id: '3', symbol: 'NATURALGAS SEP FUT', side: 'SHORT', entryPrice: 285, exitPrice: 280, entryTime: '2024-01-01T09:00:00Z', exitTime: '2024-01-01T09:15:00Z', pnl: 500 },
+        { id: '4', symbol: 'NATURALGAS 23 SEP 275 PUT', side: 'LONG', entryPrice: 12, exitPrice: 16, entryTime: '2024-01-01T09:00:00Z', exitTime: '2024-01-01T09:15:00Z', pnl: 200 },
+      ] as any[];
+
+      const optionEntryMarkers = generateEntryMarkers(positions, undefined, 'NATURALGAS 23 SEP 275 PUT');
+      expect(optionEntryMarkers).toHaveLength(1);
+      expect(optionEntryMarkers[0].text).toBe('LONG @15.00');
+
+      const optionClosedMarkers = generateClosedTradeMarkers(closedTrades, 'NATURALGAS 23 SEP 275 PUT');
+      // 1 entry marker + 1 exit marker
+      expect(optionClosedMarkers).toHaveLength(2);
+      expect(optionClosedMarkers[0].text).toBe('LONG @12.00');
+    });
   });
 });

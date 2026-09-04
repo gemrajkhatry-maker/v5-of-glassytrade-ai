@@ -469,6 +469,8 @@ class QuantEngine:
         self.event_store.append(
             PositionOpened(symbol=self.symbol, time=str(ts), position=position)
         )
+        if self._portfolio_risk is not None:
+            self._portfolio_risk.register_open(0.0, symbol=self.symbol)
 
     def close(self) -> None:
         """Cleanly release attached resources (advisor, journal)."""
@@ -968,14 +970,14 @@ class QuantEngine:
             # otherwise risk 4% of capital simultaneously).
             if self._portfolio_risk is not None:
                 trade_risk = abs(float(signal.entry) - float(signal.sl)) * max(1.0, quantity)
-                ok, why = self._portfolio_risk.can_accept(trade_risk)
+                ok, why = self._portfolio_risk.can_accept(trade_risk, symbol=self.symbol)
                 if not ok:
                     logger.warning(
                         "🛑 [PORTFOLIO RISK] %s: entry rejected — %s",
                         self.symbol, why,
                     )
                     return
-                if not self._portfolio_risk.register_open(trade_risk):
+                if not self._portfolio_risk.register_open(trade_risk, symbol=self.symbol):
                     logger.warning(
                         "🛑 [PORTFOLIO RISK] %s: entry rejected at register — "
                         "cap breached between can_accept and register",
@@ -998,7 +1000,7 @@ class QuantEngine:
                 if self._portfolio_risk is not None:
                     reserved = getattr(self, "_open_trade_risk", 0.0)
                     if reserved > 0:
-                        self._portfolio_risk.release(reserved)
+                        self._portfolio_risk.release(reserved, symbol=self.symbol)
                     self._open_trade_risk = 0.0
                 return
             self._entry_bar_index = self._bar_index
@@ -1135,6 +1137,8 @@ class QuantEngine:
             self._portfolio_risk.record_close(
                 getattr(self, "_open_trade_risk", 0.0),
                 float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
+                symbol=self.symbol,
+                is_full_close=True,
             )
             self._open_trade_risk = 0.0
 

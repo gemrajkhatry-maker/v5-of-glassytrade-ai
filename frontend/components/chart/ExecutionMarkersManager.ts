@@ -29,6 +29,7 @@ export interface ExecutionMarkersOptions {
   maxMarkers?: number; // Limit markers for performance
   quantDecision?: any | null;
   decisionHistory?: any[];
+  currentSymbol?: string;
 }
 
 /**
@@ -36,14 +37,19 @@ export interface ExecutionMarkersOptions {
  * 
  * @param positions - Open trade positions
  * @param fallbackTime - Optional fallback IST timestamp if pos.entryTime is missing
+ * @param currentSymbol - Optional current chart symbol for isolation
  * @returns Array of entry markers
  */
 export function generateEntryMarkers(
   positions: TradePosition[],
-  fallbackTime?: number
+  fallbackTime?: number,
+  currentSymbol?: string
 ): ChartMarker[] {
   const markers: ChartMarker[] = [];
   (positions || []).forEach(pos => {
+    if (currentSymbol && pos.symbol && pos.symbol !== currentSymbol) {
+      return;
+    }
     let time = toISTTimestamp(pos.entryTime);
     if ((time <= 0 || !Number.isFinite(time)) && fallbackTime && fallbackTime > 0) {
       time = fallbackTime;
@@ -65,12 +71,19 @@ export function generateEntryMarkers(
  * Generate entry and exit markers from closed trades
  * 
  * @param closedTrades - Closed trade history
+ * @param currentSymbol - Optional current chart symbol for isolation
  * @returns Array of entry and exit markers
  */
-export function generateClosedTradeMarkers(closedTrades: TradePosition[]): ChartMarker[] {
+export function generateClosedTradeMarkers(
+  closedTrades: TradePosition[],
+  currentSymbol?: string
+): ChartMarker[] {
   const markers: ChartMarker[] = [];
 
   (closedTrades || []).forEach(trade => {
+    if (currentSymbol && trade.symbol && trade.symbol !== currentSymbol) {
+      return;
+    }
     // Entry marker (smaller size to differentiate from open positions)
     const entryTime = toISTTimestamp(trade.entryTime);
     if (entryTime > 0 && Number.isFinite(entryTime)) {
@@ -123,6 +136,14 @@ export function generateIBBreakMarker(
 
   const breakDir = amt.breakDirection;
   const breakLevel = amt.breakLevel;
+
+  // Scale guard: if breakLevel is far out of scale from chart candles (e.g. futures level on option chart), skip
+  if (data && data.length > 0) {
+    const lastClose = data[data.length - 1].close;
+    if (lastClose > 0 && (breakLevel > lastClose * 3 || breakLevel < lastClose * 0.3)) {
+      return null;
+    }
+  }
 
   // Find the first candle that broke the IB level
   for (let i = 1; i < data.length; i++) {
@@ -336,12 +357,16 @@ export function generateTripleAMarkers(
 export function generateDecisionSignalMarkers(
   data: OHLCData[],
   quantDecision?: any | null,
-  decisionHistory?: any[]
+  decisionHistory?: any[],
+  currentSymbol?: string
 ): ChartMarker[] {
   const markers: ChartMarker[] = [];
 
   // Historical decisions
   (decisionHistory || []).forEach(h => {
+    if (h.symbol && currentSymbol && h.symbol !== currentSymbol) {
+      return;
+    }
     if (h.direction === 'LONG' || h.direction === 'SHORT') {
       const time = toISTTimestamp(h.timestamp);
       if (time > 0 && Number.isFinite(time)) {
@@ -360,8 +385,19 @@ export function generateDecisionSignalMarkers(
 
   // Current active quant decision
   if (quantDecision?.signal && (quantDecision.signal.type === 'LONG' || quantDecision.signal.type === 'SHORT')) {
-    const isLong = quantDecision.signal.type === 'LONG';
+    const sigSymbol = quantDecision.signal.symbol || quantDecision.symbol;
+    if (sigSymbol && currentSymbol && sigSymbol !== currentSymbol) {
+      return markers;
+    }
     const entryPx = Number(quantDecision.signal.entry) || 0;
+    // Cross-scale guard: if entry price is 3x higher or 0.3x lower than candle price, it belongs to underlying index, not this chart
+    if (data && data.length > 0 && entryPx > 0) {
+      const lastClose = data[data.length - 1].close;
+      if (lastClose > 0 && (entryPx > lastClose * 3 || entryPx < lastClose * 0.3)) {
+        return markers;
+      }
+    }
+    const isLong = quantDecision.signal.type === 'LONG';
     const pxStr = entryPx > 0 ? ` @${entryPx.toFixed(2)}` : '';
     const label = quantDecision.approved ? 'AMT DECISION' : 'AMT SIGNAL';
 
@@ -545,16 +581,17 @@ export function generateAllExecutionMarkers(
   options: ExecutionMarkersOptions
 ): ChartMarker[] {
   const markers: ChartMarker[] = [];
+  const currentSymbol = options?.currentSymbol;
   const fallbackTime = data && data.length > 0 ? toISTTimestamp(data[data.length - 1].time) : undefined;
 
   // Entry markers from open positions
-  markers.push(...generateEntryMarkers(positions, fallbackTime));
+  markers.push(...generateEntryMarkers(positions, fallbackTime, currentSymbol));
 
   // Entry + exit markers from closed trades
-  markers.push(...generateClosedTradeMarkers(closedTrades));
+  markers.push(...generateClosedTradeMarkers(closedTrades, currentSymbol));
 
   // AMT Decision and Signal markers
-  markers.push(...generateDecisionSignalMarkers(data, options?.quantDecision, options?.decisionHistory));
+  markers.push(...generateDecisionSignalMarkers(data, options?.quantDecision, options?.decisionHistory, currentSymbol));
 
   // Triple-A markers
   markers.push(...generateTripleAMarkers(data, amt));

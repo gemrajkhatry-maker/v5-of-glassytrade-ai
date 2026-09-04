@@ -1359,6 +1359,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       maxMarkers: 100,
       quantDecision,
       decisionHistory,
+      currentSymbol: symbol,
     };
 
     const allMarkers = generateAllExecutionMarkers(
@@ -1401,7 +1402,8 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       console.warn('[ChartScene] setMarkers skipped due to invalid data:', err);
     }
 
-    const currentPosIds = new Set((positions || []).map(p => p.id));
+    const symbolPositions = (positions || []).filter(p => !symbol || !p.symbol || p.symbol === symbol);
+    const currentPosIds = new Set(symbolPositions.map(p => p.id));
     activePriceLinesRef.current.forEach((lines, id) => {
       if (!currentPosIds.has(id)) {
         lines.forEach(l => candleSeriesRef.current?.removePriceLine(l));
@@ -1409,7 +1411,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       }
     });
 
-    (positions || []).forEach(pos => {
+    symbolPositions.forEach(pos => {
       if (activePriceLinesRef.current.has(pos.id)) return;
 
       const lines: IPriceLine[] = [];
