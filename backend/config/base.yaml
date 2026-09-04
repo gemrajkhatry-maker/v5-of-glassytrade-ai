@@ -75,6 +75,7 @@ globals:
   signal_ttl_seconds: 600
   vwap_extreme_multiplier: 1.01
   decision_history_limit: 1000
+  cooldown_minutes: 15
 
   # Risk
   risk_per_trade_pct: 0.005

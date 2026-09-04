@@ -136,10 +136,12 @@ class QuantEngine:
         risk_per_trade_pct: float | None = None,
         max_daily_loss_pct: float = 0.02,
         max_consecutive_losses: int = 3,
+        execution_enabled: bool = True,
     ) -> None:
         self._gateway = gateway
         self._underlying_gateway = underlying_gateway
         self._portfolio_risk = portfolio_risk  # shared PortfolioRiskAuthority | None
+        self._execution_enabled = execution_enabled  # ponytail: False for underlying observer feeds in options mode
         self.symbol = symbol
         self._tick_size = tick_size
         # Session market for the Fabio phase gates: NSE closes 15:30, MCX
@@ -769,6 +771,10 @@ class QuantEngine:
             self._decide(amt_dto, bar)
 
     def _decide(self, amt_dto: dict, bar, execution_bar=None) -> None:
+        # ponytail: debounce repeated rejected entries to avoid 60-second log flood
+        if (self._bar_index - getattr(self, "_last_rejected_bar_index", -999)) < 2:
+            return
+
         # --- Guard 0: trade-count / risk halt check BEFORE building any context ---
         can_trade, no_trade_reason = self._risk.can_trade()
         if not can_trade:
@@ -940,6 +946,13 @@ class QuantEngine:
                 risk_st.equity,
             )
             self._emit(SignalApproved(symbol=self.symbol, time=bar.time, signal=signal))
+            # ponytail: underlying observer engines stream charts/data but must not submit orders
+            if not getattr(self, "_execution_enabled", True):
+                logger.debug(
+                    "⏭️ [EXECUTION_DISABLED] %s: approved signal not submitted (underlying observer engine)",
+                    self.symbol,
+                )
+                return
             # Mirror position_manager's is_expiry source of truth (the traded
             # contract expires today) so entry sizing halves risk on expiry day.
             _ist = _ist_dt(bar.time)
@@ -976,6 +989,7 @@ class QuantEngine:
                         "🛑 [PORTFOLIO RISK] %s: entry rejected — %s",
                         self.symbol, why,
                     )
+                    self._last_rejected_bar_index = self._bar_index
                     return
                 if not self._portfolio_risk.register_open(trade_risk, symbol=self.symbol):
                     logger.warning(
@@ -983,6 +997,7 @@ class QuantEngine:
                         "cap breached between can_accept and register",
                         self.symbol,
                     )
+                    self._last_rejected_bar_index = self._bar_index
                     return
                 self._open_trade_risk = trade_risk
             try:
@@ -1009,13 +1024,20 @@ class QuantEngine:
             self._entry_time_epoch = _bar_epoch_ms(bar.time) / 1000.0
             self._emit(PositionOpened(symbol=self.symbol, time=bar.time, position=position))
         else:
-            logger.info(
-                "⚪ [DECISION EVAL] %s: approved=False reason=%s phase=%s blocked=%s",
-                self.symbol,
-                decision.reason,
-                decision.phase,
-                decision.block_reasons,
-            )
+            if decision.reason == "OPPOSING_TYPE":
+                logger.debug(
+                    "⚪ [DECISION EVAL] %s: approved=False reason=OPPOSING_TYPE phase=%s",
+                    self.symbol,
+                    decision.phase,
+                )
+            else:
+                logger.info(
+                    "⚪ [DECISION EVAL] %s: approved=False reason=%s phase=%s blocked=%s",
+                    self.symbol,
+                    decision.reason,
+                    decision.phase,
+                    decision.block_reasons,
+                )
 
     def _build_context(self, bar, amt_dto: dict, cooldown_remaining_sec: float):
         """Single DecisionContext source shared by the flat-path ``_decide()``

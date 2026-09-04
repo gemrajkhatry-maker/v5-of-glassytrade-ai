@@ -58,6 +58,7 @@ poc*/*.onnx
 *.db
 *.db-shm
 *.db-wal
+old.freebuff/
 
 # Large data directories and backups
 poc*/

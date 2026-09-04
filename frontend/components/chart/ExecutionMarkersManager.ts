@@ -352,34 +352,84 @@ export function generateTripleAMarkers(
 }
 
 /**
+ * Snap a timestamp to the corresponding bar time in the candle series.
+ * Returns the bar time (candleTimes[i] <= time), or the exact time if no candles.
+ */
+export function snapToBarTime(time: number, barTimes: number[]): number {
+  if (!barTimes || barTimes.length === 0 || time <= 0) return time;
+  if (time < barTimes[0]) return barTimes[0];
+  let low = 0;
+  let high = barTimes.length - 1;
+  let best = barTimes[0];
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (barTimes[mid] <= time) {
+      best = barTimes[mid];
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return best;
+}
+
+/**
  * Generate AMT Quant Decision and historical signal markers
  */
 export function generateDecisionSignalMarkers(
   data: OHLCData[],
   quantDecision?: any | null,
   decisionHistory?: any[],
-  currentSymbol?: string
+  currentSymbol?: string,
+  existingMarkers?: ChartMarker[]
 ): ChartMarker[] {
   const markers: ChartMarker[] = [];
+  const barTimes = (data || []).map(d => toISTTimestamp(d.time)).filter(t => t > 0);
 
-  // Historical decisions
+  // Collect entry times from existing markers to prevent placing redundant generic decision arrows on the exact same candle
+  const entryTimes = new Set<number>();
+  (existingMarkers || []).forEach(m => {
+    if (m.text.startsWith('LONG @') || m.text.startsWith('SHORT @')) {
+      entryTimes.add(barTimes.length > 0 ? snapToBarTime(m.time, barTimes) : m.time);
+    }
+  });
+
+  // Track the previous direction to only record directional changes / state transitions
+  // and ensure at most one decision marker per candle bar
+  let lastDirection: string | null = null;
+  const seenBarTimes = new Set<number>();
+
   (decisionHistory || []).forEach(h => {
     if (h.symbol && currentSymbol && h.symbol !== currentSymbol) {
       return;
     }
-    if (h.direction === 'LONG' || h.direction === 'SHORT') {
-      const time = toISTTimestamp(h.timestamp);
-      if (time > 0 && Number.isFinite(time)) {
-        const isLong = h.direction === 'LONG';
-        markers.push({
-          time,
-          position: isLong ? 'belowBar' : 'aboveBar',
-          color: isLong ? '#10b981' : '#ef4444',
-          shape: isLong ? 'arrowUp' : 'arrowDown',
-          text: `AMT ${h.direction}`,
-          size: 1 as const,
-        });
+    const dir = h.direction;
+    if (dir === 'LONG' || dir === 'SHORT') {
+      const rawTime = toISTTimestamp(h.timestamp);
+      if (rawTime > 0 && Number.isFinite(rawTime)) {
+        const time = barTimes.length > 0 ? snapToBarTime(rawTime, barTimes) : rawTime;
+        // If an actual order entry already exists on this bar, suppress generic "AMT LONG/SHORT"
+        if (entryTimes.has(time)) {
+          lastDirection = dir;
+          return;
+        }
+        // Only trigger on directional change/initiation and at most once per bar
+        if (dir !== lastDirection && !seenBarTimes.has(time)) {
+          const isLong = dir === 'LONG';
+          markers.push({
+            time,
+            position: isLong ? 'belowBar' : 'aboveBar',
+            color: isLong ? '#10b981' : '#ef4444',
+            shape: isLong ? 'arrowUp' : 'arrowDown',
+            text: `AMT ${dir}`,
+            size: 1 as const,
+          });
+          seenBarTimes.add(time);
+        }
+        lastDirection = dir;
       }
+    } else if (dir === 'FLAT' || dir === 'EXIT' || !dir) {
+      lastDirection = null;
     }
   });
 
@@ -404,14 +454,17 @@ export function generateDecisionSignalMarkers(
     if (data && data.length > 0) {
       const lastTime = toISTTimestamp(data[data.length - 1].time);
       if (lastTime > 0 && Number.isFinite(lastTime)) {
-        markers.push({
-          time: lastTime,
-          position: isLong ? 'belowBar' : 'aboveBar',
-          color: isLong ? '#10b981' : '#ef4444',
-          shape: isLong ? 'arrowUp' : 'arrowDown',
-          text: `${label} ${quantDecision.signal.type}${pxStr}`,
-          size: 2 as const,
-        });
+        // If an actual order entry already took place on this last candle, suppress recommendation marker to avoid overlap
+        if (!entryTimes.has(lastTime)) {
+          markers.push({
+            time: lastTime,
+            position: isLong ? 'belowBar' : 'aboveBar',
+            color: isLong ? '#10b981' : '#ef4444',
+            shape: isLong ? 'arrowUp' : 'arrowDown',
+            text: `${label} ${quantDecision.signal.type}${pxStr}`,
+            size: 2 as const,
+          });
+        }
       }
     }
   }
@@ -585,13 +638,23 @@ export function generateAllExecutionMarkers(
   const fallbackTime = data && data.length > 0 ? toISTTimestamp(data[data.length - 1].time) : undefined;
 
   // Entry markers from open positions
-  markers.push(...generateEntryMarkers(positions, fallbackTime, currentSymbol));
+  const entryMarkers = generateEntryMarkers(positions, fallbackTime, currentSymbol);
+  markers.push(...entryMarkers);
 
   // Entry + exit markers from closed trades
-  markers.push(...generateClosedTradeMarkers(closedTrades, currentSymbol));
+  const closedMarkers = generateClosedTradeMarkers(closedTrades, currentSymbol);
+  markers.push(...closedMarkers);
 
   // AMT Decision and Signal markers
-  markers.push(...generateDecisionSignalMarkers(data, options?.quantDecision, options?.decisionHistory, currentSymbol));
+  markers.push(
+    ...generateDecisionSignalMarkers(
+      data,
+      options?.quantDecision,
+      options?.decisionHistory,
+      currentSymbol,
+      [...entryMarkers, ...closedMarkers]
+    )
+  );
 
   // Triple-A markers
   markers.push(...generateTripleAMarkers(data, amt));

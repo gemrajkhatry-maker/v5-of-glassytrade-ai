@@ -141,10 +141,11 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     include_futures = getattr(scanner_cfg, "include_futures", True) if scanner_cfg else True
 
     coord_config = {
-            "journal_dir": str(Path(__file__).resolve().parents[3] / "journals"),
+        "journal_dir": str(Path(__file__).resolve().parents[3] / "journals"),
         "underlyings": list(_settings.SCANNER_UNDERLYINGS or []),
         "n": int(_settings.SCANNER_TOP_N or 8),
         "exchange": _settings.DEFAULT_EXCHANGE or "NSE",
+        "strategy_name": getattr(_settings, "GLASSYTRADE_STRATEGY", None) or "mcx_options",
         "expiry_index": int(_settings.SCANNER_EXPIRY_INDEX or 0),
         "strikes_around_atm": int(_settings.STRIKES_AROUND_ATM or 2),
         "interval_seconds": candle_minutes * 60,

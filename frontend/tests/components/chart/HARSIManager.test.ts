@@ -164,5 +164,20 @@ describe('HARSIManager', () => {
       const resDisabled = computeHARSI(candles, { showMarkers: false });
       expect(resDisabled.markers).toEqual([]);
     });
+
+    it('filters out mid-range neutral oscillations when extremeOnly is true', () => {
+      const baseTime = 1704067200;
+      // Flat, low-volatility candles fluctuating in neutral range (no extreme OB/OS)
+      const neutralCandles = Array.from({ length: 30 }, (_, i) => ({
+        time: baseTime + i * 300,
+        open: 100 + (i % 2 === 0 ? 0.2 : -0.2),
+        high: 100.5,
+        low: 99.5,
+        close: 100 + (i % 2 === 0 ? -0.2 : 0.2),
+      }));
+
+      const resExtreme = computeHARSI(neutralCandles, { showMarkers: true, extremeOnly: true });
+      expect(resExtreme.markers).toEqual([]);
+    });
   });
 });

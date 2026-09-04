@@ -523,5 +523,46 @@ describe('ExecutionMarkersManager', () => {
       expect(optionClosedMarkers).toHaveLength(2);
       expect(optionClosedMarkers[0].text).toBe('LONG @12.00');
     });
+
+    it('deduplicates repetitive consecutive AMT LONG decisions across bars and ticks', () => {
+      const data = [
+        { time: '2024-01-01T09:15:00Z', close: 50000 },
+        { time: '2024-01-01T09:20:00Z', close: 50020 },
+        { time: '2024-01-01T09:25:00Z', close: 50050 },
+      ] as any[];
+      // 3 consecutive polls/bars all with LONG
+      const decisionHistory = [
+        { timestamp: new Date('2024-01-01T09:15:10Z').getTime(), direction: 'LONG' },
+        { timestamp: new Date('2024-01-01T09:15:30Z').getTime(), direction: 'LONG' },
+        { timestamp: new Date('2024-01-01T09:20:05Z').getTime(), direction: 'LONG' },
+        { timestamp: new Date('2024-01-01T09:25:00Z').getTime(), direction: 'LONG' },
+      ];
+      const markers = generateDecisionSignalMarkers(data, null, decisionHistory);
+      // Only the first initiation should produce a marker, avoiding spamming every bar/tick
+      expect(markers).toHaveLength(1);
+      expect(markers[0].text).toBe('AMT LONG');
+    });
+
+    it('suppresses redundant AMT LONG marker on candles with an actual trade entry fill', () => {
+      const data = [
+        { time: '2024-01-01T09:15:00Z', close: 50000 },
+        { time: '2024-01-01T09:20:00Z', close: 50020 },
+      ] as any[];
+      const positions = [
+        { id: '1', symbol: 'TEST', side: 'LONG', entryPrice: 50000, entryTime: '2024-01-01T09:15:00Z' },
+      ] as any[];
+      const decisionHistory = [
+        { timestamp: new Date('2024-01-01T09:15:00Z').getTime(), direction: 'LONG' },
+      ];
+
+      const markers = generateAllExecutionMarkers(positions, [], data, null, {
+        mode: 'STANDARD',
+        decisionHistory,
+      });
+
+      // Should show the entry fill marker LONG @50000.00 and NOT duplicate with AMT LONG
+      expect(markers.some(m => m.text === 'LONG @50000.00')).toBe(true);
+      expect(markers.some(m => m.text === 'AMT LONG')).toBe(false);
+    });
   });
 });

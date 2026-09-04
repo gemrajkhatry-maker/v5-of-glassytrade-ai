@@ -1325,6 +1325,15 @@ class QuantCoordinator:
         advisor = None
         if self.config.get("advisor_enabled", False):
             advisor = build_live_advisor(None)
+
+        # ponytail: In options mode, futures contracts provide underlying market data & charts,
+        # but must not execute trades directly and lock the root token away from the options.
+        import os
+        strat = str(self.config.get("strategy_name") or os.environ.get("GLASSYTRADE_STRATEGY") or "").lower()
+        is_futures = _is_futures_symbol(symbol)
+        options_mode = "option" in strat or not strat
+        execution_enabled = not (is_futures and options_mode)
+
         engine = QuantEngine(
             gateway,
             symbol,
@@ -1342,6 +1351,8 @@ class QuantCoordinator:
             risk_per_trade_pct=float(self.config.get("risk_per_trade_pct", 0.005)),
             max_daily_loss_pct=float(self.config.get("max_daily_loss_pct", 0.02)),
             max_consecutive_losses=int(self.config.get("max_consecutive_losses", 3)),
+            cooldown_minutes=int(self.config.get("cooldown_minutes", 15)),
+            execution_enabled=execution_enabled,
         )
         if advisor is not None:
             # Route advisor emissions through the engine's own bus exactly as

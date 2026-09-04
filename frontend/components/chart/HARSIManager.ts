@@ -39,6 +39,7 @@ export interface HARSIOptions {
   colWick?: string;       // Default: '#94a3b8'
   colRSI?: string;        // Default: '#fac832'
   showMarkers?: boolean;  // Default: true (Crossover Buy/Sell markers)
+  extremeOnly?: boolean;  // Default: true (Only show reversal markers emerging from OB/OS zones)
 }
 
 export interface HARSICandlePoint {
@@ -95,6 +96,7 @@ export const DEFAULT_HARSI_OPTIONS: Required<HARSIOptions> = {
   showHist: true,
   showStoch: false,
   showMarkers: true,
+  extremeOnly: false,
   smoothK: 3,
   smoothD: 3,
   stochLen: 14,
@@ -360,6 +362,10 @@ export function computeHARSI(
   const markers: HARSIMarkerPoint[] = [];
 
   if (opts.showMarkers && n > 1) {
+    const extremeOnly = opts.extremeOnly === true;
+    const lowerThresh = opts.lower ?? -20;
+    const upperThresh = opts.upper ?? 20;
+
     for (let i = 1; i < n; i++) {
       const prevRsi = rsiValues[i - 1];
       const currRsi = rsiValues[i];
@@ -368,26 +374,32 @@ export function computeHARSI(
       const t = candles[i].time;
 
       // Bullish Crossover: RSI line crosses above HARSI candle
+      // In extremeOnly mode: require crossing out of oversold zone to prevent mid-range chop noise
       if (prevRsi <= prevClose && currRsi > currClose) {
-        markers.push({
-          time: t,
-          position: 'belowBar',
-          color: '#00c896',
-          shape: 'arrowUp',
-          text: 'BUY',
-          size: 1,
-        });
+        if (!extremeOnly || prevRsi <= lowerThresh || prevClose <= lowerThresh || currRsi <= (lowerThresh + 5)) {
+          markers.push({
+            time: t,
+            position: 'belowBar',
+            color: '#00c896',
+            shape: 'arrowUp',
+            text: 'BUY',
+            size: 1,
+          });
+        }
       }
       // Bearish Crossunder: RSI line crosses below HARSI candle
+      // In extremeOnly mode: require crossing down from overbought zone to prevent mid-range chop noise
       else if (prevRsi >= prevClose && currRsi < currClose) {
-        markers.push({
-          time: t,
-          position: 'aboveBar',
-          color: '#ff4757',
-          shape: 'arrowDown',
-          text: 'SELL',
-          size: 1,
-        });
+        if (!extremeOnly || prevRsi >= upperThresh || prevClose >= upperThresh || currRsi >= (upperThresh - 5)) {
+          markers.push({
+            time: t,
+            position: 'aboveBar',
+            color: '#ff4757',
+            shape: 'arrowDown',
+            text: 'SELL',
+            size: 1,
+          });
+        }
       }
     }
   }
