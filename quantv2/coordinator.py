@@ -31,3 +31,14 @@ class Coordinator:
                 eng.open_risk = 0.0
                 n += 1
         return n
+
+    def load_state(self, state: dict) -> None:
+        from quantv2.oms import Position
+        for symbol, s in state.items():
+            eng = self.engines.get(symbol)
+            if eng is None:
+                continue
+            p = s.get("position")
+            eng.position = Position(**p) if p else None
+            eng.open_risk = float(s.get("open_risk", 0.0))
+            eng.trail = dict(s.get("trail", {}))
