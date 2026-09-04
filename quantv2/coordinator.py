@@ -44,7 +44,16 @@ class Coordinator:
             eng = self.engines.get(symbol)
             if eng is None:
                 continue
+            if not isinstance(s, dict):
+                eng.can_trade = False
+                continue
             p = s.get("position")
-            eng.position = Position(**p) if p else None
-            eng.open_risk = float(s.get("open_risk", 0.0))
-            eng.trail = dict(s.get("trail", {}))
+            try:
+                eng.position = Position(**p) if p else None
+                eng.open_risk = float(s.get("open_risk", 0.0))
+                eng.trail = dict(s.get("trail", {}))
+            except (TypeError, ValueError):
+                eng.position = None
+                eng.open_risk = 0.0
+                eng.trail = {}
+                eng.can_trade = False

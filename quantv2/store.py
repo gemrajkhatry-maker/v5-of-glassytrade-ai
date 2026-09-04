@@ -19,6 +19,7 @@ def save(coordinator, path: str) -> None:
 def restore(path: str) -> dict:
     try:
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
     except (OSError, ValueError):
         return {}
+    return data if isinstance(data, dict) else {}
