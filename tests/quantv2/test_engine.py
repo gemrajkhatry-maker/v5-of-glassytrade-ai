@@ -79,3 +79,25 @@ def test_risk_daily_loss_halt_gates_entry():
     eng = Engine(symbol="X", interval_sec=60, oms=PaperOMS(), equity=100000.0, clock=clock, risk=risk)
     d = eng.on_bar(Bar(time="2026-09-04T10:01:00+05:30", open=100.0, high=100.5, low=99.9, close=100.2))
     assert d.approved is False and d.reason == "DAILY_LOSS"
+
+
+def test_engine_defaults_to_session_amt():
+    eng = Engine(symbol="X", interval_sec=60, oms=PaperOMS(), equity=100000.0)
+    assert eng.amt is not None and eng.amt.tick == 0.05
+
+
+def test_engine_on_fill_records_take_profit():
+    fills = []
+    eng = Engine(symbol="X", interval_sec=60, oms=PaperOMS(), equity=100000.0, exit_cfg=ExitConfig(tick=0.05), on_fill=fills.append)
+    eng.position = Position(pid="p1", symbol="X", side="LONG", qty=10.0, entry=100.0, sl=90.0, tp=102.0, setup="T", opened_at="2026-01-01T09:15:00+05:30")
+    d = eng.on_bar(Bar(time="2026-01-01T10:00:00+05:30", open=101.0, high=103.0, low=100.5, close=102.5))
+    assert d.reason == "EXITED_TAKE_PROFIT" and eng.position is None
+    assert len(fills) == 1 and fills[0].reason == "TAKE_PROFIT" and fills[0].pid == "p1"
+
+
+def test_engine_on_fill_not_called_on_exit_retry():
+    fills = []
+    eng = Engine(symbol="X", interval_sec=60, oms=FailingCloseOMS(), equity=100000.0, on_fill=fills.append)
+    eng.position = Position(pid="p1", symbol="X", side="LONG", qty=1.0, entry=100.0, sl=99.0, tp=102.0, setup="T", opened_at="t")
+    d = eng.on_bar(Bar(time="2026-09-04T10:01:00+05:30", open=99.0, high=100.0, low=98.0, close=98.5))
+    assert d.reason == "EXIT_RETRY" and eng.position is not None and fills == []

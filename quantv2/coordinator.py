@@ -53,7 +53,7 @@ class Coordinator:
                 eng.position = Position(**p) if p else None
                 eng.open_risk = float(s.get("open_risk", 0.0))
                 eng.trail = dict(s.get("trail", {}))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 eng.position = None
                 eng.open_risk = 0.0
                 eng.trail = {}

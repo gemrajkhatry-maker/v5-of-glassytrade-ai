@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
+from typing import Callable
 from quantv2.types import Bar, Context, Decision
 from quantv2.pipeline import decide
 from quantv2.exits import ExitConfig, evaluate_exit
@@ -7,12 +8,13 @@ from quantv2.oms import PaperOMS, Position
 from quantv2.risk import size
 from quantv2.clock import SessionClock
 from quantv2.session_risk import SessionRisk
+from quantv2.amt import SessionAMT
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 
 
 class Engine:
-    def __init__(self, symbol: str, interval_sec: int = 300, oms=None, equity: float = 100000.0, risk_pct: float = 0.005, lot: float = 1.0, exit_cfg: ExitConfig | None = None, clock: SessionClock | None = None, risk: SessionRisk | None = None) -> None:
+    def __init__(self, symbol: str, interval_sec: int = 300, oms=None, equity: float = 100000.0, risk_pct: float = 0.005, lot: float = 1.0, exit_cfg: ExitConfig | None = None, clock: SessionClock | None = None, risk: SessionRisk | None = None, on_fill: Callable | None = None) -> None:
         self.symbol = symbol
         self.interval_sec = interval_sec
         self.oms = oms or PaperOMS()
@@ -26,13 +28,14 @@ class Engine:
         self.risk_cap = float("inf")
         self._bucket = None
         self._ticks: list = []
-        self.amt = None
+        self.amt = SessionAMT(tick=self.exit_cfg.tick or 0.05)
         self.session_open = True
         self.can_trade = True
         self.cooldown_s = 0.0
         self.last_decision = None
         self.clock = clock
         self.risk = risk
+        self.on_fill = on_fill
 
     def _flush_bar(self) -> Bar:
         ts = self._ticks[0][0]
@@ -74,6 +77,8 @@ class Engine:
                     fill = self.oms.close(self.position, bar.close, "SESSION_CLOSE")
                 except Exception:
                     return Decision(False, "EXIT_RETRY")
+                if self.on_fill is not None:
+                    self.on_fill(fill)
                 if self.risk is not None:
                     self.risk.record_fill(fill.pnl, epoch)
                 self.position = None
@@ -87,6 +92,8 @@ class Engine:
                     fill = self.oms.close(self.position, d.price, d.reason)
                 except Exception:
                     return Decision(False, "EXIT_RETRY")
+                if self.on_fill is not None:
+                    self.on_fill(fill)
                 if self.risk is not None and epoch is not None:
                     self.risk.record_fill(fill.pnl, epoch)
                 self.position = None

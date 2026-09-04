@@ -45,7 +45,7 @@ class Runner:
         clock = SessionClock()
         c = Coordinator(risk_cap=config.risk_cap)
         for sym in config.symbols:
-            eng = Engine(symbol=sym, interval_sec=config.interval_sec, oms=PaperOMS(), equity=config.equity, clock=clock, risk=SessionRisk(config.risk_limits), exit_cfg=ExitConfig())
+            eng = Engine(symbol=sym, interval_sec=config.interval_sec, oms=PaperOMS(), equity=config.equity, clock=clock, risk=SessionRisk(config.risk_limits), exit_cfg=ExitConfig(), on_fill=(lambda f, sym=sym: journal.log_fill(sym, f)) if journal else None)
             eng.amt = SessionAMT(tick=config.tick)
             c.add(eng)
         broker = BrokerAdapter(mode=config.mode, oms=PaperOMS(), live_port=None)
