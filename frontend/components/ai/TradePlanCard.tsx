@@ -30,11 +30,27 @@ const TradePlanCard = React.memo<TradePlanCardProps>(({ positions }) => {
                     const hasPartial = (pos.partialRealizedPnl || 0) > 0;
                     const origSize = pos.originalSize || pos.size;
                     const sizeReduced = origSize > pos.size;
+                    const isPut = pos.symbol && (pos.symbol.includes('PUT') || pos.symbol.includes('PE'));
+                    const isCall = pos.symbol && (pos.symbol.includes('CALL') || pos.symbol.includes('CE'));
+                    const displaySide = isPut ? 'BUY PUT (LONG)' : isCall ? 'BUY CALL (LONG)' : pos.side;
+                    const thesisBadge = isPut ? 'BEARISH' : isCall ? 'BULLISH' : '';
                     return (
                         <div key={pos.id} className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-1.5">
+                            {pos.symbol && (
+                                <div className="flex justify-between items-center text-[10px] font-mono text-slate-300 pb-1 border-b border-white/5">
+                                    <span className="font-semibold truncate max-w-[200px]" title={pos.symbol}>{pos.symbol}</span>
+                                    {thesisBadge && (
+                                        <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider border ${
+                                            isPut ? 'bg-red-500/20 text-red-300 border-red-500/40' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                        }`}>
+                                            {thesisBadge}
+                                        </span>
+                                    )}
+                                </div>
+                            )}
                             <div className="flex justify-between items-center">
                                 <span className={`text-xs font-bold ${isLong ? 'text-green-400' : 'text-red-400'}`}>
-                                    {pos.side} x{pos.size.toFixed(0)}{sizeReduced && <span className="text-white/30 text-[9px] ml-1">(was {origSize.toFixed(0)})</span>} @ {pos.entryPrice.toFixed(2)}
+                                    {displaySide} x{pos.size.toFixed(0)}{sizeReduced && <span className="text-white/30 text-[9px] ml-1">(was {origSize.toFixed(0)})</span>} @ {pos.entryPrice.toFixed(2)}
                                 </span>
                                 <span className={`text-xs font-mono font-bold ${pos.pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                     {pos.pnl >= 0 ? '+' : ''}₹{pos.pnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
