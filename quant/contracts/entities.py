@@ -62,6 +62,7 @@ class Signal:
         setup: SetupType,
         source: Source,
         metadata: dict[str, Any] | None = None,
+        signal_id: str | None = None,
     ) -> "Signal":
         """Factory method that accepts float or Decimal for monetary values."""
         return cls(
@@ -74,6 +75,7 @@ class Signal:
             setup=setup,
             source=source,
             metadata=metadata,
+            **({"signal_id": signal_id} if signal_id else {}),
         )
 
 

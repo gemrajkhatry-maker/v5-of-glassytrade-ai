@@ -31,6 +31,7 @@ from quant.contracts.timezones import IST, MCX_SESSION_CLOSE, NSE_SESSION_CLOSE
 from quant.events import BarClosed
 from quant.execution.live_oms import LiveOMS
 from quant.execution.oms import PaperOMS
+from quant.hotpath import get_hotpath_tracer
 from quant.reconciliation_service import canonical_key, partition_keys
 from quant.runtime import QuantEngine
 from quant.session_levels import SessionLevelStore
@@ -38,6 +39,9 @@ from quant.state import project_state
 from quant.ws_adapter import view_state_to_ws
 
 logger = logging.getLogger(__name__)
+
+# Opt-in hot-path trace (GLASSYTRADE_HOTPATH_TRACE=1) — snapshot phase.
+_HOTPATH = get_hotpath_tracer()
 
 
 def _is_futures_symbol(symbol: str) -> bool:
@@ -716,6 +720,15 @@ class QuantCoordinator:
             quant_decision=engine.latest_quant_decision,
             agent_decision=engine.latest_agent_decision,
         )
+        # Opt-in hot-path trace — a snapshot was composed for the WS transport.
+        if _HOTPATH.enabled:
+            _HOTPATH.emit(
+                symbol, "snapshot",
+                positions=len(fold_positions),
+                open_pnl=round(float(open_pnl), 2),
+                ltp=float(live.ltp) if live.ltp is not None else None,
+                has_depth=live.depth is not None,
+            )
         return view_state_to_ws(vs)
 
     def symbols(self) -> list[str]:

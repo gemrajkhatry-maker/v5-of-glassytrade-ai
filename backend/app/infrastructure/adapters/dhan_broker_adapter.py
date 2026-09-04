@@ -16,18 +16,13 @@ from app.infrastructure.adapters._dhan_common import (  # noqa: F401  (bootstrap
     _exchange_enum,
     classify_symbol,
 )
-from brokers.broker import Exchange, Instrument, Order
+from brokers.broker import Instrument, Order
 from brokers.broker.dhan.application.broker import DhanBroker
 from brokers.broker.dhan.domain.errors import DhanError
 from brokers.broker.types import OrderStatus, OrderType
-from quant.contracts.aggregates import (
-    RISK_BY_CONFIDENCE,
-    RISK_PER_TRADE,
-    Portfolio,
-)
+from quant.contracts.aggregates import Portfolio
 from quant.contracts.entities import Position, Signal
 from quant.contracts.enums import Side, Source
-from quant.contracts.exchange_config import ExchangeConfig
 from quant.contracts.numeric import to_float
 from quant.contracts.ports.broker import IBroker
 from shared.money import to_decimal as _strict_to_decimal
@@ -52,8 +47,6 @@ class DhanBrokerAdapter(IBroker):
     calls via ``DhanBroker``'s internal sync wrappers, which already bridge async
     internally.
     """
-
-    _MCX_UNDERLYINGS = ExchangeConfig.for_exchange("MCX").underlyings
 
     # C7: default worst-case slippage bound for entry orders. A naked MARKET
     # order on a thin option can fill arbitrarily far from the signal price;
@@ -162,7 +155,10 @@ class DhanBrokerAdapter(IBroker):
             logger.error("Rejecting signal %s: invalid entry price=%s", signal.signal_id, signal.price)
             return None
 
-        qty = self._resolve_quantity(signal, portfolio)
+        # Quantity is finalized by SessionRisk/LiveOMS before crossing this
+        # boundary. The broker adapter validates and preserves it; it never
+        # re-sizes against a second Portfolio implementation.
+        qty = self._pre_sized_quantity(signal)
         if qty <= 0:
             logger.error(
                 "Rejecting signal %s for %s: invalid order quantity=%s",
@@ -725,71 +721,42 @@ class DhanBrokerAdapter(IBroker):
                 return product
         return "INTRADAY"
 
-    def _resolve_quantity(self, signal: Signal, portfolio: Portfolio) -> int:
-        meta = signal.metadata or {}
-        explicit_qty = to_float(
-            meta.get("order_quantity", meta.get("size", 0)),
-            default=0.0,
-        )
-        if explicit_qty > 0:
-            return int(explicit_qty)
+    def _pre_sized_quantity(self, signal: Signal) -> int:
+        """Return the already-finalized order quantity or reject it.
 
-        if not portfolio:
-            logger.error("Cannot auto-size order without Portfolio context for %s", signal.signal_id)
-            return 0
-
-        risk_pct = _to_decimal(meta.get("session_risk_pct"), default=str(RISK_PER_TRADE))
-        if risk_pct <= 0:
-            risk_pct = RISK_BY_CONFIDENCE.get(str(meta.get("confidence", "Medium")), RISK_PER_TRADE)
-
-        # keep Fabio-safe bounds (0.25% - 0.5%)
-        risk_pct = max(Decimal("0.0025"), min(Decimal("0.005"), risk_pct))
-        risk_amount = portfolio.equity * risk_pct
-
-        risk_per_unit = abs(_to_decimal(signal.price) - _to_decimal(signal.stop_loss))
-        if risk_per_unit <= 0:
-            return 0
-
-        full_size = risk_amount / risk_per_unit
-        max_notional = portfolio.equity * Decimal(str(getattr(portfolio, "leverage", 1)))
-        signal_price = _to_decimal(signal.price)
-        if full_size * signal_price > max_notional:
-            full_size = max_notional / signal_price
-
-        scale_in = bool(meta.get("scale_in", False))
-        scale_fraction = Decimal("0.4") if scale_in else Decimal("1")
-        quantity = full_size * min(max(scale_fraction, Decimal("0")), Decimal("1"))
-        if quantity <= 0:
-            return 0
-
-        lot_size = _to_decimal(meta.get("option_lot_size", 0))
-        if lot_size > 0:
-            # Nearest lot multiple, no truncation.
-            num_lots = max(1.0, round(float(quantity) / float(lot_size)))
-            quantity = Decimal(int(num_lots)) * lot_size
-            if quantity < lot_size * Decimal("0.5"):
-                quantity = lot_size
-
-        qty_int = int(quantity)
-        if qty_int <= 0:
-            return 0
-
-        # Exchange order freeze limit guard (e.g. NIFTY 1800, BANKNIFTY 900)
-        sym = str(getattr(signal, "symbol", "") or "")
-        is_mcx = ExchangeConfig.for_exchange("MCX").is_underlying(sym)
-        ex_cfg = ExchangeConfig.for_exchange("MCX" if is_mcx else "NSE")
-        freeze_limit = ex_cfg.get_freeze_limit(sym)
-        if freeze_limit > 0 and qty_int > freeze_limit:
-            logger.warning(
-                "Order quantity %d for %s exceeds exchange freeze limit %d — capping to freeze limit",
-                qty_int, getattr(signal, "symbol", ""), freeze_limit
+        Sizing belongs to the quant risk layer. Falling back to a broker-side
+        portfolio calculation creates a second risk authority and can submit a
+        different quantity from the one approved by the engine. Missing,
+        fractional, non-finite, and non-positive values therefore fail closed.
+        """
+        raw_quantity = (signal.metadata or {}).get("order_quantity")
+        if raw_quantity is None:
+            logger.error(
+                "Rejecting signal %s: pre-sized order_quantity is required",
+                signal.signal_id,
             )
-            if lot_size > 0:
-                qty_int = max(int(lot_size), int((freeze_limit // int(lot_size)) * int(lot_size)))
-            else:
-                qty_int = freeze_limit
-
-        return qty_int
+            return 0
+        try:
+            quantity = Decimal(str(raw_quantity))
+        except (ValueError, TypeError, ArithmeticError):
+            logger.error(
+                "Rejecting signal %s: invalid pre-sized order_quantity=%r",
+                signal.signal_id,
+                raw_quantity,
+            )
+            return 0
+        if (
+            not quantity.is_finite()
+            or quantity <= 0
+            or quantity != quantity.to_integral_value()
+        ):
+            logger.error(
+                "Rejecting signal %s: order_quantity must be a positive integer, got %r",
+                signal.signal_id,
+                raw_quantity,
+            )
+            return 0
+        return int(quantity)
 
     # ------------------------------------------------------------------
     # C4: durable order state persistence (crash recovery)

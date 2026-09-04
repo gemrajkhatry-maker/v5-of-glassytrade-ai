@@ -34,7 +34,11 @@ def to_broker_signal(signal: EngineSignal, quantity: float | None = None) -> Bro
     so the broker adapter executes exactly that size — the adapter must never
     re-derive quantity against its own portfolio view (C1).
     """
-    metadata: dict[str, Any] = {"rr": signal.rr, "model_label": signal.model_label}
+    metadata: dict[str, Any] = {
+        "rr": signal.rr,
+        "model_label": signal.model_label,
+        "engine_signal_id": signal.signal_id,
+    }
     if quantity is not None and quantity > 0:
         metadata["order_quantity"] = float(quantity)
     return BrokerSignal.create(
@@ -47,4 +51,5 @@ def to_broker_signal(signal: EngineSignal, quantity: float | None = None) -> Bro
         setup=_SETUP_BY_MODEL_LABEL.get(signal.model_label, SetupType.TREND_MODEL),
         source=Source.AMT,
         metadata=metadata,
+        signal_id=signal.signal_id,
     )

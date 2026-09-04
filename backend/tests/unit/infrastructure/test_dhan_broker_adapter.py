@@ -191,6 +191,50 @@ def test_order_carries_signal_id_for_broker_dedup():
 
 
 # ---------------------------------------------------------------------------
+# Quantity authority: the broker boundary is fail-closed and preserves the
+# already lot-snapped quantity supplied by SessionRisk/LiveOMS.
+# ---------------------------------------------------------------------------
+
+
+def test_execute_order_rejects_missing_pre_sized_quantity():
+    """The adapter must not resurrect its removed portfolio-based sizer."""
+    broker = _mock_broker_filled(quantity=4)
+    adapter = _make_adapter(broker)
+    signal = _make_signal(price=100.0, metadata=None)
+
+    assert adapter.execute_order(signal, Portfolio.create_default(),
+                                "CRUDEOIL 17 AUG 7200 CALL") is None
+    broker.place_order.assert_not_called()
+    broker.get_order_status.assert_not_called()
+
+
+def test_execute_order_rejects_fractional_pre_sized_quantity():
+    """Dhan quantity is an integer venue field; fractional intent fails closed."""
+    broker = _mock_broker_filled(quantity=4)
+    adapter = _make_adapter(broker)
+    signal = _make_signal(price=100.0, metadata={"order_quantity": 4.5})
+
+    assert adapter.execute_order(signal, Portfolio.create_default(),
+                                "CRUDEOIL 17 AUG 7200 CALL") is None
+    broker.place_order.assert_not_called()
+
+
+def test_execute_order_preserves_exact_pre_sized_quantity():
+    """The exact engine quantity must reach the broker order unchanged."""
+    broker = _mock_broker_filled(quantity=7, fill_price=100.0)
+    adapter = _make_adapter(broker)
+    signal = _make_signal(price=100.0, metadata={"order_quantity": 7})
+
+    position = adapter.execute_order(signal, Portfolio.create_default(),
+                                    "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert position is not None
+    placed = broker.place_order.call_args.args[0]
+    assert placed.quantity == 7
+    assert float(position.size) == 7.0
+
+
+# ---------------------------------------------------------------------------
 # C7: entry slippage collar (marketable LIMIT instead of naked MARKET)
 # ---------------------------------------------------------------------------
 

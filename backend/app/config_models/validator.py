@@ -12,6 +12,7 @@ so the main orchestrator stays readable.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from typing import TYPE_CHECKING
 
@@ -89,6 +90,52 @@ def _validate_symbol(name: str, sym: object) -> list[str]:
         )
 
     return errors
+
+
+def _validate_risk(config: "SystemConfig") -> tuple[list[str], list[str]]:
+    """RULE-14: risk values are finite, positive, and bounded for the mode."""
+    errors = []
+    risk = config.risk
+    numeric_limits = {
+        "risk_per_trade_pct": risk.risk_per_trade_pct,
+        "max_daily_loss_pct": risk.max_daily_loss_pct,
+        "max_drawdown_pct": risk.max_drawdown_pct,
+        "absolute_ceiling_pct": risk.absolute_ceiling_pct,
+        "portfolio_notional_cap": risk.portfolio_notional_cap,
+        "per_symbol_notional_cap": risk.per_symbol_notional_cap,
+    }
+    for name, value in numeric_limits.items():
+        if not math.isfinite(float(value)) or float(value) <= 0:
+            errors.append(f"RULE-14: {name} must be finite and > 0. Got {value!r}.")
+
+    integer_limits = {
+        "max_consecutive_losses": risk.max_consecutive_losses,
+        "max_trades_per_session": risk.max_trades_per_session,
+        "max_concurrent_positions": risk.max_concurrent_positions,
+    }
+    for name, value in integer_limits.items():
+        if isinstance(value, bool) or int(value) != value or int(value) < 1:
+            errors.append(f"RULE-14: {name} must be a positive integer. Got {value!r}.")
+
+    if config.is_live():
+        if risk.risk_per_trade_pct > 0.02:
+            errors.append(
+                f"RULE-14: live risk_per_trade_pct must be ≤ 0.02. Got {risk.risk_per_trade_pct}."
+            )
+        if risk.max_daily_loss_pct > risk.max_drawdown_pct:
+            errors.append(
+                "RULE-14: live max_daily_loss_pct must be ≤ max_drawdown_pct."
+            )
+        if risk.portfolio_notional_cap > 0.80:
+            errors.append(
+                f"RULE-14: live portfolio_notional_cap must be ≤ 0.80. Got {risk.portfolio_notional_cap}."
+            )
+        if risk.per_symbol_notional_cap > risk.portfolio_notional_cap:
+            errors.append(
+                "RULE-14: live per_symbol_notional_cap must be ≤ portfolio_notional_cap."
+            )
+
+    return errors, []
 
 
 def _validate_symbols(config: "SystemConfig") -> tuple[list[str], list[str]]:
@@ -225,6 +272,7 @@ def validate_config(config: "SystemConfig") -> None:
 
     for validator in (
         _validate_global,
+        _validate_risk,
         _validate_symbols,
         _validate_features,
         _validate_mcx,

@@ -181,6 +181,25 @@ def load_config(
     # STEP 2: Load environment override
     env_name = os.environ.get("GLASSYTRADE_ENV", "paper")
     env_data = _load_yaml(config_path / "environments" / f"{env_name}.yaml")
+    if env_name == "live":
+        required_live_risk = {
+            "risk_per_trade_pct",
+            "max_daily_loss_pct",
+            "max_consecutive_losses",
+            "max_trades_per_session",
+            "max_drawdown_pct",
+            "absolute_ceiling_pct",
+            "max_concurrent_positions",
+            "portfolio_notional_cap",
+            "per_symbol_notional_cap",
+        }
+        configured_live_risk = set(env_data.get("risk", {}))
+        missing_live_risk = sorted(required_live_risk - configured_live_risk)
+        if missing_live_risk:
+            raise ValueError(
+                "live environment is missing required risk settings: "
+                + ", ".join(missing_live_risk)
+            )
     merged = _deep_merge(base_data, env_data)
 
     # STEP 3: Load exactly one strategy file (align with ModeConfigLoader / MCX default)

@@ -20,6 +20,7 @@ risk:
   max_concurrent_positions: 3
   max_trades_per_session: 6
   max_drawdown_pct: 0.03     # 3% max drawdown
+  absolute_ceiling_pct: 0.01  # hard per-trade loss ceiling
   portfolio_notional_cap: 0.60
   per_symbol_notional_cap: 0.20
 

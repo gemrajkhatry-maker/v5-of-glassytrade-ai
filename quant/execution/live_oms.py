@@ -17,6 +17,7 @@ Signal flow:
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING
 
 from quant.contracts.ports.broker import IBroker
@@ -62,7 +63,21 @@ class LiveOMS:
         and maps the broker Position back to the engine domain Position.
         Returns None if the broker rejected the signal (normal, not an error).
         """
-        size = snap_to_lot(quantity, self._lot_size)
+        try:
+            raw_quantity = float(quantity)
+            lot_size = float(self._lot_size)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(
+                f"LiveOMS.submit: quantity and lot_size must be numeric, "
+                f"got quantity={quantity!r}, lot_size={self._lot_size!r}"
+            ) from exc
+        if not math.isfinite(raw_quantity) or raw_quantity <= 0:
+            raise ValueError(f"LiveOMS.submit: quantity must be finite and > 0, got {quantity!r}")
+        if not math.isfinite(lot_size) or lot_size <= 0:
+            raise ValueError(f"LiveOMS.submit: lot_size must be finite and > 0, got {self._lot_size!r}")
+        size = snap_to_lot(raw_quantity, lot_size)
+        if not math.isfinite(float(size)) or size <= 0:
+            raise ValueError(f"LiveOMS.submit: snapped quantity must be finite and > 0, got {size!r}")
         broker_signal = to_broker_signal(signal, size)
         broker_pos = self._broker.execute_order(broker_signal, self._portfolio, signal.symbol)
 

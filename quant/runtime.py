@@ -31,6 +31,7 @@ from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
 from quant.decision.signal_builder import clamp_quantity
 from quant.decision.context_builder import DecisionContextBuilder
+from quant.hotpath import get_hotpath_tracer
 from quant.position_manager import PositionManager
 from quant.session_gates import (
     bar_epoch_ms as _bar_epoch_ms,
@@ -71,6 +72,10 @@ from quant.reconciliation_service import PeriodicReconciliationResult
 from quant.transitions import apply_event, _position_to_state
 
 logger = logging.getLogger(__name__)
+
+# Opt-in hot-path trace (GLASSYTRADE_HOTPATH_TRACE=1). Zero cost when
+# disabled: every call site checks ``_HOTPATH.is_enabled()`` first.
+_HOTPATH = get_hotpath_tracer()
 
 # Deterministic conviction used for gate 4's probability check when the engine
 # decides from the auction state alone (above the 0.55 min_probability
@@ -548,6 +553,11 @@ class QuantEngine:
                 break
             steps += 1
             self._last_tick_wall = time.time()
+            if _HOTPATH.enabled:
+                _HOTPATH.emit(
+                    self.symbol, "tick",
+                    time=str(tick.time), price=float(tick.price), source="option",
+                )
             # 0. Tick-level fast SL/TP protection (Fabio: exit immediately on stop breach, never wait 5m)
             if self.state.position is not None:
                 self._manage_tick_exit(float(tick.price), str(tick.time))
@@ -590,6 +600,12 @@ class QuantEngine:
                 if self._underlying_aggregator is not None:
                     utick = self._underlying_gateway.try_next_tick()
                     while utick is not None:
+                        if _HOTPATH.enabled:
+                            _HOTPATH.emit(
+                                self.symbol, "tick",
+                                time=str(utick.time), price=float(utick.price),
+                                source="underlying",
+                            )
                         if self._micro_underlying_aggregator is not None:
                             micro_ubar = self._micro_underlying_aggregator.add_tick(utick)
                             if micro_ubar is not None:
@@ -1304,7 +1320,95 @@ class QuantEngine:
             # Event sourcing: append to EventStore and fold into state
             self.event_store.append(event)
             self.state = apply_event(self.state, event)
+            # Opt-in hot-path trace — record the phase crossing this funnel.
+            if _HOTPATH.enabled:
+                self._hotpath_event(event)
 
+    def _hotpath_event(self, event: Event) -> None:
+        """Map the events that define the hot path onto trace phases.
+
+        Only reached when the tracer is enabled (call sites short-circuit
+        on ``_HOTPATH.enabled`` first), so this never runs in production
+        unless explicitly switched on.
+        """
+        if isinstance(event, BarClosed):
+            b = event.bar
+            _HOTPATH.emit(
+                event.symbol, "bar_closed",
+                time=event.time,
+                open=getattr(b, "open", None),
+                high=getattr(b, "high", None),
+                low=getattr(b, "low", None),
+                close=getattr(b, "close", None),
+                volume=getattr(b, "volume", None),
+            )
+            return
+        if isinstance(event, DecisionProduced):
+            d = event.decision
+            signal = None
+            s = getattr(d, "signal", None)
+            if s is not None:
+                signal = {
+                    "type": s.type,
+                    "entry": getattr(s, "entry", None),
+                    "sl": getattr(s, "sl", None),
+                    "tp": getattr(s, "tp", None),
+                    "rr": getattr(s, "rr", None),
+                }
+            _HOTPATH.emit(
+                event.symbol, "decision",
+                time=event.time,
+                approved=bool(getattr(d, "approved", False)),
+                reason=getattr(d, "reason", ""),
+                model_label=getattr(d, "model_label", ""),
+                gates=[
+                    {"gate": g.gate, "name": g.name, "passed": g.passed,
+                     "reason": g.reason}
+                    for g in (getattr(d, "gate_results", None) or ())
+                ],
+                signal=signal,
+            )
+            return
+        if isinstance(event, PositionOpened):
+            p = event.position
+            o = getattr(p, "order", None)
+            sig = getattr(o, "signal", None)
+            size = float(getattr(p, "size", 0.0) or 0.0)
+            _HOTPATH.emit(
+                event.symbol, "fill",
+                time=event.time, kind="open",
+                side="LONG" if size > 0 else "SHORT",
+                qty=getattr(o, "quantity", None) or abs(size),
+                entry=getattr(p, "open_price", None),
+                sl=getattr(sig, "sl", None) if sig is not None else None,
+                tp=getattr(sig, "tp", None) if sig is not None else None,
+                model_label=getattr(sig, "model_label", "") if sig is not None else "",
+                pyramid=bool(getattr(p, "is_pyramid", False)),
+            )
+            return
+        if isinstance(event, PositionClosed):
+            f = event.fill
+            p = getattr(f, "position", None)
+            _HOTPATH.emit(
+                event.symbol, "fill",
+                time=event.time, kind="close",
+                side="LONG" if float(getattr(p, "size", 0.0) or 0.0) > 0 else "SHORT",
+                qty=abs(float(getattr(p, "size", 0.0) or 0.0)),
+                price=getattr(f, "close_price", None),
+                reason=getattr(f, "reason", ""),
+                pnl=getattr(f, "pnl", None),
+            )
+            return
+        if isinstance(event, PositionReduced):
+            f = event.fill
+            rem = event.remaining
+            _HOTPATH.emit(
+                event.symbol, "fill",
+                time=event.time, kind="partial",
+                price=getattr(f, "close_price", None),
+                reason=getattr(f, "reason", ""),
+                remaining_size=float(getattr(rem, "size", 0.0) or 0.0),
+            )
 
     def _underlying(self) -> str:
         from quant.contracts.exchange_config import ExchangeConfig

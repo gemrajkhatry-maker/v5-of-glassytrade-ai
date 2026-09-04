@@ -46,6 +46,23 @@ def test_quantity_carried_into_metadata():
     assert broker_sig.metadata.get("order_quantity") == 130.0
 
 
+def test_signal_identity_is_preserved_across_mapping():
+    signal = _engine_signal("LONG")
+    broker_sig = to_broker_signal(signal, quantity=130.0)
+
+    assert broker_sig.signal_id == signal.signal_id
+    assert broker_sig.metadata["engine_signal_id"] == signal.signal_id
+
+
+def test_repeated_mapping_reuses_same_broker_identity():
+    signal = _engine_signal("LONG")
+
+    first = to_broker_signal(signal, quantity=130.0)
+    retry = to_broker_signal(signal, quantity=130.0)
+
+    assert first.signal_id == retry.signal_id
+
+
 def test_no_quantity_omits_order_quantity():
     broker_sig = to_broker_signal(_engine_signal("LONG"))
     assert "order_quantity" not in (broker_sig.metadata or {})

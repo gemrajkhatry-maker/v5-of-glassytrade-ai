@@ -1,5 +1,6 @@
 import logging
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
@@ -59,6 +60,9 @@ class Signal:
     model_label: str     # "Triple-A" | "LVN_Sniper" | "VA_Fade" — which playbook triggered
     symbol: str
     timestamp: str
+    # Stable logical identity for retries and broker idempotency. It is created
+    # once with the approved signal and must be preserved across mappings.
+    signal_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 class SignalBuilder:

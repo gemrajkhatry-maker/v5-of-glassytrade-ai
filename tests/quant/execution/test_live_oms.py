@@ -124,6 +124,17 @@ class TestLiveOMSProtocolCompliance:
 # ---------------------------------------------------------------------------
 
 class TestLiveOMSSubmit:
+    @pytest.mark.parametrize("bad_quantity", [0.0, -1.0, float("nan"), float("inf")])
+    def test_invalid_quantity_fails_before_broker_call(self, bad_quantity):
+        broker = _CapturingBroker()
+        portfolio = MagicMock(spec=Portfolio)
+        oms = LiveOMS(broker=broker, portfolio=portfolio, lot_size=65.0)
+
+        with pytest.raises(ValueError, match="quantity"):
+            oms.submit(_make_signal(), quantity=bad_quantity)
+
+        assert broker.last_signal is None
+
     def test_submit_long_creates_position(self):
         broker = MockBroker(fill_price=102.0, fill_qty=130.0)
         portfolio = MagicMock(spec=Portfolio)
