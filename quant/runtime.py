@@ -1077,14 +1077,30 @@ class QuantEngine:
                 return
             signal = decision.signal
             held_side = "LONG" if pos.size > 0 else "SHORT"
+            from quant.contracts.instrument_registry import is_option_contract
+            sym_upper = self.symbol.upper().rstrip()
+            is_put = is_option_contract(self.symbol) and (
+                sym_upper.endswith(("PUT", "PE")) or sym_upper.endswith("-PE")
+            )
+            is_call = is_option_contract(self.symbol) and (
+                sym_upper.endswith(("CALL", "CE")) or sym_upper.endswith("-CE")
+            )
+            if is_put:
+                held_thesis = "SHORT" if pos.size > 0 else "LONG"
+            elif is_call:
+                held_thesis = "LONG" if pos.size > 0 else "SHORT"
+            else:
+                held_thesis = held_side
+
             # Same-direction approvals (and NO_EDGE) do nothing.
-            if signal.type == held_side:
+            if signal.type == held_thesis:
                 return
             logger.info(
                 "🔄 [THESIS FLIP] %s: fresh %s approval (%s @ %.2f RR=%.2f) opposes "
-                "open %s @ %.2f — flattening (OPPOSING_SIGNAL)",
+                "held %s thesis (pos %s @ %.2f) — flattening (OPPOSING_SIGNAL)",
                 self.symbol, signal.type, signal.model_label,
-                float(signal.entry), float(signal.rr), held_side,
+                float(signal.entry), float(signal.rr), held_thesis,
+                held_side,
                 float(pos.open_price) if getattr(pos, "open_price", None) else 0.0,
             )
             pm._execute_full_close(

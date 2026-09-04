@@ -26,6 +26,48 @@ from quant.execution.exit_rules import classify_exit, ExitReason
 # Signal
 # ---------------------------------------------------------------------------
 
+# Deterministic namespace for signal identity. A fixed uuid5 namespace keeps
+# signal ids stable across process restarts and identical re-derivations, so
+# broker-side correlation dedup (correlationId) survives a replay after a
+# crash — a fresh uuid4 per construction would open a duplicate position.
+# Mirrors the adapter's content-derived close ids (`close:SYMBOL:SIDE:QTY`).
+_CANONICAL_SIGNAL_NS = uuid.UUID("6f1d2c3a-9b7e-4c4d-8a2f-0d5e1b7c9a41")
+
+
+def derive_signal_id(
+    *,
+    symbol: str = "",
+    timestamp: str = "",
+    reason: str = "",
+    entry: float | Decimal | str = "",
+    stop_loss: float | Decimal | str = "",
+    take_profit: float | Decimal | str = "",
+    kind: str = "",
+    setup: str = "",
+    source: str = "",
+) -> str:
+    """Derive the canonical signal id from the signal's decision content.
+
+    One logical decision (same symbol, bar time, entry/SL/TP) must always map
+    to one broker order, across mapping, retries, and process restarts.
+    Behavioral identity: two signals differing in any decision field get
+    different ids; two constructions of the same decision get the same id.
+    """
+    canon = "|".join(
+        (
+            str(symbol).strip().upper(),
+            str(timestamp).strip(),
+            str(reason).strip().lower(),
+            str(entry),
+            str(stop_loss),
+            str(take_profit),
+            str(kind).strip().upper(),
+            str(setup).strip().upper(),
+            str(source).strip().upper(),
+        )
+    )
+    return str(uuid.uuid5(_CANONICAL_SIGNAL_NS, canon))
+
 
 @dataclass
 class Signal:
@@ -44,7 +86,26 @@ class Signal:
     setup: SetupType
     source: Source
     metadata: dict[str, Any] | None = None
-    signal_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    # Identity, not behavior: derived from decision content (RESTART-STABLE —
+    # one logical decision maps to exactly one broker order even when the
+    # engine replays the same approved decision after a crash; mirrors the
+    # adapter's content-derived close ids). compare=False: excluded from
+    # equality so replay determinism contracts compare behavioral fields only
+    # (same pattern as Event.correlation_id). An explicit signal_id wins.
+    signal_id: str = field(default="", compare=False)
+
+    def __post_init__(self) -> None:
+        if not self.signal_id:
+            self.signal_id = derive_signal_id(
+                timestamp=self.timestamp,
+                reason=self.reason,
+                entry=self.price,
+                stop_loss=self.stop_loss,
+                take_profit=self.take_profit,
+                kind=str(self.type.value) if hasattr(self.type, "value") else str(self.type),
+                setup=str(self.setup.value) if hasattr(self.setup, "value") else str(self.setup),
+                source=str(self.source.value) if hasattr(self.source, "value") else str(self.source),
+            )
 
     @property
     def is_buy(self) -> bool:

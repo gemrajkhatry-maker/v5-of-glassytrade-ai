@@ -91,6 +91,20 @@ test_events 4 passed; broker mapper/live OMS/positive-approval 31 passed;
 full determinism suite 4 passed. Remaining before B7 deletion gate closes:
 repeat the broader runtime/golden regressions when the machine is idle.
 
+B7 deletion gate closed on idle machine (full quant suite: 1730 passed, 2 failed):
+
+The 2 failures were tests/quant/test_fast_determinism_parity.py — B2's
+signal_id (fresh uuid4 per Signal construction, default equality) leaked
+volatile identity into event equality, breaking the suite's documented
+"identity-free equality" contract. Fixed by marking signal_id compare=False
+on both Signal dataclasses (quant/contracts/entities.py,
+quant/decision/signal_builder.py), matching the established
+Event.correlation_id / Order._id identity pattern. All real consumers
+(mapper preservation, broker dedup) compare the string directly and are
+unaffected. Re-verified: parity+mapper/OMS 31 passed; determinism, golden
+replay, hot-path trace, Dhan adapter 54 passed. B2 durable uuid5 identity
+across restart remains open (live dedup semantics change — do not bundle).
+
 ## Working-tree protection
 
 The branch was created from the current checkout with these existing uncommitted hot-path trace changes preserved:

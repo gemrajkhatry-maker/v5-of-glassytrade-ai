@@ -62,7 +62,8 @@ class Signal:
     timestamp: str
     # Stable logical identity for retries and broker idempotency. It is created
     # once with the approved signal and must be preserved across mappings.
-    signal_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    # compare=False: identity, not behavior — keeps replay traces equal.
+    signal_id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False)
 
 
 class SignalBuilder:

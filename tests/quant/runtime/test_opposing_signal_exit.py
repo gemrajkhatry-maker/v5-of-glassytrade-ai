@@ -344,3 +344,41 @@ def test_flip_consumes_identical_underlying_context_source():
     assert closes[-1].fill.pnl == pytest.approx((99.75 - 100.0) * 1.0), (
         "close must execute at the traded instrument's price, not underlying scale"
     )
+
+
+def test_put_option_holds_on_short_and_flips_on_long():
+    """Holding a PUT option: a fresh SHORT approval on underlying represents
+    same-direction thesis and must HOLD. A fresh LONG approval represents a
+    contrary thesis and must FLATTEN."""
+    from quant.bars import Bar
+    und_bar = Bar(time="u1", open=50000.0, high=50100.0, low=49900.0, close=50050.0, volume=10)
+
+    # 1. Engine with PUT contract symbol
+    eng = _option_mode_engine(side="LONG", entry=100.0)
+    eng.symbol = "SILVERM 24 SEP 235000 PUT"
+    eng._underlying_amt_dto = {"marketState": "BALANCED"}
+    eng._last_underlying_bar = und_bar
+
+    # Stub pipeline to approve SHORT
+    def enter_short(ctx, *, allow_positioned=False):
+        return SimpleNamespace(
+            approved=True, signal=_signal(side="SHORT"), gate_results=[],
+            reason="APPROVED", phase="", block_reasons=[], model_label="",
+        )
+    eng._strategy = SimpleNamespace(should_enter=enter_short)
+
+    # A continuing SHORT signal must NOT close the PUT position
+    eng._check_thesis_flip({"marketState": "BALANCED"}, _opt_bar(close=105.0))
+    assert eng.state.position is not None, "PUT position must hold when underlying confirms SHORT"
+
+    # 2. Now stub pipeline to approve LONG (contrary signal)
+    def enter_long(ctx, *, allow_positioned=False):
+        return SimpleNamespace(
+            approved=True, signal=_signal(side="LONG"), gate_results=[],
+            reason="APPROVED", phase="", block_reasons=[], model_label="",
+        )
+    eng._strategy = SimpleNamespace(should_enter=enter_long)
+
+    # A contrary LONG signal MUST flatten the PUT position
+    eng._check_thesis_flip({"marketState": "BALANCED"}, _opt_bar(close=95.0))
+    assert eng.state.position is None, "PUT position must flatten when underlying flips to LONG"
