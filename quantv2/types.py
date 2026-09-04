@@ -9,12 +9,13 @@ class Bar:
     low: float
     close: float
     volume: float = 0.0
+    delta: float = 0.0
 
 @dataclass(frozen=True)
 class Context:
     symbol: str
     bar: Bar
-    direction: str | None = None
+    tick: float = 0.05
     vah: float | None = None
     val: float | None = None
     poc: float | None = None
