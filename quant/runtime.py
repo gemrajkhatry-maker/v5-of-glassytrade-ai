@@ -848,6 +848,34 @@ class QuantEngine:
         )
         ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
         decision = self._strategy.should_enter(ctx)
+
+        # If running on an option contract with underlying futures feed, translate signal to option premium
+        if decision.approved and decision.signal is not None and self._underlying_gateway is not None:
+            from quant.amt.session.selector import OptionSelector
+            from dataclasses import replace as _dc_replace
+            exec_bar = execution_bar or self._aggregator.current_bar or bar
+            opt_ltp = float(exec_bar.close) if exec_bar and exec_bar.close > 0 else 0.0
+            if opt_ltp > 0:
+                delta = float(getattr(ctx, "option_delta", 0.50) or 0.50)
+                selector = OptionSelector()
+                opt_signal = selector.translate_underlying_signal_to_option(
+                    signal=decision.signal,
+                    option_symbol=self.symbol,
+                    option_ltp=opt_ltp,
+                    delta=delta,
+                    tick_size=self._tick_size,
+                )
+                if opt_signal is None:
+                    decision = _dc_replace(
+                        decision,
+                        approved=False,
+                        signal=None,
+                        reason="OPPOSING_TYPE",
+                        block_reasons=("Signal direction opposes option contract type (Call vs Put)",),
+                    )
+                else:
+                    decision = _dc_replace(decision, signal=opt_signal)
+
         # S1: record the decision itself — gates with pass/fail and reasons.
         try:
             self.cert_records.append({
@@ -897,25 +925,6 @@ class QuantEngine:
 
         if decision.approved and decision.signal is not None:
             signal = decision.signal
-
-            # If running on an option contract with underlying futures feed, translate signal to option premium
-            if self._underlying_gateway is not None:
-                from quant.amt.session.selector import OptionSelector
-                exec_bar = execution_bar or self._aggregator.current_bar or bar
-                opt_ltp = float(exec_bar.close) if exec_bar and exec_bar.close > 0 else 0.0
-                if opt_ltp > 0:
-                    delta = float(getattr(ctx, "option_delta", 0.50) or 0.50)
-                    selector = OptionSelector()
-                    signal = selector.translate_underlying_signal_to_option(
-                        signal=signal,
-                        option_symbol=self.symbol,
-                        option_ltp=opt_ltp,
-                        delta=delta,
-                        tick_size=self._tick_size,
-                    )
-                    if signal is None:
-                        return
-
             logger.info(
                 "⚡ [APPROVED SIGNAL] %s: %s @ %.2f (SL=%.2f, TP=%.2f, RR=%.2f) — %s | trades_today=%d equity=₹%.0f",
                 self.symbol,
