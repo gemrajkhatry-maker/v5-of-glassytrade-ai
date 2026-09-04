@@ -236,9 +236,49 @@ class DhanBrokerAdapter(IBroker):
                     broker.cancel_order(placed_order_id)
                     logger.info("Order %s cancelled after timeout", placed_order_id)
                 except Exception:
-                    logger.debug("Failed to cancel timed-out order %s", placed_order_id, exc_info=True)
-                self._persist_order_terminal(signal, "CANCELLED", broker_order_id=placed_order_id)
-                return None
+                    # The order may still be live at the broker: CANCELLED would
+                    # be a lie, and a later fill would be untracked exposure.
+                    # Persist the honest terminal state; reconciliation (C4/B3)
+                    # treats UNKNOWN as reconcile-required, and the executing
+                    # guard keeps this signal from re-submitting blind.
+                    logger.warning(
+                        "Order %s: cancel request failed after timeout — outcome UNKNOWN",
+                        placed_order_id,
+                    )
+                    self._persist_order_terminal(signal, "UNKNOWN", broker_order_id=placed_order_id)
+                    return None
+                # A fill can race the cancel — the broker's post-cancel state
+                # decides; never trust the local intent. Hand an observed
+                # TERMINAL status to the normal path below: FILLED -> position
+                # honored, partial terminal -> filled_quantity persisted,
+                # CANCELLED -> clean. A still-open order is cancelled outright:
+                # the cancel already succeeded, so only a race fill can have
+                # happened and the fresh read above is the authority.
+                post_cancel = self._safe_order_status(placed_order_id)
+                if post_cancel is not None and self._is_terminal(post_cancel.status):
+                    if self._is_filled(post_cancel):
+                        logger.info("Order %s filled despite cancel — honoring the fill", placed_order_id)
+                    final_order = post_cancel
+                elif post_cancel is not None and to_float(post_cancel.filled_quantity) > 0:
+                    # Partial fill frozen by the successful cancel: persist the
+                    # fractional exposure (reconciliation will collect it) and
+                    # treat the entry as failed from the engine's perspective.
+                    logger.warning(
+                        "Order %s partially filled before cancel: %s/%s",
+                        placed_order_id,
+                        to_float(post_cancel.filled_quantity),
+                        to_float(post_cancel.quantity),
+                    )
+                    self._persist_order_terminal(
+                        signal, "FILLED",
+                        broker_order_id=placed_order_id,
+                        filled_quantity=to_float(post_cancel.filled_quantity),
+                        avg_fill_price=to_float(post_cancel.average_fill_price),
+                    )
+                    return None
+                else:
+                    self._persist_order_terminal(signal, "CANCELLED", broker_order_id=placed_order_id)
+                    return None
 
             if not self._is_filled(final_order):
                 terminal_status = str(

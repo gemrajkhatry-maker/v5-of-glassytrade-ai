@@ -112,6 +112,41 @@ mapper/OMS/adapter/payload/identity combined: 227 passed
 
 B2 is now COMPLETE. Runtime, ledger, and trace files remain protected.
 
+B3 durable-ledger truthfulness slice completed (adapter-side):
+
+```text
+backend/app/infrastructure/adapters/dhan_broker_adapter.py — timeout
+boundary no longer lies to the ledger:
+  cancel request FAILED after poll timeout -> durable row UNKNOWN
+  (was: CANCELLED while the order could still be live at the broker —
+  a later fill would have been untracked exposure); the executing-guard
+  set blocks blind re-submission, reconciliation owns the outcome
+  fill raced the cancel -> FILLED, position honored (was: CANCELLED)
+  partial fill frozen by a successful cancel -> FILLED with the
+  fractional quantity (reconciliation collects it)
+  clean cancel -> CANCELLED (unchanged)
+New suite: backend/tests/unit/infrastructure/test_dhan_ledger_truthfulness.py
+(6 tests) — including duplicate WS fill updates converging idempotently
+(absolute values, no accumulation) and non-terminal pushes leaving the
+row in-flight.
+Regression: backend infrastructure 162 passed, 1 pre-existing skip.
+```
+
+B3 acceptance status:
+
+```text
+intent persists before broker submit      pre-existing (_persist_order_submitted)
+UNKNOWN durable after ambiguous response  DONE this slice
+partial fills cumulative and idempotent   verified (absolute-value writes)
+position quantity derives from fills      close path uses broker filled_quantity
+restart restores long/short positions     OWNER: w5 worktree (load_inflight_orders
+                                          caller lives there) — integration agent merges
+```
+
+B3 finding for the integration agent: load_inflight_orders() has no
+production caller on this branch; restart restore is implemented in the
+w5 worktree and must be merged before G1.
+
 B7 passive hot-path observability completed (uncommitted on this branch):
 
 ```text
