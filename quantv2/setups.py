@@ -16,7 +16,7 @@ def _second_drive(ctx: Context) -> str | None:
 def _lvn(ctx: Context) -> str | None:
     x = ctx.extra
     lvl = float(x.get("leg_lvn") or 0.0)
-    if lvl > 0 and abs(ctx.bar.close - lvl) <= 2 * float(x.get("tick") or 0.05):
+    if lvl > 0 and abs(ctx.bar.close - lvl) <= 2 * ctx.tick:
         if x.get("absorption") == "SELL_ABSORBED":
             return "LONG"
         if x.get("absorption") == "BUY_ABSORBED":
