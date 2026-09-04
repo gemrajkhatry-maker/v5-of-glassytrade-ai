@@ -1,0 +1,126 @@
+# tests/quant/runtime/test_signal_blocked_latch.py
+"""A blocked approval emits exactly one SignalBlocked per blocking episode.
+Evaluation itself is never latched — vetoes still run every bar, so the
+moment a signal becomes executable it trades."""
+
+from dataclasses import dataclass
+from unittest.mock import MagicMock
+
+from quant.bars import Bar
+from quant.decision.signal_builder import Signal
+from quant.events import SignalBlocked
+from quant.execution.order import Order, Position
+from quant.runtime import QuantEngine
+
+
+@dataclass
+class _ApprovedDecision:
+    signal: Signal
+    approved: bool = True
+    reason: str = "Triple-A"
+    phase: str = ""
+    gate_results: tuple = ()
+    block_reasons: tuple = ()
+    model_label: str = "t"
+
+
+def _sig():
+    return Signal(
+        type="LONG", reason="t", entry=14.0, sl=13.0, tp=16.0, rr=2.0,
+        model_label="t", symbol="LATCH-CALL", timestamp="t0",
+    )
+
+
+def _engine():
+    pra = MagicMock()
+    eng = QuantEngine(gateway=MagicMock(), symbol="LATCH-CALL", portfolio_risk=pra)
+    eng._oms = MagicMock()
+    eng._oms.lot_size = 1
+    # ponytail: EventStore checksum-serializes every event eagerly, so the
+    # stubbed position must be a real Position — a MagicMock recurses there.
+    eng._oms.submit.return_value = Position(
+        order=Order(signal=_sig(), quantity=2.0),
+        open_price=14.0,
+        open_time="t300",
+        size=2.0,
+    )
+    eng._risk = MagicMock()
+    eng._risk.can_trade.return_value = (True, "")
+    eng._risk.state.return_value = MagicMock(trades_today=0, equity=1_000_000)
+    eng._risk.position_size.return_value = 2
+    stub = MagicMock()
+    stub.should_enter.return_value = _ApprovedDecision(_sig())
+    eng._strategy = stub
+    blocked = []
+    eng._bus.subscribe(SignalBlocked, lambda e: blocked.append(e))
+    return eng, blocked, pra
+
+
+def _bar(n):
+    return Bar(time=f"t{300 + n}", open=14.0, high=14.2, low=13.9, close=14.0, volume=10.0)
+
+
+def test_sizing_zero_emits_one_blocked_event():
+    eng, blocked, _ = _engine()
+    eng._risk.position_size.return_value = 0
+    eng._bar_index = 10
+    eng._decide({}, _bar(0))
+    assert len(blocked) == 1
+    assert "0 lots" in blocked[0].reason
+
+
+def test_portfolio_reject_emits_once_per_episode():
+    pra = MagicMock()
+    pra.can_accept.return_value = (False, "concurrent root position: LATCH-CALL active")
+    eng, blocked, _ = _engine()
+    eng._portfolio_risk = pra
+    for i, bar_index in enumerate((10, 13, 16, 19)):  # each beyond the 2-bar debounce
+        eng._bar_index = bar_index
+        eng._decide({}, _bar(i))
+    assert len(blocked) == 1
+    assert pra.can_accept.call_count == 4  # evaluation continues, only emission is latched
+
+
+def test_new_block_reason_starts_new_episode():
+    pra = MagicMock()
+    pra.can_accept.side_effect = [
+        (False, "concurrent root position: X active"),
+        (False, "portfolio open-risk limit: 100+50 > 120"),
+    ]
+    eng, blocked, _ = _engine()
+    eng._portfolio_risk = pra
+    eng._bar_index = 10
+    eng._decide({}, _bar(0))
+    eng._bar_index = 13
+    eng._decide({}, _bar(1))
+    assert len(blocked) == 2
+
+
+def test_successful_entry_resets_latch():
+    pra = MagicMock()
+    pra.can_accept.side_effect = [
+        (False, "concurrent root position: X active"),
+        (True, ""),
+        (False, "concurrent root position: X active"),
+    ]
+    eng, blocked, _ = _engine()
+    eng._portfolio_risk = pra
+    eng._bar_index = 10
+    eng._decide({}, _bar(0))   # blocked → episode 1
+    eng._bar_index = 13
+    eng._decide({}, _bar(1))   # executes → latch cleared
+    eng._bar_index = 16
+    eng._decide({}, _bar(2))   # blocked again → fresh episode
+    assert len(blocked) == 2
+    eng._oms.submit.assert_called_once()
+
+
+def test_sizing_zero_then_reason_change_emits_twice():
+    eng, blocked, _ = _engine()
+    eng._risk.position_size.side_effect = [0, 0]
+    # same reason → one episode
+    eng._bar_index = 10
+    eng._decide({}, _bar(0))
+    eng._bar_index = 13
+    eng._decide({}, _bar(1))
+    assert len(blocked) == 1

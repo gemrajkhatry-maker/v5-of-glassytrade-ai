@@ -57,6 +57,7 @@ from quant.events import (
     PositionOpened,
     RiskUpdated,
     SignalApproved,
+    SignalBlocked,
     StopMoved,
 )
 from quant.execution.exits import ExitDecision, ExitEngine
@@ -318,10 +319,11 @@ class QuantEngine:
                 )
 
             for evt_type in (BarClosed, DecisionProduced,
-                            SignalApproved, PositionOpened, PositionClosed,
-                            PositionReduced,
-                            RiskUpdated, DepthUpdated, AmtUpdated,
-                            OrderSubmitted, OrderFilled, StopMoved):
+                             SignalApproved, SignalBlocked,
+                             PositionOpened, PositionClosed,
+                             PositionReduced,
+                             RiskUpdated, DepthUpdated, AmtUpdated,
+                             OrderSubmitted, OrderFilled, StopMoved):
                 self._bus.subscribe(evt_type, _journal_subscriber,
                                     priority=-100)
         else:
@@ -331,6 +333,11 @@ class QuantEngine:
         # per bar covers a 6.5-hour NSE session; older events fall out of memory.
         # Full history still lands in the tick journal (quant/persistence.Journal).
         self._trace: deque[Event] = deque(maxlen=10_000)
+        # Setup latch: last approved-but-blocked (signal identity, side) and
+        # the block reason. Emits SignalBlocked once per blocking episode
+        # instead of once per micro-bar. Never suppresses evaluation.
+        self._latch_key: tuple[str, str] | None = None
+        self._latch_block: str = ""
         self._bar_index = 0
         # History bars seeded into the AMT engine count toward the warmup
         # requirement (accessed via self._amt_engine.warm_bars).
@@ -415,7 +422,8 @@ class QuantEngine:
             )
 
         for evt_type in (BarClosed, DecisionProduced,
-                        SignalApproved, PositionOpened, PositionClosed,
+                        SignalApproved, SignalBlocked,
+                        PositionOpened, PositionClosed,
                         PositionReduced,
                         RiskUpdated, DepthUpdated, AmtUpdated,
                         OrderSubmitted, OrderFilled, StopMoved):
@@ -958,10 +966,11 @@ class QuantEngine:
             # returns 0 — opening a zero-size position would put a phantom
             # trade on the UI with frozen P&L. Skip the entry entirely.
             if quantity <= 0:
-                logger.info(
-                    "⏭️ [SIZING] %s: skipping entry — risk budget affords 0 lots "
-                    "(entry=%.2f sl=%.2f lot=%d)",
-                    self.symbol, signal.entry, signal.sl, self._oms.lot_size,
+                self._latch_or_signal_block(
+                    signal,
+                    f"risk budget affords 0 lots (entry={signal.entry:.2f} "
+                    f"sl={signal.sl:.2f} lot={self._oms.lot_size})",
+                    bar.time,
                 )
                 return
             # Portfolio-level ceiling: aggregate open risk across ALL engines.
@@ -972,17 +981,12 @@ class QuantEngine:
                 trade_risk = abs(float(signal.entry) - float(signal.sl)) * max(1.0, quantity)
                 ok, why = self._portfolio_risk.can_accept(trade_risk, symbol=self.symbol)
                 if not ok:
-                    logger.warning(
-                        "🛑 [PORTFOLIO RISK] %s: entry rejected — %s",
-                        self.symbol, why,
-                    )
+                    self._latch_or_signal_block(signal, why, bar.time)
                     self._last_rejected_bar_index = self._bar_index
                     return
                 if not self._portfolio_risk.register_open(trade_risk, symbol=self.symbol):
-                    logger.warning(
-                        "🛑 [PORTFOLIO RISK] %s: entry rejected at register — "
-                        "cap breached between can_accept and register",
-                        self.symbol,
+                    self._latch_or_signal_block(
+                        signal, "portfolio cap breached between can_accept and register", bar.time,
                     )
                     self._last_rejected_bar_index = self._bar_index
                     return
@@ -999,6 +1003,7 @@ class QuantEngine:
                     "unwinding risk reservation (engine stays alive)",
                     self.symbol,
                 )
+                self._latch_or_signal_block(signal, "OMS submit raised — broker/OMS failure", bar.time)
                 if self._portfolio_risk is not None:
                     reserved = getattr(self, "_open_trade_risk", 0.0)
                     if reserved > 0:
@@ -1022,6 +1027,8 @@ class QuantEngine:
             # route through an IOMS — emit only after a successful submit.
             self._emit(SignalApproved(symbol=self.symbol, time=bar.time, signal=signal))
             self._entry_bar_index = self._bar_index
+            self._latch_key = None
+            self._latch_block = ""
             pm = self._get_position_manager()
             pm.current_position = position
             self._entry_time_epoch = _bar_epoch_ms(bar.time) / 1000.0
@@ -1041,6 +1048,27 @@ class QuantEngine:
                     decision.phase,
                     decision.block_reasons,
                 )
+
+    def _latch_or_signal_block(self, signal, block_reason: str, bar_time: str) -> None:
+        """Record a blocked approval. First occurrence of an episode (same
+        signal blocked for the same reason) warns + emits SignalBlocked;
+        repeats debug-log only. Evaluation is never suppressed."""
+        key = (getattr(signal, "symbol", "") or self.symbol, str(signal.type))
+        new_episode = key != self._latch_key or block_reason != self._latch_block
+        self._latch_key, self._latch_block = key, block_reason
+        if new_episode:
+            logger.warning(
+                "🛑 [SIGNAL BLOCKED] %s: %s %s @ %.2f — %s",
+                self.symbol, signal.type, signal.symbol, signal.entry, block_reason,
+            )
+            self._emit(SignalBlocked(
+                symbol=self.symbol, time=bar_time, signal=signal, reason=block_reason,
+            ))
+        else:
+            logger.debug(
+                "🛑 [SIGNAL BLOCKED] %s: %s %s @ %.2f — %s (repeat, latched)",
+                self.symbol, signal.type, signal.symbol, signal.entry, block_reason,
+            )
 
     def _build_context(self, bar, amt_dto: dict, cooldown_remaining_sec: float):
         """Single DecisionContext source shared by the flat-path ``_decide()``

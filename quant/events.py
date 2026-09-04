@@ -50,6 +50,18 @@ class SignalApproved(Event):
 
 
 @dataclass(frozen=True)
+class SignalBlocked(Event):
+    """An approved signal could not be routed through the OMS.
+
+    Emitted once per blocking episode: repeats of the same (signal, side)
+    blocked for the same reason are latched (debug-logged only) so the
+    stream stays truthful without spamming. Never folded into engine state.
+    """
+    signal: "Signal"
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class PositionOpened(Event):
     position: "Position"
 
