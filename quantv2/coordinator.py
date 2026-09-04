@@ -19,7 +19,9 @@ class Coordinator:
         eng = self.engines[symbol]
         self._last[symbol] = price
         eng.risk_cap = self._headroom(symbol)
-        return eng.on_tick(ts, price, volume, delta)
+        out = eng.on_tick(ts, price, volume, delta)
+        eng.last_decision = out
+        return out
 
     def eod_flatten(self, reason: str = "EOD") -> int:
         n = 0

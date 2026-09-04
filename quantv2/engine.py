@@ -28,6 +28,7 @@ class Engine:
         self.session_open = True
         self.can_trade = True
         self.cooldown_s = 0.0
+        self.last_decision = None
 
     def _flush_bar(self) -> Bar:
         ts = self._ticks[0][0]
