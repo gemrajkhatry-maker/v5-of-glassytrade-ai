@@ -1,0 +1,39 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+
+@dataclass(frozen=True)
+class Bar:
+    time: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0.0
+
+@dataclass(frozen=True)
+class Context:
+    symbol: str
+    bar: Bar
+    direction: str | None = None
+    vah: float | None = None
+    val: float | None = None
+    poc: float | None = None
+    cvd_slope: float = 0.0
+    extra: dict = field(default_factory=dict)
+
+@dataclass(frozen=True)
+class Signal:
+    type: str
+    entry: float
+    sl: float
+    tp: float
+    rr: float
+    setup: str
+    symbol: str
+    timestamp: str
+
+@dataclass(frozen=True)
+class Decision:
+    approved: bool
+    reason: str
+    signal: Signal | None = None
