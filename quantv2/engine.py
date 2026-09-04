@@ -62,7 +62,8 @@ class Engine:
 
     def on_bar(self, bar: Bar) -> Decision:
         if self.position is not None:
-            d, self.trail = evaluate_exit(self.position, bar, self.trail, self.exit_cfg)
+            elapsed_min = self._elapsed_min(bar.time, self.position.opened_at)
+            d, self.trail = evaluate_exit(self.position, bar, self.trail, self.exit_cfg, elapsed_min=elapsed_min)
             if d.should_exit:
                 self.oms.close(self.position, d.price, d.reason)
                 self.position = None
@@ -79,3 +80,12 @@ class Engine:
             self.trail = {}
             self.open_risk = abs(out.position.entry - out.position.sl) * float(out.position.qty)
         return out
+
+    @staticmethod
+    def _elapsed_min(now_iso: str, opened_iso: str) -> float | None:
+        try:
+            t0 = datetime.fromisoformat(opened_iso)
+            t1 = datetime.fromisoformat(now_iso)
+            return (t1 - t0).total_seconds() / 60.0
+        except (ValueError, TypeError):
+            return None
