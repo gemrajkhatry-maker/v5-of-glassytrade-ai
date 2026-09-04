@@ -67,7 +67,50 @@ mapper/OMS regression: 66 passed
 backend Dhan adapter regression remains green
 ```
 
-The broader B2 work is not yet complete: broker payload/property coverage for every order type, durable retry identity across process restart, and reservation lifecycle tests remain required before G1. Runtime, ledger, and trace files remain protected.
+B2 remainder completed:
+
+Durable signal identity (restart-safe):
+
+```text
+signal_id is now DERIVED from decision content via uuid5
+(quant/contracts/entities.derive_signal_id; applied in both Signal
+dataclasses through __post_init__ — explicit signal_id= still wins).
+Replaying the same approved decision after a crash re-derives the SAME
+id, so broker-side correlationId dedup survives process restarts.
+compare=False retained — replay determinism parity stays exact.
+New suite: tests/quant/execution/test_signal_identity.py (9 tests:
+stability across reconstruction, content sensitivity, explicit-id
+precedence, mapper preservation).
+```
+
+Payload boundary suite (backend/tests/unit/infrastructure/test_dhan_payload_boundary.py):
+
+```text
+Adapter decision -> DhanConverter.from_order_request for every emitted
+order type: default collared LIMIT entry (price present, no trigger,
+correlationId == signal_id), explicit MARKET (no price field), SL
+(triggerPrice + price), SLM (triggerPrice only), collared close LIMIT,
+naked close MARKET, no-reference-price close MARKET; correlationId
+capped at 36 chars in all cases.
+Cross-checked against DhanHQ v2 docs: payload orderType correctly uses
+the v2 vocabulary STOP_LOSS / STOP_LOSS_MARKET (SL / SLM were v1).
+```
+
+Reservation lifecycle: verified already covered
+(test_audit_regressions.test_entry_oms_failure_unwinds_risk_and_keeps_engine_alive,
+test_portfolio_risk_guard fractional release, tick-partial adoption) —
+no gap found; LiveOMS.submit raises on broker rejection so the engine
+unwind path is exercised.
+
+Regression evidence:
+
+```text
+Full quant suite: 1742 passed, 11 pre-existing skips
+Backend unit suite: 688 passed, 18 skipped
+mapper/OMS/adapter/payload/identity combined: 227 passed
+```
+
+B2 is now COMPLETE. Runtime, ledger, and trace files remain protected.
 
 B7 passive hot-path observability completed (uncommitted on this branch):
 

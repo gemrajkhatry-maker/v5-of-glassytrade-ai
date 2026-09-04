@@ -1,7 +1,7 @@
 import logging
-import uuid
 from dataclasses import dataclass, field
 
+from quant.contracts.entities import derive_signal_id
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 from quant.decision.stops import DEFAULT_TICK, structural_anchor, structural_stop
@@ -60,10 +60,29 @@ class Signal:
     model_label: str     # "Triple-A" | "LVN_Sniper" | "VA_Fade" — which playbook triggered
     symbol: str
     timestamp: str
-    # Stable logical identity for retries and broker idempotency. It is created
-    # once with the approved signal and must be preserved across mappings.
-    # compare=False: identity, not behavior — keeps replay traces equal.
-    signal_id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False)
+    # Stable logical identity for retries and broker idempotency. Derived from
+    # the decision content (RESTART-STABLE): replaying the same approved bar
+    # after a crash re-derives the SAME id, so broker-side correlation dedup
+    # still blocks a duplicate order. compare=False: identity, not behavior —
+    # keeps replay traces equal. An explicit signal_id wins.
+    signal_id: str = field(default="", compare=False)
+
+    def __post_init__(self) -> None:
+        if not self.signal_id:
+            object.__setattr__(
+                self,
+                "signal_id",
+                derive_signal_id(
+                    symbol=self.symbol,
+                    timestamp=self.timestamp,
+                    reason=self.reason,
+                    entry=self.entry,
+                    stop_loss=self.sl,
+                    take_profit=self.tp,
+                    kind=self.type,
+                    setup=self.model_label,
+                ),
+            )
 
 
 class SignalBuilder:
