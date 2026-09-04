@@ -966,10 +966,14 @@ class QuantEngine:
             # returns 0 — opening a zero-size position would put a phantom
             # trade on the UI with frozen P&L. Skip the entry entirely.
             if quantity <= 0:
+                # Episode-key stability: the reason must exclude per-evaluation
+                # moving values (entry/sl drift with bar.close on a fresh Signal
+                # each micro-bar) — a new reason string every evaluation would
+                # re-open the blocking episode and spam SignalBlocked. The
+                # payload carries the signal; the log line prints entry/sl.
                 self._latch_or_signal_block(
                     signal,
-                    f"risk budget affords 0 lots (entry={signal.entry:.2f} "
-                    f"sl={signal.sl:.2f} lot={self._oms.lot_size})",
+                    f"risk budget affords 0 lots (lot={self._oms.lot_size})",
                     bar.time,
                 )
                 return

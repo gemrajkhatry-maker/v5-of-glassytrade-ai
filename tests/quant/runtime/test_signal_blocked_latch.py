@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 from quant.bars import Bar
 from quant.decision.signal_builder import Signal
-from quant.events import SignalBlocked
+from quant.events import PositionOpened, SignalApproved, SignalBlocked
 from quant.execution.order import Order, Position
 from quant.runtime import QuantEngine
 
@@ -81,6 +81,41 @@ def test_portfolio_reject_emits_once_per_episode():
     assert pra.can_accept.call_count == 4  # evaluation continues, only emission is latched
 
 
+def test_register_reject_emits_one_blocked_event():
+    # can_accept passes but register_open loses the race → same episode.
+    pra = MagicMock()
+    pra.can_accept.return_value = (True, "")
+    pra.register_open.return_value = False
+    eng, blocked, _ = _engine()
+    eng._portfolio_risk = pra
+    for i, bar_index in enumerate((10, 13, 16, 19)):  # each beyond the 2-bar debounce
+        eng._bar_index = bar_index
+        eng._decide({}, _bar(i))
+    assert len(blocked) == 1
+    assert "cap breached" in blocked[0].reason
+    assert pra.can_accept.call_count == 4  # evaluation continues, only emission is latched
+    eng._oms.submit.assert_not_called()
+
+
+def test_oms_raise_emits_one_blocked_event_and_unwinds_reservation():
+    pra = MagicMock()
+    pra.can_accept.return_value = (True, "")
+    pra.register_open.return_value = True
+    eng, blocked, _ = _engine()
+    eng._portfolio_risk = pra
+    eng._oms.submit.side_effect = RuntimeError("boom")
+    emitted = []
+    eng._bus.subscribe(SignalApproved, lambda e: emitted.append(e))
+    eng._bus.subscribe(PositionOpened, lambda e: emitted.append(e))
+    for i, bar_index in enumerate((10, 13, 16, 19)):  # each beyond the 2-bar debounce
+        eng._bar_index = bar_index
+        eng._decide({}, _bar(i))
+    assert len(blocked) == 1
+    assert "OMS submit raised" in blocked[0].reason
+    assert pra.release.called  # reservation unwound on the failed submit
+    assert emitted == []
+
+
 def test_new_block_reason_starts_new_episode():
     pra = MagicMock()
     pra.can_accept.side_effect = [
@@ -113,6 +148,35 @@ def test_successful_entry_resets_latch():
     eng._decide({}, _bar(2))   # blocked again → fresh episode
     assert len(blocked) == 2
     eng._oms.submit.assert_called_once()
+
+
+def test_sizing_zero_entry_drift_emits_one_blocked_event():
+    # SignalBuilder sets entry = float(ctx.bar.close), so a fresh Signal every
+    # micro-bar carries a new price. The episode key must be stable anyway.
+    eng, blocked, _ = _engine()
+    eng._risk.position_size.return_value = 0
+
+    def drifted(ctx):
+        entry = float(ctx.bar.close)  # mirror SignalBuilder: entry = bar.close
+        return _ApprovedDecision(
+            Signal(
+                type="LONG", reason="t", entry=entry, sl=entry - 1.0,
+                tp=entry + 2.0, rr=2.0, model_label="t",
+                symbol="LATCH-CALL", timestamp="t0",
+            )
+        )
+
+    eng._strategy.should_enter.side_effect = drifted
+    for i, bar_index in enumerate((10, 13, 16, 19)):  # each beyond the 2-bar debounce
+        close = 14.0 + i * 0.5
+        bar = Bar(
+            time=f"t{300 + i}", open=close, high=close + 0.2,
+            low=close - 0.1, close=close, volume=10.0,
+        )
+        eng._bar_index = bar_index
+        eng._decide({}, bar)
+    assert len(blocked) == 1
+    assert "0 lots" in blocked[0].reason
 
 
 def test_sizing_zero_then_reason_change_emits_twice():

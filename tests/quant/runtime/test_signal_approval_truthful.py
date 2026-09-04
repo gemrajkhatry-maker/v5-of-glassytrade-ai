@@ -95,7 +95,10 @@ def test_portfolio_reject_emits_no_approval():
 
 def test_real_submission_emits_approval_before_position_opened():
     eng, captured = _engine()
+    sig = _signal()
+    eng._strategy.should_enter.return_value = _ApprovedDecision(sig)
     eng._bar_index = 10
     eng._decide({}, _bar(0))
     eng._oms.submit.assert_called_once()
     assert [type(e).__name__ for e in captured] == ["SignalApproved", "PositionOpened"]
+    assert captured[0].signal is sig
