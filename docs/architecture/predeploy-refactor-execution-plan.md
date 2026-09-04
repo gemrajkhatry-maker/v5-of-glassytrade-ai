@@ -69,6 +69,28 @@ backend Dhan adapter regression remains green
 
 The broader B2 work is not yet complete: broker payload/property coverage for every order type, durable retry identity across process restart, and reservation lifecycle tests remain required before G1. Runtime, ledger, and trace files remain protected.
 
+B7 passive hot-path observability completed (uncommitted on this branch):
+
+```text
+quant/hotpath.py: HotPathSubscriber bus subscriber (priority +200) maps
+  BarClosed/DecisionProduced/PositionOpened/PositionClosed/PositionReduced
+  onto trace phases and records the event correlation_id per record; emit
+  is guarded (JSONL failure cannot stop trading), try_emit for non-bus call
+  sites; ring overflow counted and exposed via tracer.dropped
+quant/runtime.py: engine subscribes the subscriber in __init__ and no longer
+  owns the phase field-extraction mapping (_hotpath_event deleted); tick
+  call sites route through try_emit
+quant/multi_engine.py: snapshot call-site routes through try_emit
+tests/quant/test_hotpath_trace.py: 8 tests — original 4 plus trace-on==trace-
+off event parity (deletion gate), correlation-id presence, ring-overflow
+  visibility, and trace-failure engine isolation
+```
+
+Verified under heavy machine load (load avg >100): hot-path suite 8 passed;
+test_events 4 passed; broker mapper/live OMS/positive-approval 31 passed;
+full determinism suite 4 passed. Remaining before B7 deletion gate closes:
+repeat the broader runtime/golden regressions when the machine is idle.
+
 ## Working-tree protection
 
 The branch was created from the current checkout with these existing uncommitted hot-path trace changes preserved:

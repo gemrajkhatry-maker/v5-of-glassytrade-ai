@@ -152,3 +152,115 @@ def test_hotpath_report_renders() -> None:
     print("\n" + "\n".join(lines))
     assert rows
     assert counts["fill"] >= 1 and counts["snapshot"] == 1
+
+
+# ---------------------------------------------------------------------------
+# B7 passivity: the hot-path trace is a passive EventBus subscriber owned by
+# quant.hotpath. Enabling it must not change the engine's event stream
+# (trace-on == trace-off), every event-derived record must carry the event's
+# correlation id, ring overflow must be visible, and a trace failure must
+# never stop the engine.
+# ---------------------------------------------------------------------------
+
+_RING_CAPACITY = 8192  # HotPathTracer default ring (see _DEFAULT_RING)
+
+
+def _run_engine_trace_off() -> list:
+    TRACER.disable()
+    eng = QuantEngine(SyntheticGateway(_organic_approval_ticks()), SYMBOL,
+                      interval_seconds=1)
+    return eng.run()
+
+
+def test_trace_on_event_stream_equals_trace_off() -> None:
+    """The deletion gate for B7: a trace-enabled run must emit byte-identical
+    events to a trace-disabled run (ignoring volatile engine ids)."""
+    from tests.quant.certification import trace_compare
+
+    # Engine Signals now carry a stable signal_id (uuid) — also volatile.
+    trace_compare._VOLATILE_KEYS = trace_compare._VOLATILE_KEYS | {"signal_id"}
+    from tests.quant.certification.trace_compare import first_divergence
+
+    events_off = _run_engine_trace_off()
+    TRACER.enable(clear=True)
+    try:
+        events_on = QuantEngine(
+            SyntheticGateway(_organic_approval_ticks()), SYMBOL,
+            interval_seconds=1,
+        ).run()
+    finally:
+        TRACER.disable()
+
+    divergence = first_divergence(events_off, events_on)
+    assert divergence is None, (
+        "enabling the passive trace changed the engine's event stream "
+        f"(B7 passivity violated): {divergence}"
+    )
+
+
+def test_phase_records_carry_event_correlation_id() -> None:
+    events = _run_engine_with_trace()
+    assert any(isinstance(e, PositionOpened) for e in events)
+
+    event_corrs = {e.correlation_id for e in events}
+    phased = [
+        r for r in TRACER.records(SYMBOL)
+        if r.phase in ("bar_closed", "decision", "fill")
+    ]
+    assert phased, "no event-derived phase records were captured by the subscriber"
+    for r in phased:
+        corr = r.fields.get("correlation_id", "")
+        assert isinstance(corr, str) and corr, (
+            f"{r.phase} record is missing the event correlation_id"
+        )
+    assert {r.fields["correlation_id"] for r in phased} <= event_corrs, (
+        "phase records must reference correlation ids of real emitted events"
+    )
+
+
+def test_ring_overflow_is_visible() -> None:
+    """When the ring buffer overflows, evictions are counted, not silent."""
+    total = _RING_CAPACITY + 900
+    TRACER.enable(clear=True)
+    try:
+        for i in range(total):
+            TRACER.emit(f"S{i % 7}", "tick", n=i)
+    finally:
+        TRACER.disable()
+
+    assert len(TRACER.records()) <= _RING_CAPACITY
+    assert TRACER.dropped == total - _RING_CAPACITY, (
+        "ring evictions must be observable through tracer.dropped"
+    )
+
+
+def test_trace_failure_does_not_stop_engine(monkeypatch) -> None:
+    """Every trace emit raises — the engine (and its event stream) survives.
+
+    Event phases run through the bus's per-handler isolation plus
+    try_emit; tick ingress and the snapshot call-site use try_emit, so a
+    trace-internal failure can never stop trading or the WS push.
+    """
+    import logging
+    import types
+
+    # The failure path logs a traceback per phase crossing (thousands) —
+    # silence it: the point is that trading continues, not the log volume.
+    monkeypatch.setattr(logging.getLogger("quant.hotpath"), "disabled", True)
+
+    def _boom(self, symbol, phase, **fields):
+        raise RuntimeError(f"trace exploded on {phase}")
+
+    monkeypatch.setattr(TRACER, "emit", types.MethodType(_boom, TRACER))
+    TRACER.enable(clear=True)
+    try:
+        eng = QuantEngine(SyntheticGateway(_organic_approval_ticks()), SYMBOL,
+                          interval_seconds=1)
+        events = eng.run()
+    finally:
+        TRACER.disable()
+
+    assert any(isinstance(e, PositionOpened) for e in events), (
+        "engine must keep trading when the trace subscriber fails"
+    )
+    assert TRACER.records() == []  # nothing recorded — but nothing crashed

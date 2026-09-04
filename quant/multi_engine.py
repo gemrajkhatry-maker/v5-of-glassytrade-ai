@@ -721,8 +721,9 @@ class QuantCoordinator:
             agent_decision=engine.latest_agent_decision,
         )
         # Opt-in hot-path trace — a snapshot was composed for the WS transport.
+        # try_emit: a trace-internal failure must never break the WS push.
         if _HOTPATH.enabled:
-            _HOTPATH.emit(
+            _HOTPATH.try_emit(
                 symbol, "snapshot",
                 positions=len(fold_positions),
                 open_pnl=round(float(open_pnl), 2),

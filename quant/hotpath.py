@@ -37,12 +37,15 @@ from __future__ import annotations
 
 import atexit
 import json
+import logging
 import os
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
+
+logger = logging.getLogger(__name__)
 
 _ENV_FLAG = "GLASSYTRADE_HOTPATH_TRACE"
 _ENV_FILE = "GLASSYTRADE_HOTPATH_TRACE_FILE"
@@ -74,6 +77,7 @@ class HotPathTracer:
         self._lock = threading.Lock()
         self._records: Deque[TraceRecord] = deque(maxlen=_DEFAULT_RING)
         self._seq = 0
+        self._dropped = 0  # records evicted by the ring cap (overflow visibility)
         self._enabled = self._env_enabled()
         self._file_path: Optional[str] = os.environ.get(_ENV_FILE) or None
         self._jsonl: Any = None
@@ -114,6 +118,7 @@ class HotPathTracer:
         with self._lock:
             self._records.clear()
             self._seq = 0
+            self._dropped = 0
 
     def close(self) -> None:
         with self._lock:
@@ -129,18 +134,45 @@ class HotPathTracer:
     # ------------------------------------------------------------------
 
     def emit(self, symbol: str, phase: str, **fields: Any) -> None:
+        """Record one phase crossing. Never raises: a trace-internal failure
+        (e.g. JSONL write error) must not stop trading."""
         if not self._enabled:
             return
         if phase not in PHASES:
             phase = f"phase:{phase}"  # keep unknown phases visible, never silent
         with self._lock:
+            if len(self._records) == self._records.maxlen:
+                self._dropped += 1  # ring cap reached — count the eviction
             self._seq += 1
             rec = TraceRecord(
                 symbol=symbol, phase=phase, seq=self._seq,
                 epoch=time.time(), fields=dict(fields),
             )
             self._records.append(rec)
-            self._write_jsonl(rec)
+            try:
+                self._write_jsonl(rec)
+            except Exception:
+                logger.exception(
+                    "hot-path trace: JSONL write failed for %s %s (seq=%d) — "
+                    "trading continues", symbol, phase, self._seq,
+                )
+
+    def try_emit(self, symbol: str, phase: str, **fields: Any) -> None:
+        """Call sites on non-bus paths (tick ingress, snapshot egress) use this:
+        a trace bug must never propagate into the engine loop or WS push."""
+        try:
+            self.emit(symbol, phase, **fields)
+        except Exception:
+            logger.exception(
+                "hot-path trace: emit failed for %s %s — trading continues",
+                symbol, phase,
+            )
+
+    @property
+    def dropped(self) -> int:
+        """Records evicted by the ring cap — 0 until the buffer overflows."""
+        with self._lock:
+            return self._dropped
 
     def _write_jsonl(self, rec: TraceRecord) -> None:
         if self._jsonl is None:
@@ -258,3 +290,144 @@ def render_records(
     if not rows:
         return "(no hot-path records)"
     return "\n".join(rows)
+
+
+# ----------------------------------------------------------------------
+# Passive EventBus subscriber (B7) — quant/hotpath.py stays free of
+# module-level ``quant`` imports so importing this module can never form a
+# cycle; the event types are imported lazily inside ``subscribe``.
+#
+# The engine publishes typed events and knows nothing about the tracer:
+# bar/decision/fill phases are derived HERE from the events it emits. The
+# subscriber runs at priority +200 — before the journal (-100) — so a trace
+# failure is isolated by the bus and never poisons later handlers.
+# ----------------------------------------------------------------------
+
+
+class HotPathSubscriber:
+    """Maps domain events onto hot-path trace phases, passively."""
+
+    def __init__(self, tracer: "HotPathTracer | None" = None) -> None:
+        self._tracer = tracer if tracer is not None else get_hotpath_tracer()
+
+    @classmethod
+    def subscribe(cls, bus, tracer: "HotPathTracer | None" = None) -> "HotPathSubscriber":
+        """Subscribe to every event type that defines a hot-path phase."""
+        from quant.events import (
+            BarClosed,
+            DecisionProduced,
+            PositionClosed,
+            PositionOpened,
+            PositionReduced,
+        )
+
+        subscriber = cls(tracer)
+        for evt_type in (
+            BarClosed,
+            DecisionProduced,
+            PositionOpened,
+            PositionClosed,
+            PositionReduced,
+        ):
+            bus.subscribe(evt_type, subscriber.on_event, priority=+200)
+        return subscriber
+
+    def on_event(self, event) -> None:
+        """Record the phase crossing carried by ``event`` (no-op when off)."""
+        if not self._tracer.enabled:
+            return
+        from quant.events import (
+            BarClosed,
+            DecisionProduced,
+            PositionClosed,
+            PositionOpened,
+            PositionReduced,
+        )
+
+        corr = getattr(event, "correlation_id", "") or ""
+        if isinstance(event, BarClosed):
+            b = event.bar
+            self._tracer.try_emit(
+                event.symbol, "bar_closed",
+                time=event.time,
+                correlation_id=corr,
+                open=getattr(b, "open", None),
+                high=getattr(b, "high", None),
+                low=getattr(b, "low", None),
+                close=getattr(b, "close", None),
+                volume=getattr(b, "volume", None),
+            )
+            return
+        if isinstance(event, DecisionProduced):
+            d = event.decision
+            signal = None
+            s = getattr(d, "signal", None)
+            if s is not None:
+                signal = {
+                    "type": s.type,
+                    "entry": getattr(s, "entry", None),
+                    "sl": getattr(s, "sl", None),
+                    "tp": getattr(s, "tp", None),
+                    "rr": getattr(s, "rr", None),
+                }
+            self._tracer.try_emit(
+                event.symbol, "decision",
+                time=event.time,
+                correlation_id=corr,
+                approved=bool(getattr(d, "approved", False)),
+                reason=getattr(d, "reason", ""),
+                model_label=getattr(d, "model_label", ""),
+                gates=[
+                    {"gate": g.gate, "name": g.name, "passed": g.passed,
+                     "reason": g.reason}
+                    for g in (getattr(d, "gate_results", None) or ())
+                ],
+                signal=signal,
+            )
+            return
+        if isinstance(event, PositionOpened):
+            p = event.position
+            o = getattr(p, "order", None)
+            sig = getattr(o, "signal", None)
+            size = float(getattr(p, "size", 0.0) or 0.0)
+            self._tracer.try_emit(
+                event.symbol, "fill",
+                time=event.time,
+                correlation_id=corr,
+                kind="open",
+                side="LONG" if size > 0 else "SHORT",
+                qty=getattr(o, "quantity", None) or abs(size),
+                entry=getattr(p, "open_price", None),
+                sl=getattr(sig, "sl", None) if sig is not None else None,
+                tp=getattr(sig, "tp", None) if sig is not None else None,
+                model_label=getattr(sig, "model_label", "") if sig is not None else "",
+                pyramid=bool(getattr(p, "is_pyramid", False)),
+            )
+            return
+        if isinstance(event, PositionClosed):
+            f = event.fill
+            p = getattr(f, "position", None)
+            self._tracer.try_emit(
+                event.symbol, "fill",
+                time=event.time,
+                correlation_id=corr,
+                kind="close",
+                side="LONG" if float(getattr(p, "size", 0.0) or 0.0) > 0 else "SHORT",
+                qty=abs(float(getattr(p, "size", 0.0) or 0.0)),
+                price=getattr(f, "close_price", None),
+                reason=getattr(f, "reason", ""),
+                pnl=getattr(f, "pnl", None),
+            )
+            return
+        if isinstance(event, PositionReduced):
+            f = event.fill
+            rem = event.remaining
+            self._tracer.try_emit(
+                event.symbol, "fill",
+                time=event.time,
+                correlation_id=corr,
+                kind="partial",
+                price=getattr(f, "close_price", None),
+                reason=getattr(f, "reason", ""),
+                remaining_size=float(getattr(rem, "size", 0.0) or 0.0),
+            )
