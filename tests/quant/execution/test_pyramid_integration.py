@@ -99,9 +99,12 @@ class SpiedPortfolioRisk(PortfolioRiskAuthority):
         super().__init__()
         self.realized_calls: list[tuple[float, float]] = []  # [(risk_i, pnl_i)]
 
-    def record_close(self, risk_rupees: float, pnl: float) -> None:
+    def record_close(
+        self, risk_rupees: float, pnl: float,
+        symbol: str = "", is_full_close: bool = False,
+    ) -> None:
         self.realized_calls.append((float(risk_rupees), float(pnl)))
-        super().record_close(risk_rupees, pnl)
+        super().record_close(risk_rupees, pnl, symbol=symbol, is_full_close=is_full_close)
 
 
 def _two_pyramid_pm():
