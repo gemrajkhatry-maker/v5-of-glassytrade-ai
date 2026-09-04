@@ -4,6 +4,11 @@ from quantv2.types import Context, Signal
 MIN_RR = 1.5
 MIN_STOP_PCT = 0.001
 TP_MULT = 2.0
+STOP_CAP_TICKS = 200.0
+STOP_CAP_PCT = 0.0075
+
+class StopTooWide(Exception):
+    pass
 
 def _anchor(ctx: Context, direction: str) -> float | None:
     e = ctx.bar.close
@@ -17,7 +22,8 @@ def _anchor(ctx: Context, direction: str) -> float | None:
             return float(lvl)
     return None
 
-def build_signal(ctx: Context, direction: str, setup: str, tick: float = 0.05) -> Signal | None:
+def build_signal(ctx: Context, direction: str, setup: str) -> Signal | None:
+    tick = ctx.tick if ctx.tick and ctx.tick > 0 else 0.05
     e = float(ctx.bar.close)
     a = _anchor(ctx, direction)
     if a is None:
@@ -30,6 +36,9 @@ def build_signal(ctx: Context, direction: str, setup: str, tick: float = 0.05) -
     risk = abs(e - sl)
     if risk < e * MIN_STOP_PCT:
         return None
+    cap = max(STOP_CAP_TICKS * tick, e * STOP_CAP_PCT)
+    if risk > cap:
+        raise StopTooWide(f"risk {risk:.2f} > cap {cap:.2f}")
     tp = e + risk * TP_MULT if direction == "LONG" else e - risk * TP_MULT
     rr = abs(tp - e) / risk
     if rr < MIN_RR:
