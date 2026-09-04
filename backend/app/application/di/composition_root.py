@@ -151,12 +151,12 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         "include_futures": include_futures,
         "underlying_priority": _settings.SCANNER_UNDERLYING_PRIORITY,
         "live_oms_enabled": is_live_mode(),
-        "max_trades_per_session": int(getattr(config.risk, "max_trades_per_session", 6)),
         # C2: the configured per-trade risk must reach the engines' SessionRisk.
-        # Omitting it made every engine fall back to an unsafe default.
-        "risk_per_trade_pct": float(getattr(config.risk, "risk_per_trade_pct", 0.005)),
-        "max_daily_loss_pct": float(getattr(config.risk, "max_daily_loss_pct", 0.02)),
-        "max_consecutive_losses": int(getattr(config.risk, "max_consecutive_losses", 3)),
+        # NO silent fallback: the effective value is whatever the loader + live
+        # validator settled on (config_models), and boot fails if it is absent.
+        # The old getattr(..., 0.005/0.02/3/6) literals here were a THIRD risk
+        # authority that could drift from the validated YAML value.
+        **_coordinator_risk_config(config),
     }
     logger.info(
         "QuantCoordinator config: underlyings=%s n=%d exchange=%s expiry_index=%d "
@@ -176,5 +176,41 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         config=coord_config,
         storage=storage,
     )
+
+
+def _require_risk_value(config: "Configuration", name: str):
+    """Return a required risk field or fail boot — never default silently.
+
+    The typed RiskConfig always carries these fields today, so this guard only
+    fires if a future refactor removes/renames a field or makes it optional.
+    Failing here (instead of a getattr default) keeps the YAML -> validator ->
+    composition_root chain the ONE risk authority: a missing live risk value
+    must stop startup, not quietly trade at an unvalidated fallback.
+    """
+    risk = getattr(config, "risk", None)
+    value = getattr(risk, name, None) if risk is not None else None
+    if value is None:
+        raise ValueError(
+            "Refusing to start engines: required risk setting "
+            f"'config.risk.{name}' is missing/None. Declare it in "
+            "backend/config (base.yaml + environments/live.yaml) — there is "
+            "no silent risk default."
+        )
+    return value
+
+
+def _coordinator_risk_config(config: "Configuration") -> dict:
+    """The risk values the coordinator must pass to every engine's SessionRisk.
+
+    These are the exact values the loader + validator settled on — the values
+    are read, never re-defaulted. A missing field aborts coordinator startup.
+    """
+    return {
+        "max_trades_per_session": int(_require_risk_value(config, "max_trades_per_session")),
+        "risk_per_trade_pct": float(_require_risk_value(config, "risk_per_trade_pct")),
+        "max_daily_loss_pct": float(_require_risk_value(config, "max_daily_loss_pct")),
+        "max_consecutive_losses": int(_require_risk_value(config, "max_consecutive_losses")),
+    }
+
 
 
