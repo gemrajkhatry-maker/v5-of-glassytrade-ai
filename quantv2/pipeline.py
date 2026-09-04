@@ -36,7 +36,7 @@ def decide(ctx: Context, *, session_open: bool, can_trade: bool, cooldown_s: flo
     if open_risk + new_risk > risk_cap:
         return Decision(False, "PORTFOLIO_CAP")
     try:
-        oms.submit(sig, qty)
+        pos = oms.submit(sig, qty)
     except Exception:
         return Decision(False, "SUBMIT_FAILED")
-    return Decision(True, setup, sig)
+    return Decision(True, setup, sig, pos)

@@ -24,7 +24,6 @@ class Engine:
         self.risk_cap = float("inf")
         self._bucket = None
         self._ticks: list = []
-        self._n = 0
         self.amt = None
         self.session_open = True
         self.can_trade = True
@@ -72,11 +71,10 @@ class Engine:
             return Decision(False, "HOLDING")
         ctx = self._context(bar)
         out = decide(ctx, session_open=self.session_open, can_trade=self.can_trade, cooldown_s=self.cooldown_s, position_open=False, equity=self.equity, oms=self.oms, risk_pct=self.risk_pct, lot=self.lot, open_risk=self.open_risk, risk_cap=self.risk_cap)
-        if out.approved and out.signal is not None:
-            sig = out.signal
-            qty = size(self.equity, self.risk_pct, sig.entry, sig.sl, self.lot)
-            self._n += 1
-            self.position = Position(pid=f"{self.symbol}-{self._n}", symbol=sig.symbol, side=sig.type, qty=float(qty), entry=sig.entry, sl=sig.sl, tp=sig.tp, setup=sig.setup, opened_at=sig.timestamp)
+        if out.approved:
+            if out.position is None:
+                return Decision(False, "SUBMIT_FAILED")
+            self.position = out.position
             self.trail = {}
-            self.open_risk = abs(sig.entry - sig.sl) * float(qty)
+            self.open_risk = abs(out.position.entry - out.position.sl) * float(out.position.qty)
         return out

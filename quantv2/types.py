@@ -38,3 +38,4 @@ class Decision:
     approved: bool
     reason: str
     signal: Signal | None = None
+    position: object | None = None
