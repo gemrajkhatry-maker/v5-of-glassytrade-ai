@@ -62,7 +62,10 @@ def test_position_size_honors_is_expiry_at_call_site():
     """Entry sizing is reachable only through the private _decide, so drive it
     directly and capture the is_expiry flag actually handed to SessionRisk."""
     today = datetime.now(IST).date()
-    bar = Bar(time=f"{today.isoformat()}T12:00:00+05:30",
+    # ponytail: 00:30 keeps the bar within EventStore's 1h future-guard on
+    # morning CI runs (12:00 IST is >1h ahead before ~11:00 → append raises).
+    # Expiry compare uses the date part only, so the hour is not load-bearing.
+    bar = Bar(time=f"{today.isoformat()}T00:30:00+05:30",
               open=100.0, high=100.0, low=100.0, close=100.0, volume=10)
 
     seen = []
@@ -76,7 +79,7 @@ def test_position_size_honors_is_expiry_at_call_site():
     eng2 = QuantEngine(SyntheticGateway([]), "SYM", interval_seconds=1)
     eng2._risk.position_size = lambda *a, **kw: seen2.append(kw.get("is_expiry")) or 25.0
     eng2._strategy.should_enter = lambda ctx: _approved("SYM")
-    eng2._decide({}, Bar(time=f"{today.isoformat()}T12:00:00+05:30",
+    eng2._decide({}, Bar(time=f"{today.isoformat()}T00:30:00+05:30",
                          open=100.0, high=100.0, low=100.0, close=100.0, volume=10))
     assert seen2 == [False], "non-expiring contract must pass is_expiry=False into sizing"
 
