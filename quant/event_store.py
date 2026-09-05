@@ -84,32 +84,47 @@ def _validate_event_time(time) -> None:
         raise ValueError(f"event time {text!r} is in the future — refusing to append")
 
 
-def _json_value(value: Any) -> Any:
-    """Return a deterministic JSON-compatible representation of a payload."""
+def _json_value(value: Any, _seen: frozenset[int] = frozenset()) -> Any:
+    """Return a deterministic JSON-compatible representation of a payload.
+
+    Self-referential structures (a dataclass/dict holding itself) collapse to
+    ``"<cycle>"`` instead of raising RecursionError — a broken payload must
+    append (and checksum) rather than crash the emit path. ``_seen`` tracks
+    container identity on the CURRENT recursion path only, so the same object
+    legitimately appearing twice (a DAG, not a cycle) still serializes fully.
+    """
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, Enum):
         return value.value
+    if (
+        isinstance(value, (dict, list, tuple, set, frozenset))
+        or is_dataclass(value)
+        or hasattr(value, "__dict__")
+    ):
+        if id(value) in _seen:
+            return "<cycle>"
+        _seen = _seen | {id(value)}
     if is_dataclass(value):
         return {
-            field.name: _json_value(getattr(value, field.name))
+            field.name: _json_value(getattr(value, field.name), _seen)
             for field in fields(value)
         }
     if isinstance(value, dict):
         return {
-            str(key): _json_value(item)
+            str(key): _json_value(item, _seen)
             for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
         }
     if isinstance(value, (list, tuple)):
-        return [_json_value(item) for item in value]
+        return [_json_value(item, _seen) for item in value]
     if isinstance(value, (set, frozenset)):
         # Sets have no stable iteration order; sort their serialized values so
         # the checksum is reproducible across processes.
-        serialized = [_json_value(item) for item in value]
+        serialized = [_json_value(item, _seen) for item in value]
         return sorted(serialized, key=lambda item: json.dumps(item, sort_keys=True))
     if hasattr(value, "__dict__"):
         return {
-            str(key): _json_value(item)
+            str(key): _json_value(item, _seen)
             for key, item in sorted(vars(value).items())
             if not key.startswith("__")
         }

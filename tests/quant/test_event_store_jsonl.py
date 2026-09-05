@@ -229,3 +229,29 @@ class TestExportToJsonl:
         path = tmp_path / "log.jsonl"
         assert store.export_to_jsonl(path) == 20
         assert len(_read_rows(path)) == 20
+
+
+def test_self_referential_payload_serializes_without_recursion():
+    """A payload holding a self-referential object must append (and checksum)
+    instead of crashing the emit path with RecursionError."""
+    from dataclasses import dataclass
+
+    from quant.events import Event
+
+    @dataclass(frozen=True)
+    class _LoopEvent(Event):
+        payload: object = None
+
+    @dataclass
+    class _Node:
+        name: str = "n"
+        child: object = None
+
+    node = _Node()
+    node.child = node  # cycle
+
+    store = EventStore()
+    seq = store.append(_LoopEvent(symbol="S", time="t0", payload=node))
+    assert seq >= 1
+    row = store.export()[0]
+    assert "<cycle>" in json.dumps(row)
