@@ -333,11 +333,12 @@ class QuantEngine:
         # per bar covers a 6.5-hour NSE session; older events fall out of memory.
         # Full history still lands in the tick journal (quant/persistence.Journal).
         self._trace: deque[Event] = deque(maxlen=10_000)
-        # Setup latch: last approved-but-blocked (signal identity, side) and
-        # the block reason. Emits SignalBlocked once per blocking episode
-        # instead of once per micro-bar. Never suppresses evaluation.
-        self._latch_key: tuple[str, str] | None = None
-        self._latch_block: str = ""
+        # Setup latch: approved-but-blocked episodes, keyed by (signal symbol,
+        # side) → block reason. Emits SignalBlocked once per blocking episode
+        # instead of once per micro-bar. The dict is wiped on any non-approved
+        # decision (market changed → episodes stale) and per-key on successful
+        # entry. Never suppresses evaluation.
+        self._latch: dict[tuple[str, str], str] = {}
         self._bar_index = 0
         # History bars seeded into the AMT engine count toward the warmup
         # requirement (accessed via self._amt_engine.warm_bars).
@@ -1031,13 +1032,14 @@ class QuantEngine:
             # route through an IOMS — emit only after a successful submit.
             self._emit(SignalApproved(symbol=self.symbol, time=bar.time, signal=signal))
             self._entry_bar_index = self._bar_index
-            self._latch_key = None
-            self._latch_block = ""
+            self._latch.pop((getattr(signal, "symbol", "") or self.symbol, str(signal.type)), None)
             pm = self._get_position_manager()
             pm.current_position = position
             self._entry_time_epoch = _bar_epoch_ms(bar.time) / 1000.0
             self._emit(PositionOpened(symbol=self.symbol, time=bar.time, position=position))
         else:
+            # Market state changed — all open blocking episodes are stale.
+            self._latch.clear()
             if decision.reason == "OPPOSING_TYPE":
                 logger.debug(
                     "⚪ [DECISION EVAL] %s: approved=False reason=OPPOSING_TYPE phase=%s",
@@ -1056,23 +1058,23 @@ class QuantEngine:
     def _latch_or_signal_block(self, signal, block_reason: str, bar_time: str) -> None:
         """Record a blocked approval. First occurrence of an episode (same
         signal blocked for the same reason) warns + emits SignalBlocked;
-        repeats debug-log only. Evaluation is never suppressed."""
+        repeats debug-log only. Episodes live per (signal symbol, side) key in
+        self._latch. Evaluation is never suppressed."""
         key = (getattr(signal, "symbol", "") or self.symbol, str(signal.type))
-        new_episode = key != self._latch_key or block_reason != self._latch_block
-        self._latch_key, self._latch_block = key, block_reason
-        if new_episode:
-            logger.warning(
-                "🛑 [SIGNAL BLOCKED] %s: %s %s @ %.2f — %s",
-                self.symbol, signal.type, signal.symbol, signal.entry, block_reason,
-            )
-            self._emit(SignalBlocked(
-                symbol=self.symbol, time=bar_time, signal=signal, reason=block_reason,
-            ))
-        else:
+        if self._latch.get(key) == block_reason:
             logger.debug(
                 "🛑 [SIGNAL BLOCKED] %s: %s %s @ %.2f — %s (repeat, latched)",
                 self.symbol, signal.type, signal.symbol, signal.entry, block_reason,
             )
+            return
+        self._latch[key] = block_reason
+        logger.warning(
+            "🛑 [SIGNAL BLOCKED] %s: %s %s @ %.2f — %s",
+            self.symbol, signal.type, signal.symbol, signal.entry, block_reason,
+        )
+        self._emit(SignalBlocked(
+            symbol=self.symbol, time=bar_time, signal=signal, reason=block_reason,
+        ))
 
     def _build_context(self, bar, amt_dto: dict, cooldown_remaining_sec: float):
         """Single DecisionContext source shared by the flat-path ``_decide()``

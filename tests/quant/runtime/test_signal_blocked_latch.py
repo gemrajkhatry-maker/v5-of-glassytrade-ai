@@ -188,3 +188,54 @@ def test_sizing_zero_then_reason_change_emits_twice():
     eng._bar_index = 13
     eng._decide({}, _bar(1))
     assert len(blocked) == 1
+
+
+@dataclass
+class _NonApprovedDecision:
+    approved: bool = False
+    signal: Signal | None = None
+    reason: str = "NO_EDGE"
+    phase: str = ""
+    gate_results: tuple = ()
+    block_reasons: tuple = ("no edge",)
+    model_label: str = ""
+
+
+def test_non_approved_decision_starts_new_episode():
+    # blocked(R) → market goes NO_EDGE for a stretch → the same setup blocked
+    # with the same reason again is a FRESH episode (the market changed between).
+    pra = MagicMock()
+    pra.can_accept.return_value = (False, "concurrent root position: X active")
+    eng, blocked, _ = _engine()
+    eng._portfolio_risk = pra
+    eng._bar_index = 10
+    eng._decide({}, _bar(0))          # blocked → episode 1
+    eng._strategy.should_enter.return_value = _NonApprovedDecision()
+    eng._bar_index = 13
+    eng._decide({}, _bar(1))          # non-approved → episodes stale
+    eng._bar_index = 16
+    eng._decide({}, _bar(2))          # non-approved again
+    eng._strategy.should_enter.return_value = _ApprovedDecision(_sig())
+    eng._bar_index = 19
+    eng._decide({}, _bar(3))          # blocked same reason → NEW episode
+    assert len(blocked) == 2
+
+
+def test_alternating_keys_keep_independent_episodes():
+    # Two distinct blocked setups alternate; each key owns its episode, so A
+    # returning after B does not re-emit (single-slot latch would re-emit).
+    sig_a = Signal(type="LONG", reason="t", entry=14.0, sl=13.0, tp=16.0, rr=2.0,
+                   model_label="t", symbol="A-CE", timestamp="t0")
+    sig_b = Signal(type="SHORT", reason="t", entry=14.0, sl=15.0, tp=12.0, rr=2.0,
+                   model_label="t", symbol="B-PE", timestamp="t0")
+    pra = MagicMock()
+    pra.can_accept.return_value = (False, "concurrent root position: X active")
+    eng, blocked, _ = _engine()
+    eng._portfolio_risk = pra
+    eng._strategy.should_enter.side_effect = [
+        _ApprovedDecision(sig_a), _ApprovedDecision(sig_b), _ApprovedDecision(sig_a),
+    ]
+    for i, bar_index in enumerate((10, 13, 16)):
+        eng._bar_index = bar_index
+        eng._decide({}, _bar(i))
+    assert len(blocked) == 2  # A emits, B emits, A is latched (same episode)
