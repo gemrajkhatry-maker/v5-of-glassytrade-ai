@@ -84,6 +84,7 @@ class SymbolRegistry:
         return self.mcx_underlyings | self.nse_underlyings
 
     def _extract_underlying(self, symbol: str) -> str:
+        # registry-specific; canonical parsing lives in ExchangeConfig.extract_underlying
         if not symbol:
             return ""
         clean = (
