@@ -8,3 +8,9 @@ import quant.state_machine as state_machine
 
 def test_bar_is_single_definition():
     assert state_machine.Bar is bars.Bar
+
+
+def test_ibroker_single_home():
+    import quant.contracts.ports.broker as cpb
+    import brokers.broker.ports as bbp
+    assert cpb.IBroker is bbp.IBroker

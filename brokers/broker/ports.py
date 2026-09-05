@@ -20,6 +20,9 @@ from .entities import Instrument, Quote, Tick, Order, Position, OptionChain, Opt
 from .types import Exchange
 from .market_info import get_lot_size as _get_lot_size, get_step_size as _get_step_size
 
+from quant.contracts.entities import Position as QuantPosition, Signal
+from quant.contracts.aggregates import Portfolio
+
 if TYPE_CHECKING:
     import pandas as pd
     from rx import Observable
@@ -368,5 +371,53 @@ class IBrokerPort(ABC):
             List of orders
         """
         pass
+
+
+# =============================================================================
+# Engine-Side Execution Port
+# =============================================================================
+
+class IBroker(ABC):
+    """Engine-side execution port (order entry/exit). Canonical definition —
+    quant/contracts/ports/broker.py re-exports this."""
+
+    @abstractmethod
+    def execute_order(
+        self, signal: Signal, portfolio: Portfolio, symbol: str
+    ) -> QuantPosition | None:
+        """Execute an order based on *signal*.
+
+        Returns the opened Position, or None if the order was rejected.
+        """
+
+    @abstractmethod
+    def close_position(
+        self,
+        symbol: str,
+        side: str,
+        quantity: int,
+        portfolio: Portfolio,
+        reference_price: float | None = None,
+    ) -> QuantPosition | None:
+        """Close (or reduce) an open position by placing an opposing order.
+
+        Args:
+            symbol: Trading symbol.
+            side: The CLOSING side — "SELL" to close a LONG, "BUY" to close a SHORT.
+            quantity: Number of units to close.
+            portfolio: Portfolio for cost model / tracking.
+            reference_price: Optional expected exit price. Live brokers may use it
+                to bound slippage (marketable-LIMIT collar); a close must still
+                fill, so implementations treat this as advisory, not a hard gate.
+
+        Returns:
+            Position with entry_price = actual fill price, or None on failure.
+        """
+        ...
+
+    @abstractmethod
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an open order (like a standalone Stop-Loss bracket) by its ID."""
+        ...
 
 
