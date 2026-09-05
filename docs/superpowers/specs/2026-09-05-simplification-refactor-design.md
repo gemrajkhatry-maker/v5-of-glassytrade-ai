@@ -75,3 +75,13 @@ Post-quantv2-removal, the live system still carries structural duplication that 
 - No relocation of types between packages (Approach B explicitly rejected).
 - No new abstractions/protocols (Approach C rejected — it does not remove duplication).
 - No changes to `quantv2/` (deleted), no work on test organization beyond what slices require.
+
+## 8. Census addendum (2026-09-05, post-recon — binding amendments)
+
+Detailed recon amended three findings per the §4 protocol (never force a unification that changes behavior):
+
+1. **`Signal` and `Position` are layered models, not clones.** `quant/contracts/entities.py::Signal` (broker-layer: `SetupType`/`SignalType` enums, 8 importing files) and `quant/decision/signal_builder.py::Signal` (engine: entry/sl/tp/rr, 10 importing files) have different field sets; `quant/execution/broker_mapper.py` is the sanctioned seam. The three `Position` shapes are each imported by live layer code (`execution/order.py` engine ×10; `contracts/entities.py` broker-layer; `shared/entities/models.py` by `brokers/broker/types.py`, `brokers/broker/entities.py`, `backend/.../schemas.py`). **Amendment:** keep the layer pairs distinct; delete only the dead copy (`quant/hansi/`); the anti-clone AST guard documents these pairs as sanctioned seams instead of unifying them.
+2. **`detect_absorption` is test-only.** Zero production callers (only `tests/quant/amt/orderflow/test_footprint_gaps.py`). **Amendment:** delete the function and its test file rather than deduplicate; port any unique AMT-meaningful assertions into `AbsorptionDetector` tests if present.
+3. **`IBroker` (engine execution port, 3 methods) and `IBrokerPort` (full broker port, ~20 methods) are different ports.** "Port lives in brokers/" means: `brokers/broker/ports.py` becomes the single home for ALL broker port definitions — `IBroker` moves there (name unchanged), `quant/contracts/ports/broker.py` re-exports it, adapters unchanged behaviorally. Slice 4 additionally runs a backend adapter census: if `backend/app/infrastructure/adapters/dhan_adapter.py` duplicates live capability already provided by `brokers/broker/dhan`, it is deleted with its callers re-pointed (census + caller re-point plan required before deletion).
+
+`Bar` unification stands (identical fields; `quant/bars.py::Bar` gains the `state_machine.Bar` defaults — a compatible widening — then `state_machine` re-exports it). `OHLC` unification stands pending a field-compatibility check as the first step of its task.
