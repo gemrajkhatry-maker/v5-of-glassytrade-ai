@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+from quant.bars import Bar  # canonical single definition (was a local dataclass)
+
 
 # ---------------------------------------------------------------------------
 # Value Objects (frozen dataclasses)
@@ -35,22 +37,6 @@ class RiskState:
     trades_today: int = 0
     halted: bool = False
     halt_reason: str = ""
-
-
-@dataclass(frozen=True)
-class Bar:
-    """Immutable bar data (minimal for state)."""
-    time: str = ""
-    open: float = 0.0
-    high: float = 0.0
-    low: float = 0.0
-    close: float = 0.0
-    volume: float = 0.0
-    vwap: float = 0.0
-    buy_volume: float = 0.0
-    sell_volume: float = 0.0
-    oi: float = 0.0
-    delta: float = 0.0
 
 
 # ---------------------------------------------------------------------------
