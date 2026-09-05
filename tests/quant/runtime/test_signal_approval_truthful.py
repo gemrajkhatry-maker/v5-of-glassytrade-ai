@@ -102,3 +102,17 @@ def test_real_submission_emits_approval_before_position_opened():
     eng._oms.submit.assert_called_once()
     assert [type(e).__name__ for e in captured] == ["SignalApproved", "PositionOpened"]
     assert captured[0].signal is sig
+
+
+def test_event_store_failure_does_not_orphan_entry():
+    # An EventStore append failure (I/O, corrupt payload) must not skip the
+    # post-submit entry bookkeeping — a live order with a flat book would
+    # invite a duplicate entry on the next evaluation.
+    eng, captured = _engine()
+    eng.event_store.append = MagicMock(side_effect=RuntimeError("disk full"))
+    eng._bar_index = 10
+    eng._decide({}, _bar(0))  # must not raise
+    eng._oms.submit.assert_called_once()
+    assert [type(e).__name__ for e in captured] == ["SignalApproved", "PositionOpened"]
+    assert eng._entry_bar_index == 10
+    assert eng._get_position_manager().current_position is not None

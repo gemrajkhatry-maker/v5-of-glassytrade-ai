@@ -1411,8 +1411,20 @@ class QuantEngine:
                 self._latest_agent_decision = event.decision
             elif isinstance(event, DepthUpdated):
                 self._latest_depth = event.depth
-            # Event sourcing: append to EventStore and fold into state
-            self.event_store.append(event)
+            # Event sourcing: append to EventStore and fold into state.
+            # Contained: a sourcing failure (disk I/O, corrupt payload, clock
+            # skew) must never kill the caller mid-bookkeeping — the journal
+            # and storage bridge already received the event via the bus, and
+            # the reconcile layer re-syncs event-sourced drift on startup.
+            try:
+                self.event_store.append(event)
+            except Exception:
+                logger.critical(
+                    "⚠️ [EVENT SOURCING] %s: append failed for %s — event NOT "
+                    "recorded in the store; state may drift (reconciliation "
+                    "re-syncs on startup)",
+                    self.symbol, type(event).__name__,
+                )
             self.state = apply_event(self.state, event)
 
     def _underlying(self) -> str:
