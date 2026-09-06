@@ -20,6 +20,9 @@ from .entities import Instrument, Quote, Tick, Order, Position, OptionChain, Opt
 from .types import Exchange
 from .market_info import get_lot_size as _get_lot_size, get_step_size as _get_step_size
 
+# QuantPosition: this module's own `Position` (broker-layer, from .entities)
+# collides with the engine-layer quant Position used in IBroker's return
+# annotations — alias keeps both layer models distinct (spec §8).
 from quant.contracts.entities import Position as QuantPosition, Signal
 from quant.contracts.aggregates import Portfolio
 
