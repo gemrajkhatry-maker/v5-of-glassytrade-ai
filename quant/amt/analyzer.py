@@ -1,11 +1,35 @@
 """AMT Analyzer — Auction Market Theory analysis domain service.
 
-Pure domain logic: volume profile construction, LVN/HVN detection,
-market state assessment, and aggression scoring.  Signal generation is
-delegated to the SignalGenerator service to honour SRP.
+Architecture Overview
+=====================
+The AMTAnalyzer orchestrates multiple focused analysis components to produce
+a comprehensive AMT result from OHLC bars and order book data. It is a facade
+over specialized analyzers, each responsible for a single concern.
 
-Enhanced with Valentini AMT features: 2.5σ aggression filter,
-CVD tracking, profile shape classification, and session context.
+Pipeline Flow:
+  OHLC Bars → VolumeProfileComputer → POC/VAH/VAL
+             → VWAPTracker → VWAP bands
+             → CVDTracker → cumulative volume delta
+             → AbsorptionDetector → absorption clusters
+             → AggressionScorer → 2.5σ aggression filter
+             → SessionContext → gap/opening classification
+             → BreakDetector → IB break detection
+             → DisplacementDetector → displacement events
+             → MarketStateEngine → market state classification
+             → AcceptanceRejectionEngine → acceptance/rejection
+             → TripleAMachine → AAA setup detection
+
+Internal Structure
+==================
+1. CONFIGURATION — AMTConfig with Fabio-spec thresholds
+2. VOLUME PROFILE — construction, POC/VAH/VAL computation
+3. LVN/HVN — low/high value node detection
+4. ORDER FLOW — CVD, aggression, absorption, prints
+5. MARKET STRUCTURE — balance, displacement, breaks
+6. SESSION CONTEXT — gaps, opening type, initial balance
+7. ANALYSIS — analyze() main entry point, result assembly
+
+Pure domain logic: no I/O, no broker dependencies.
 """
 
 from __future__ import annotations

@@ -1,11 +1,30 @@
 """QuantCoordinator — multi-symbol orchestrator.
 
-Runs one QuantEngine per scanned contract on a single BOUNDED thread pool
-(a per-engine blocking run loop occupies exactly one pool worker, so pool
-capacity caps both concurrent engines and OS threads; spawns past the bound
-are refused). Engine decisions fold onto a shared queue for the backend
-shell. Pure quant: imports ``quant.*`` and stdlib only — zero backend
-imports.
+Architecture Overview
+=====================
+QuantCoordinator owns one QuantEngine per scanned contract, all fed by a
+single multiplexed market data feed. It manages the lifecycle of engines,
+handles symbol rotation, and provides health/readiness telemetry.
+
+Pipeline Flow:
+  Scanner → Symbol List → EngineFactory → QuantEngine (one per symbol)
+                                      ↓
+                              ThreadPoolExecutor (bounded)
+                                      ↓
+                              Backend (WS snapshots, health, metrics)
+
+Internal Structure
+==================
+The coordinator is organized into these functional areas:
+
+1. LIFECYCLE — start, stop, rescan, symbol rotation
+2. ENGINE MANAGEMENT — spawn, stop, thread pool, gateway lifecycle
+3. POSITION RECONCILIATION — startup restore, stale quarantine
+4. HEALTH & READINESS — crashed engines, staleness, readiness status
+5. METRICS — per-engine activity, aggregate totals
+6. SCHEDULERS — history seed scheduler, EOD watchdog
+
+Pure quant: imports ``quant.*`` and stdlib only — zero backend imports.
 """
 
 from __future__ import annotations
@@ -295,6 +314,9 @@ class QuantCoordinator:
     connection for every symbol (Dhan allows up to 1000 instruments per
     connection)."""
 
+    # =========================================================================
+    # 1. LIFECYCLE — start, stop, rescan, symbol rotation
+    # =========================================================================
     def __init__(self, market_data, broker=None, config=None, strategy=None, storage=None) -> None:
         self.market_data = market_data
         self.broker = broker
@@ -766,6 +788,9 @@ class QuantCoordinator:
         with self._lock:
             return list(self._engines.keys())
 
+    # =========================================================================
+    # 4. HEALTH & READINESS — crashed engines, staleness, readiness status
+    # =========================================================================
     def crashed_engines(self) -> list[str]:
         """Symbols whose engine thread died from an exception (F1 fix).
 
@@ -865,6 +890,9 @@ class QuantCoordinator:
             logger.warning("emergency_halt: force-closed %d position(s) across %d engine(s)", closed, halted)
         return halted
 
+    # =========================================================================
+    # 6. SCHEDULERS — history seed scheduler, EOD watchdog
+    # =========================================================================
     def _squareoff_deadline(self, market) -> datetime | None:
         """IST datetime at which the EOD backstop fires (exchange close − N min)."""
         try:
@@ -1260,6 +1288,9 @@ class QuantCoordinator:
     # Bounded engine pool
     # ------------------------------------------------------------------
 
+    # =========================================================================
+    # 2. ENGINE MANAGEMENT — spawn, stop, thread pool, gateway lifecycle
+    # =========================================================================
     def _ensure_executor(self) -> ThreadPoolExecutor:
         """Return the coordinator's engine pool, creating it lazily.
 

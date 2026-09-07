@@ -1,9 +1,30 @@
 """QuantEngine — the deterministic single-threaded event loop.
 
-Consumes ticks from a ``BrokerGateway``, aggregates them into bars, drives the
-pipeline AuctionCoordinator -> DecisionService -> PaperOMS -> ExitEngine ->
-SessionRisk, and emits typed events. Purely deterministic: replaying the same
-tick sequence always yields the same event trace.
+Architecture Overview
+=====================
+QuantEngine is the per-symbol runtime that consumes ticks, aggregates bars,
+makes trading decisions, manages positions, and emits events. It is the
+central orchestrator of the quant trading pipeline.
+
+Pipeline Flow:
+  Tick → BarAggregator → AMTEngine → DecisionService → PaperOMS → ExitEngine → SessionRisk
+                         ↓
+                    EventBus (events emitted)
+
+Internal Structure
+==================
+The engine is organized into these functional areas:
+
+1. LIFECYCLE — construction, run loop, startup/shutdown
+2. TICK PROCESSING — tick ingestion, bar aggregation, AMT updates
+3. DECISIONS — entry gating, signal translation, submission
+4. POSITION MANAGEMENT — entries, exits, pyramids, partials
+5. RISK — session risk, portfolio risk, halt logic
+6. EVENTS — emission, event store, reconciliation
+7. UTILITIES — depth conversion, quote caching, advisors
+
+Each area has well-separated internal methods. The class is large (1,595 lines)
+but internally cohesive — every method directly supports the per-symbol runtime.
 
 Only imports ``quant.*`` and stdlib — zero backend/ imports.
 """
@@ -112,6 +133,9 @@ _WARMUP_BARS = 15
 
 
 class QuantEngine:
+    # =========================================================================
+    # 1. LIFECYCLE — construction, run loop, startup/shutdown
+    # =========================================================================
     def __init__(
         self,
         gateway,
@@ -375,7 +399,9 @@ class QuantEngine:
         # constructions stay thread-free and reproducible.
         self._advisor = advisor
 
-
+    # =========================================================================
+    # 2. TICK PROCESSING — tick ingestion, bar aggregation, AMT updates
+    # =========================================================================
     def run(self, max_steps: int | None = None) -> list[Event]:
         """Consume ticks from the gateway, drive the full pipeline, and return
         the event trace. Deterministic: same ticks -> same trace.
@@ -669,9 +695,9 @@ class QuantEngine:
     def events(self) -> tuple[Event, ...]:
         return tuple(self._trace)
 
-    @property
-    def live_cache(self) -> LiveQuoteCache:
-        return self._live
+    # =========================================================================
+    # 3. POSITION MANAGEMENT — entries, exits, pyramids, partials
+    # =========================================================================
 
     @property
     def latest_amt(self) -> dict | None:
@@ -785,6 +811,9 @@ class QuantEngine:
         elif self._micro_aggregator is None:
             self._decide(amt_dto, bar)
 
+    # =========================================================================
+    # 4. DECISIONS — entry gating, signal translation, submission
+    # =========================================================================
     def _decide(self, amt_dto: dict, bar, execution_bar=None) -> None:
         # ponytail: debounce repeated rejected entries to avoid 60-second log flood
         if (self._bar_index - getattr(self, "_last_rejected_bar_index", -999)) < 2:
@@ -1186,6 +1215,9 @@ class QuantEngine:
             )
             self._book_full_close()
 
+    # =========================================================================
+    # 5. RISK — session risk, portfolio risk, halt logic
+    # =========================================================================
     def _book_full_close(self) -> None:
         """Shared post-full-close bookkeeping — the ONLY full-close release path.
 
@@ -1363,6 +1395,9 @@ class QuantEngine:
             pm.current_position = pm.base_override
             pm.base_override = None
 
+    # =========================================================================
+    # 6. EVENTS — emission, event store, reconciliation
+    # =========================================================================
     def _emit(self, event: Event) -> None:
         """Publish to the bus, append to the trace, fold into the projector.
 
@@ -1579,6 +1614,9 @@ class QuantEngine:
             discrepancies=tuple(discrepancies),
         )
 
+    # =========================================================================
+    # 7. UTILITIES — depth conversion, quote caching, advisors
+    # =========================================================================
     @staticmethod
     def _depth_to_book(depth: dict) -> OrderBook | None:
         if not depth:
