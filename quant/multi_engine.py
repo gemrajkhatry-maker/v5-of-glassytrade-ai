@@ -31,6 +31,8 @@ from quant.contracts.timezones import IST, MCX_SESSION_CLOSE, NSE_SESSION_CLOSE
 from quant.events import BarClosed
 from quant.execution.live_oms import LiveOMS
 from quant.execution.oms import PaperOMS
+from quant.execution.paper_reconciliation import PaperPositionReconciler, ReconciliationResult
+from quant.execution.readiness import readiness_status, ReadinessStatus
 from quant.hotpath import get_hotpath_tracer
 from quant.reconciliation_service import canonical_key, partition_keys
 from quant.runtime import QuantEngine
@@ -336,6 +338,10 @@ class QuantCoordinator:
         self._gex_by_root: dict[str, object] = {}
         self._eod_thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        # Paper position reconciliation: classify persisted positions against
+        # the active universe so stale contracts are quarantined, not restored.
+        self._quarantined: set[str] = set()
+        self._reconciliation_result: ReconciliationResult | None = None
         # Serializes LIFECYCLE TRANSITIONS (start/rescan/switch/stop). These
         # compose multiple steps over the shared dicts + threads above — a
         # dict-level lock cannot close the check-then-act window between them
@@ -389,6 +395,22 @@ class QuantCoordinator:
             symbols = self._scan()
             self._refresh_gex()
             self._feed.set_symbols(symbols)
+            # Paper position reconciliation: classify persisted positions
+            # against the active universe. Only OPEN positions are restored;
+            # stale contracts are quarantined (preserved in storage but not
+            # loaded into any engine).
+            self._reconciliation_result = PaperPositionReconciler(
+                self._storage, active_universe=set(symbols)
+            ).reconcile()
+            self._quarantined = {
+                q.symbol for q in self._reconciliation_result.quarantined
+            }
+            if self._quarantined:
+                logger.warning(
+                    "QuantCoordinator: %d paper position(s) quarantined "
+                    "(not in active universe): %s",
+                    len(self._quarantined), sorted(self._quarantined),
+                )
             for symbol in symbols:
                 self._spawn_engine(symbol)
             # Startup reconciliation: rebuild each engine's state from its event store
@@ -747,6 +769,21 @@ class QuantCoordinator:
                 sym for sym, eng in self._engines.items()
                 if getattr(eng, "_crashed", False)
             )
+
+    def quarantined_positions(self) -> set[str]:
+        """Symbols of persisted paper positions not in the active universe.
+
+        Exposed for the /health endpoint and readiness checks. These positions
+        are preserved in storage but not restored into any engine.
+        """
+        return set(self._quarantined)
+
+    def readiness(self) -> tuple[ReadinessStatus, dict[str, str]]:
+        """Compute readiness status for the backend health router.
+
+        Wraps readiness_status() with self as the coordinator.
+        """
+        return readiness_status(self)
 
     def stale_engines(self, threshold_sec: float = 300.0) -> list[str]:
         """Symbols whose engine has consumed no tick for ``threshold_sec``.
@@ -1386,16 +1423,28 @@ class QuantCoordinator:
         # Always attach storage (position persistence, restart book).
         if self._storage is not None:
             engine.attach_storage(self._storage)
-            try:
-                rows = self._storage.load_open_positions() or []
-            except Exception:
-                logger.exception("load_open_positions failed for %s", symbol)
-                rows = []
+            # Only restore positions classified as OPEN by the reconciler.
+            # Quarantined positions are preserved in storage but NOT loaded
+            # into any engine (they are not in the active universe).
+            open_rows: list[dict] = []
+            if self._reconciliation_result is not None:
+                open_rows = [
+                    r for r in self._reconciliation_result.open_positions
+                    if r.get("symbol") == symbol
+                ]
+            else:
+                # No reconciler result (e.g., tests that bypass start()): fall
+                # back to loading directly, filtering by symbol.
+                try:
+                    rows = self._storage.load_open_positions() or []
+                except Exception:
+                    logger.exception("load_open_positions failed for %s", symbol)
+                    rows = []
+                open_rows = [r for r in rows if r.get("symbol") == symbol]
             from quant.execution.order import row_to_position
-            for row in rows:
-                if row.get("symbol") == symbol:
-                    engine.restore_position(row_to_position(row))
-                    break
+            for row in open_rows:
+                engine.restore_position(row_to_position(row))
+                break
         if _journal_dir:
             from quant.persistence import Journal
 

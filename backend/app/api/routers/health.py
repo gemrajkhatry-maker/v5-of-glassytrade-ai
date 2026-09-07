@@ -220,6 +220,19 @@ async def readiness_check(request: Request):
     except Exception as e:
         checks["symbols"] = f"error: {e}"
 
+    # Coordinator readiness (truthful degraded states)
+    try:
+        coordinator = getattr(request.app.state, "coordinator", None)
+        if coordinator is not None and hasattr(coordinator, "readiness"):
+            status, details = coordinator.readiness()
+            checks["coordinator_readiness"] = status.value
+            if status.value != "READY":
+                checks["coordinator_readiness_details"] = details
+        else:
+            checks["coordinator_readiness"] = "unknown"
+    except Exception as e:
+        checks["coordinator_readiness"] = f"error: {e}"
+
     # Startup runtime contracts
     try:
         startup_contracts = getattr(request.app.state, "startup_contracts", {})
@@ -259,6 +272,7 @@ async def readiness_check(request: Request):
             v == "ok"
             or (isinstance(v, str) and v.startswith("ok"))
             or v == "degraded"
+            or v == "DEGRADED_NO_NEW_ENTRIES"
         )
         for k, v in checks.items()
         if k
@@ -270,9 +284,13 @@ async def readiness_check(request: Request):
             "startup_storage_runtime",
             "startup_reconciliation_contract",
             "position_close_contract",
+            "coordinator_readiness_details",
         }
     )
     if str(checks.get("startup_close_contract", "")).startswith("error"):
+        all_ok = False
+    # NOT_READY overrides everything
+    if checks.get("coordinator_readiness") == "NOT_READY":
         all_ok = False
     status = "ready" if all_ok else "not_ready"
 
@@ -281,8 +299,27 @@ async def readiness_check(request: Request):
 
 @router.get("/v1/metrics")
 async def metrics():
-    """Return current pipeline metrics."""
-    return MetricsCollector().snapshot()
+    """Return current pipeline metrics.
+
+    Uses CoordinatorMetricsProvider to read per-engine activity from the
+    coordinator's engines, replacing the disconnected MetricsCollector that
+    reported 0 ticks while WebSocket showed live market flow.
+    """
+    coordinator = getattr(request.app.state, "coordinator", None)
+    if coordinator is not None:
+        from quant.execution.coordinator_metrics import coordinator_metrics_provider
+        provider = coordinator_metrics_provider(coordinator)
+        return provider.snapshot()
+    # Fallback: no coordinator — return empty but well-formed payload
+    return {
+        "engines": {},
+        "totals": {
+            "decision_count": 0,
+            "approved_count": 0,
+            "blocked_count": 0,
+            "engine_count": 0,
+        },
+    }
 
 
 @router.get("/system/config")
