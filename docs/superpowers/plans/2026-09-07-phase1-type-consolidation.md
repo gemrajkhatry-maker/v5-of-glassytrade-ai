@@ -2,7 +2,7 @@
 
 > Last updated: 2026-09-07
 > Branch: `refactor/phase0-runtime-truth`
-> Status: **Steps 1-2 complete. 475 broker tests passing.**
+> Status: **Phase 1 complete. 1861 quant tests passing.**
 
 ---
 
@@ -36,14 +36,14 @@
 
 **Verdict:** Same as Position. Engine version is canonical for execution; shared version is the broker-layer duplicate.
 
-### 1.4 `RiskState` (2 classes)
+### 1.4 `RiskState` (2 classes, intentional)
 
-| Location | Domain |
-|---|---|
-| `quant/execution/risk.py` | Engine (SessionRisk.state()) |
-| `quant/state_machine.py` | Legacy state machine |
+| Location | Domain | Purpose |
+|---|---|---|
+| `quant/execution/risk.py` | Engine runtime | SessionRisk state (consecutive_losses, equity, cushion_tier, risk_per_trade_pct) |
+| `quant/state_machine.py` | Immutable engine state | EngineState.risk snapshot (daily_pnl, trades_today, halted, halt_reason) |
 
-**Verdict:** `quant/state_machine.py` is legacy/dead code. Consolidate to `quant/execution/risk.py`.
+**Verdict:** Two different shapes for different purposes. Both are canonical in their respective modules. No consolidation needed.
 
 ### 1.5 `Tick` (2 classes)
 
@@ -126,9 +126,8 @@ brokers/broker/dhan/application/broker.py
 #### Step 4: Remove `StateProjector` removal notice
 1. Delete the dead code documentation
 
-#### Step 5: Consolidate `RiskState`
-1. Verify `quant/state_machine.py` `PositionState` is unused
-2. Delete the legacy class
+#### Step 5: Consolidate `RiskState` — **DONE (no-op)**
+Both `RiskState` classes serve different purposes. No consolidation needed.
 
 ---
 
@@ -151,7 +150,7 @@ brokers/broker/dhan/application/broker.py
 |---|---|---|
 | **B1** | All broker tests pass after removing `brokers/broker/entities.py` | **PASS** — 475 passed |
 | **B2** | All tests pass after removing `OrderStatus.COMPLETED` | **PASS** |
-| **B3** | All tests pass after removing `Instrument.__init__` backward compat | TODO |
+| **B3** | All tests pass after removing `Order.__init__` backward compat | **PASS** |
 | **B4** | No import cycles introduced | **PASS** |
 | **B5** | No duplicate class names across layers | **PASS** |
 
@@ -201,14 +200,14 @@ brokers/broker/dhan/application/broker.py
 
 **Verdict:** Same as Position. Engine version is canonical for execution; shared version is the broker-layer duplicate.
 
-### 1.4 `RiskState` (2 classes)
+### 1.4 `RiskState` (2 classes, intentional)
 
-| Location | Domain |
-|---|---|
-| `quant/execution/risk.py` | Engine (SessionRisk.state()) |
-| `quant/state_machine.py` | Legacy state machine |
+| Location | Domain | Purpose |
+|---|---|---|
+| `quant/execution/risk.py` | Engine runtime | SessionRisk state (consecutive_losses, equity, cushion_tier, risk_per_trade_pct) |
+| `quant/state_machine.py` | Immutable engine state | EngineState.risk snapshot (daily_pnl, trades_today, halted, halt_reason) |
 
-**Verdict:** `quant/state_machine.py` is legacy/dead code. Consolidate to `quant/execution/risk.py`.
+**Verdict:** Two different shapes for different purposes. Both are canonical in their respective modules. No consolidation needed.
 
 ### 1.5 `Tick` (2 classes)
 
@@ -292,9 +291,8 @@ brokers/broker/dhan/application/broker.py
 #### Step 4: Remove `StateProjector` removal notice
 1. Delete the dead code documentation
 
-#### Step 5: Consolidate `RiskState`
-1. Verify `quant/state_machine.py` `PositionState` is unused
-2. Delete the legacy class
+#### Step 5: Consolidate `RiskState` — **DONE (no-op)**
+Both `RiskState` classes serve different purposes. No consolidation needed.
 
 ---
 
