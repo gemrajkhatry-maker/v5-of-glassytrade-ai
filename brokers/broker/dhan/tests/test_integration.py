@@ -49,7 +49,7 @@ from brokers.broker.dhan.ports import (
     WSMessage,
 )
 
-from brokers.broker.entities import (
+from shared.entities.models import (
     Instrument,
     Quote,
     Tick,

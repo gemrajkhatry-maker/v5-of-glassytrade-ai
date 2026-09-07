@@ -10,7 +10,7 @@ subscription management API — no new connections are created per call.
 import asyncio
 from typing import Dict, List, Optional, Tuple, AsyncIterator
 
-from brokers.broker.entities import (
+from shared.entities.models import (
     Instrument,
     Quote,
     Tick,

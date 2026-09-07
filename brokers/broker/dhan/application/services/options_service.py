@@ -5,8 +5,8 @@ Options Service - Option chain and expiry operations.
 from datetime import datetime
 from typing import Dict, List
 
-from brokers.broker.entities import Instrument, OptionChain
-from brokers.broker.entities import Option as BrokerOption
+from shared.entities.models import Instrument, OptionChain
+from shared.entities.models import Option as BrokerOption
 from brokers.broker.types import Exchange
 from brokers.broker.dhan.domain import (
     DhanError,

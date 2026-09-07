@@ -9,7 +9,7 @@ These tests verify the new features ported from dhanhq_custom:
 
 import pytest
 from datetime import datetime
-from brokers.broker.entities import (
+from shared.entities.models import (
     Option,
     OptionChain,
     Instrument,

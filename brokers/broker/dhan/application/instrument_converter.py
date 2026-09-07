@@ -8,7 +8,7 @@ are stateless; ``converters.DhanConverter`` re-exposes them as staticmethods.
 
 from typing import Any, Dict
 
-from brokers.broker.entities import Instrument, OptionChain
+from shared.entities.models import Instrument, OptionChain
 from brokers.broker.types import Exchange, OptionType
 
 from brokers.broker.dhan.domain import (

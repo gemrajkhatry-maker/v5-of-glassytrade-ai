@@ -61,7 +61,7 @@ from brokers.broker.dhan.ports import (
 )
 
 # Broker-agnostic imports
-from brokers.broker.entities import Instrument, Quote, Tick, Order, Position
+from shared.entities.models import Instrument, Quote, Tick, Order, Position
 from brokers.broker.types import Exchange, OrderSide, OrderType, OrderStatus
 
 

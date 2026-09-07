@@ -186,7 +186,7 @@ async def test_fetch_history_exception_returns_empty_list():
 
 @pytest.mark.asyncio
 async def test_fetch_order_book_builds_from_depth():
-    from brokers.broker.entities import Quote, DepthLevel
+    from shared.entities.models import Quote, DepthLevel
 
     adapter = _make_adapter()
     mock_broker = _make_mock_broker()
@@ -341,7 +341,7 @@ async def test_fetch_history_none_df_returns_empty():
 @pytest.mark.asyncio
 async def test_stream_full_yields_packets():
     from datetime import datetime
-    from brokers.broker.entities import FullPacket
+    from shared.entities.models import FullPacket
 
     adapter = _make_adapter()
     mock_broker = _make_mock_broker()

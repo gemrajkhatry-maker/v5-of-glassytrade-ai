@@ -33,7 +33,7 @@ from typing import (
 import pandas as pd
 
 from brokers.broker.ports import IBrokerPort
-from brokers.broker.entities import (
+from shared.entities.models import (
     Instrument,
     Quote,
     Tick,

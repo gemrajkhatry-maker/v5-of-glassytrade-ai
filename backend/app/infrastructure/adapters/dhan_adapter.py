@@ -161,7 +161,7 @@ class DhanMarketDataAdapter(IMarketData):
         this is used downstream by streaming_service to select the correct
         WS exchange segment (MCX_FNO vs MCX_COMM).
         """
-        from brokers.broker.entities import Instrument, OptionType
+        from shared.entities.models import Instrument, OptionType
 
         sym_upper = symbol.upper()
         is_option, is_call, is_put, dhan_exchange = classify_symbol(symbol)
@@ -546,7 +546,7 @@ class DhanMarketDataAdapter(IMarketData):
         instruments = [self._make_instrument(sym) for sym in symbols]
         
         # MCX does not support 20-level depth WebSocket (MCX depth is 5-level in stream_full)
-        from brokers.broker.entities import Exchange
+        from shared.entities.models import Exchange
         non_mcx = [inst for inst in instruments if getattr(inst, "exchange", None) != Exchange.MCX]
         if not non_mcx:
             return

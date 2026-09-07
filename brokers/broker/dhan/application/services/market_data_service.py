@@ -4,7 +4,7 @@ Market Data Service - Quote and LTP operations.
 
 from typing import Dict, List, Optional
 
-from brokers.broker.entities import Instrument, Quote
+from shared.entities.models import Instrument, Quote
 from brokers.broker.types import Exchange
 from brokers.broker.dhan.domain import DhanNetworkError, MARKETFEED_QUOTE, MARKETFEED_LTP
 from brokers.broker.dhan.domain.segment_mapping import exchange_to_segment_name

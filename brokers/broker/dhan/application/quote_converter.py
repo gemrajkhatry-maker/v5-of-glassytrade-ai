@@ -10,7 +10,7 @@ re-exposes them as staticmethods.
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from brokers.broker.entities import (
+from shared.entities.models import (
     DepthLevel,
     Instrument,
     Quote,
@@ -21,7 +21,7 @@ from brokers.broker.types import Exchange
 from brokers.broker.dhan.domain import DhanQuote, DhanTick
 
 if TYPE_CHECKING:
-    from brokers.broker.entities import MarketDepth
+    from shared.entities.models import MarketDepth
 
 
 def to_quote(dhan_quote: DhanQuote) -> Quote:
@@ -219,7 +219,7 @@ def depth_from_api_response(
     Example:
         >>> depth = DhanConverter.depth_from_api_response(ws_data, "12345", instrument)
     """
-    from brokers.broker.entities import MarketDepth, DepthLevel
+    from shared.entities.models import MarketDepth, DepthLevel
 
     # Parse bid levels (up to 20)
     bid_levels = []

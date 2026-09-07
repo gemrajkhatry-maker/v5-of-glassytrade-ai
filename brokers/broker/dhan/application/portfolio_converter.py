@@ -9,7 +9,7 @@ as staticmethods.
 
 from typing import Any, Dict
 
-from brokers.broker.entities import Instrument, Position
+from shared.entities.models import Instrument, Position
 from brokers.broker.types import Exchange
 
 from brokers.broker.dhan.domain import DhanPosition

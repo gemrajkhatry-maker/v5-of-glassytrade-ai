@@ -5,7 +5,7 @@ Portfolio Service - Positions, trades, and P&L operations.
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from brokers.broker.entities import Position
+from shared.entities.models import Position
 from brokers.broker.dhan.domain import (
     DhanError,
     DhanNetworkError,

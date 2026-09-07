@@ -11,7 +11,7 @@ import asyncio
 import pandas as pd
 
 from brokers.broker.types import Exchange, OptionType, OrderSide, OrderStatus
-from brokers.broker.entities import Instrument, Quote, Tick, Order, Position, OptionChain
+from shared.entities.models import Instrument, Quote, Tick, Order, Position, OptionChain
 from brokers.broker.ports import IBrokerPort
 
 

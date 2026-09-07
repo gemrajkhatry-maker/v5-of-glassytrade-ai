@@ -23,7 +23,7 @@ from brokers.broker.dhan.application.converters import (
     DHAN_STRING_TO_SEGMENT,
     ORDER_TYPE_TO_DHAN,
 )
-from brokers.broker.entities import Instrument, Order
+from shared.entities.models import Instrument, Order
 from brokers.broker.types import Exchange, OptionType, OrderSide, OrderStatus, OrderType
 from brokers.broker.dhan.domain import OptionType as DhanOptionType
 

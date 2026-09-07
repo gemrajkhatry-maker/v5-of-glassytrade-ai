@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, List, Optional, AsyncIterator, Dict, Tuple, Union, runtime_checkable, Protocol
 from datetime import datetime
 
-from .entities import Instrument, Quote, Tick, Order, Position, OptionChain, Option, MarketDepth, FullPacket
+from shared.entities.models import Instrument, Quote, Tick, Order, Position, OptionChain, Option, MarketDepth, FullPacket
 from .types import Exchange
 from .market_info import get_lot_size as _get_lot_size, get_step_size as _get_step_size
 

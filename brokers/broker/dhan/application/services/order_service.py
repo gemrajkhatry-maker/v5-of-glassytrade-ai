@@ -5,7 +5,7 @@ Order Service - Order placement and management operations.
 from datetime import datetime
 from typing import List
 
-from brokers.broker.entities import Order
+from shared.entities.models import Order
 from brokers.broker.types import OrderStatus
 from brokers.broker.dhan.domain import (
     DhanError,

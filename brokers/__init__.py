@@ -30,7 +30,7 @@ from brokers.broker.types import (
     OrderType,
     OrderStatus,
 )
-from brokers.broker.entities import (
+from shared.entities.models import (
     Instrument,
     Quote,
     Tick,

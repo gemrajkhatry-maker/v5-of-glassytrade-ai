@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from brokers.broker.entities import Instrument, BulkHistoricalResult
+from shared.entities.models import Instrument, BulkHistoricalResult
 from brokers.broker.types import Exchange
 from brokers.broker.dhan.domain import (
     DhanError,

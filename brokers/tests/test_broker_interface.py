@@ -44,7 +44,7 @@ class TestInstrument:
     
     def test_create_instrument(self):
         """Can create an Instrument."""
-        from brokers.broker.entities import Instrument
+        from shared.entities.models import Instrument
         from brokers.broker.types import Exchange
         
         inst = Instrument(
@@ -57,7 +57,7 @@ class TestInstrument:
     
     def test_instrument_is_immutable(self):
         """Instrument must be immutable (frozen=True)."""
-        from brokers.broker.entities import Instrument
+        from shared.entities.models import Instrument
         from brokers.broker.types import Exchange
         
         inst = Instrument(symbol="RELIANCE", exchange=Exchange.NSE, security_id="2885")
@@ -66,7 +66,7 @@ class TestInstrument:
     
     def test_instrument_is_option(self):
         """is_option() returns correct value."""
-        from brokers.broker.entities import Instrument
+        from shared.entities.models import Instrument
         from brokers.broker.types import Exchange, OptionType
         
         opt = Instrument(
@@ -83,7 +83,7 @@ class TestInstrument:
     
     def test_instrument_is_index(self):
         """is_index() returns correct value."""
-        from brokers.broker.entities import Instrument
+        from shared.entities.models import Instrument
         from brokers.broker.types import Exchange
         
         idx = Instrument(symbol="NIFTY", exchange=Exchange.INDEX, security_id="999920000")
@@ -98,7 +98,7 @@ class TestQuote:
     
     def test_create_quote(self):
         """Can create a Quote."""
-        from brokers.broker.entities import Quote, Instrument
+        from shared.entities.models import Quote, Instrument
         from brokers.broker.types import Exchange
         
         inst = Instrument(symbol="RELIANCE", exchange=Exchange.NSE, security_id="2885")
@@ -121,7 +121,7 @@ class TestTick:
     
     def test_create_tick(self):
         """Can create a Tick."""
-        from brokers.broker.entities import Tick, Instrument
+        from shared.entities.models import Tick, Instrument
         from brokers.broker.types import Exchange
         
         inst = Instrument(symbol="RELIANCE", exchange=Exchange.NSE, security_id="2885")
@@ -134,7 +134,7 @@ class TestOrder:
     
     def test_create_order(self):
         """Can create an Order."""
-        from brokers.broker.entities import Order, Instrument
+        from shared.entities.models import Order, Instrument
         from brokers.broker.types import Exchange, OrderSide, OrderType
         
         inst = Instrument(symbol="RELIANCE", exchange=Exchange.NSE, security_id="2885")

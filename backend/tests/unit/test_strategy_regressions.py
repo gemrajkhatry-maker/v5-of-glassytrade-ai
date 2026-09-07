@@ -90,7 +90,7 @@ def test_dhan_adapter_instrument_detection_anchored():
     from backend.app.infrastructure.adapters.dhan_adapter import (
         DhanMarketDataAdapter,
     )
-    from brokers.broker.entities import OptionType
+    from shared.entities.models import OptionType
 
     adapter = DhanMarketDataAdapter(
         symbols=["NIFTY"], client_id="test", access_token="token"

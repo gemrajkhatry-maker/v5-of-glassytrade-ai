@@ -5,7 +5,7 @@ Base Dhan Service - Shared dependencies and helpers for all Dhan services.
 import asyncio
 from typing import Dict, List, Optional, Tuple
 
-from brokers.broker.entities import Instrument
+from shared.entities.models import Instrument
 from brokers.broker.types import Exchange
 
 from brokers.broker.dhan.ports import (

@@ -40,7 +40,7 @@ from brokers.broker.dhan.ports import (
 )
 
 # Broker-agnostic imports for tests
-from brokers.broker.entities import Instrument
+from shared.entities.models import Instrument
 from brokers.broker.types import Exchange
 
 from brokers.broker.dhan.domain import (

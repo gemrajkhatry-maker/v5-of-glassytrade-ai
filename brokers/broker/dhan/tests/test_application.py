@@ -27,7 +27,7 @@ from brokers.broker.dhan.domain import (
     DepthLevel,
 )
 
-from brokers.broker.entities import (
+from shared.entities.models import (
     Instrument,
     Quote,
     Tick,
@@ -831,7 +831,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from brokers.broker.dhan.application.services.streaming_service import StreamingService
 from brokers.broker.dhan.domain.errors import DhanFeedNotSupportedError
-from brokers.broker.entities import Instrument, MarketDepth, DepthLevel as BrokerDepthLevel
+from shared.entities.models import Instrument, MarketDepth, DepthLevel as BrokerDepthLevel
 from brokers.broker.types import Exchange
 
 
