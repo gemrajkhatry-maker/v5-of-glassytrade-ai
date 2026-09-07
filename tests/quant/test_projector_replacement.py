@@ -39,7 +39,6 @@ class TestFoldIsSoleAuthority:
         assert len(ws_snapshot["portfolio"]["positions"]) == 1
 
     def test_state_projector_removed(self):
-        """StateProjector has been removed — importing and calling it raises."""
-        from quant.state import StateProjector
-        with pytest.raises(RuntimeError, match="StateProjector has been removed"):
-            StateProjector()
+        """StateProjector has been removed — importing it raises ImportError."""
+        with pytest.raises(ImportError):
+            from quant.state import StateProjector
