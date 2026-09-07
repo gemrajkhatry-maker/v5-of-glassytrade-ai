@@ -5,6 +5,7 @@ from quant.bars import Bar
 from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.enums import MarketState
 from quant.contracts.value_objects import AMTResult
+from quant.decision.data_quality import DataQuality
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,9 @@ class DecisionContext:
     # intended direction from a higher-level agent (may be None -> gates decide)
     agent_direction: Optional[str] = None   # "LONG" | "SHORT" | "FLAT" | None
     agent_probability: float = 0.0
+    # Provenance of order-flow evidence; unknown quality must not pass a
+    # high-conviction entry gate.
+    data_quality: DataQuality | None = None
     setup_evidence: Any | None = None
     # AMT market state (Fabio 2-state model) from the AMT analyzer. The
     # Triple-A edge (absorption → accumulation → VWAP breakout) fires in both

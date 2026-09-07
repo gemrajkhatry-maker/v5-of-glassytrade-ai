@@ -36,6 +36,8 @@ class CoordinatorLike(Protocol):
     def crashed_engines(self) -> list[str]: ...
     def quarantined_positions(self) -> set[str]: ...
 
+    def unresolved_startup_issues(self) -> set[str]: ...
+
 
 def readiness_status(
     coordinator: Any,
@@ -93,4 +95,18 @@ def readiness_status(
         return ReadinessStatus.DEGRADED_NO_NEW_ENTRIES, details
 
     details["quarantined"] = "ok"
+
+    # Unknown/inflight orders and failed recovery are NOT safe to trade
+    # through. Coordinators that do not expose this check remain compatible
+    # with lightweight test doubles.
+    try:
+        issues_fn = getattr(coordinator, "unresolved_startup_issues", None)
+        issues = set(issues_fn() if callable(issues_fn) else [])
+    except Exception as exc:
+        details["startup_recovery"] = f"error: {exc}"
+        return ReadinessStatus.NOT_READY, details
+    if issues:
+        details["startup_recovery"] = f"not_ready: {sorted(issues)}"
+        return ReadinessStatus.NOT_READY, details
+    details["startup_recovery"] = "ok"
     return ReadinessStatus.READY, details

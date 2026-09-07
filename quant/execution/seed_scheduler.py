@@ -15,6 +15,8 @@ This module provides:
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 import random
 import threading
@@ -146,6 +148,17 @@ class HistorySeedScheduler:
 
             try:
                 result = self._history_source.fetch_history(symbol, interval, limit)
+                if inspect.isawaitable(result):
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+                    if loop and loop.is_running():
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                            result = executor.submit(asyncio.run, result).result()
+                    else:
+                        result = asyncio.run(result)
                 if result is not None and len(result) > 0:
                     return list(result)
                 if result is not None:

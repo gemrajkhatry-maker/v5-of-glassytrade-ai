@@ -45,7 +45,14 @@ from quant.brokers.live_gateway import LiveGateway
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.enums import MarketState
-from quant.contracts.instrument_registry import DEFAULT_REGISTRY, is_futures_contract, root_token
+from quant.contracts.contracts import ContractRef
+from quant.contracts.instrument_registry import (
+    DEFAULT_REGISTRY,
+    is_futures_contract,
+    is_option_contract,
+    root_token,
+)
+from quant.session_gates import parse_contract_expiry
 from quant.contracts.market_calendar import is_trading_day
 from quant.contracts.timezones import IST, MCX_SESSION_CLOSE, NSE_SESSION_CLOSE
 from quant.events import BarClosed
@@ -364,6 +371,7 @@ class QuantCoordinator:
         # Paper position reconciliation: classify persisted positions against
         # the active universe so stale contracts are quarantined, not restored.
         self._quarantined: set[str] = set()
+        self._unresolved_startup: set[str] = set()
         self._reconciliation_result: ReconciliationResult | None = None
         # Shared history seed scheduler: one per coordinator so all engines
         # serialize through one rate-limited fetch path (prevents DH-3001).
@@ -432,6 +440,15 @@ class QuantCoordinator:
             self._reconciliation_result = PaperPositionReconciler(
                 self._storage, active_universe=set(symbols)
             ).reconcile()
+            self._unresolved_startup = set()
+            if self._storage is not None and hasattr(self._storage, "load_inflight_orders"):
+                try:
+                    self._unresolved_startup = {
+                        str(row.get("order_id") or "unknown-order")
+                        for row in (self._storage.load_inflight_orders() or [])
+                    }
+                except Exception:
+                    self._unresolved_startup = {"order-storage-unavailable"}
             self._quarantined = {
                 q.symbol for q in self._reconciliation_result.quarantined
             }
@@ -802,6 +819,10 @@ class QuantCoordinator:
                 sym for sym, eng in self._engines.items()
                 if getattr(eng, "_crashed", False)
             )
+
+    def unresolved_startup_issues(self) -> set[str]:
+        """Orders/recovery conditions that must be resolved before trading."""
+        return set(self._unresolved_startup)
 
     def quarantined_positions(self) -> set[str]:
         """Symbols of persisted paper positions not in the active universe.
@@ -1269,6 +1290,70 @@ class QuantCoordinator:
         """NSE/MCX session clock for *symbol* — never the coordinator's mode flag."""
         return DEFAULT_REGISTRY.resolve(symbol).session_profile
 
+    def _cost_profile_for(self, symbol: str) -> dict | None:
+        """Return the validated paper cost profile for a contract root."""
+        profiles = self.config.get("cost_profiles") or {}
+        root = _canonical_root(symbol)
+        profile = profiles.get(root) or profiles.get(str(root).upper())
+        if profile is None:
+            profile = self.config.get("cost_profile")
+        return dict(profile) if profile is not None else None
+
+    def _contract_for(self, symbol: str) -> ContractRef:
+        """Build the broker-neutral identity used by paper execution.
+
+        Option expiry/strike come from the scanned contract symbol. If a
+        provider has richer metadata it may supply an explicit expiry through
+        ``contract_expiries``; missing option identity is a startup error.
+        """
+        spec = DEFAULT_REGISTRY.resolve(symbol)
+        expiry = parse_contract_expiry(symbol)
+        expiry_text = expiry.isoformat() if expiry is not None else ""
+        configured_expiry = (self.config.get("contract_expiries") or {}).get(symbol)
+        expiry_text = str(configured_expiry or expiry_text).strip()
+        option = is_option_contract(symbol)
+        strike = extract_option_strike(symbol) if option else None
+        option_type = ""
+        upper = str(symbol).upper().strip()
+        if option:
+            if upper.endswith(("CALL", "CE", "-CE")):
+                option_type = "CE"
+            elif upper.endswith(("PUT", "PE", "-PE")):
+                option_type = "PE"
+            if strike is None or not expiry_text or not option_type:
+                raise ValueError(
+                    f"missing option contract metadata for {symbol!r}: "
+                    "expiry, strike, and option type are required"
+                )
+        elif not expiry_text:
+            # Futures are observer-only in options strategies. They still need
+            # an identity for diagnostics, but must never reach a paper OMS
+            # while execution_enabled=False. A configured expiry is required
+            # if a future is ever made executable.
+            expiry_text = str((self.config.get("contract_expiries") or {}).get(symbol) or "")
+            if not expiry_text:
+                raise ValueError(
+                    f"missing futures contract expiry for executable symbol {symbol!r}"
+                )
+        return ContractRef(
+            symbol=str(symbol),
+            exchange=spec.dhan_exchange,
+            expiry=expiry_text,
+            lot_size=int(self._resolve_lot_size(symbol)),
+            tick_size=float(self._resolve_tick_size(symbol)),
+            strike=strike,
+            option_type=option_type,
+        )
+
+    def _quote_provider_for(self, engine):
+        """Read the latest executable quote from the engine's canonical depth."""
+        def quote():
+            book = getattr(engine, "_last_depth", None)
+            if book is None or not book.bids or not book.asks:
+                return None
+            return float(book.bids[0].price), float(book.asks[0].price)
+        return quote
+
     def _resolve_tick_size(self, symbol: str) -> float:
         """InstrumentRegistry tick. Unknown roots raise — never 0.05."""
         return DEFAULT_REGISTRY.resolve(symbol).tick_size
@@ -1443,9 +1528,10 @@ class QuantCoordinator:
         root_upper = _canonical_root(symbol).upper()
         if root_upper in self._gex_by_root and hasattr(engine, "_amt_engine"):
             engine._amt_engine.set_gex(self._gex_by_root[root_upper])
-        # OMS injection: live_oms_enabled + broker → LiveOMS, else PaperOMS.
-        # The engine default is PaperOMS (set in QuantEngine.__init__); we
-        # override only when the coordinator has a wired broker.
+        # OMS composition is explicit at the coordinator boundary. Live mode
+        # receives LiveOMS; every paper engine receives the cost-aware factory
+        # with a validated ContractRef. QuantEngine's direct-construction
+        # fallback remains test/replay-only and is not reachable here.
         if self.config.get("live_oms_enabled") and self.broker is not None:
             portfolio = self._portfolio
             lot_size = self._resolve_lot_size(symbol)
@@ -1459,6 +1545,25 @@ class QuantCoordinator:
             logger.warning(
                 "LIVE MODE: %s using LiveOMS — orders route to Dhan exchange",
                 symbol,
+            )
+        elif not execution_enabled:
+            # Underlying observer engines never submit orders, so no OMS is
+            # needed. Keep the explicit non-execution boundary rather than
+            # inventing an invalid paper contract for the observer.
+            pass
+        else:
+            from quant.execution.oms_factory import make_paper_oms
+            contract = self._contract_for(symbol)
+            paper_oms = make_paper_oms(
+                contract=contract,
+                cost_profile=self._cost_profile_for(symbol),
+            )
+            paper_oms.set_quote_provider(self._quote_provider_for(engine))
+            engine._oms = paper_oms
+            logger.info(
+                "PAPER MODE: %s using bid_ask PaperExecutionSimulator "
+                "contract=%s costs=enabled",
+                symbol, contract.instrument_key if hasattr(contract, "instrument_key") else contract.symbol,
             )
         # Always attach storage (position persistence, restart book).
         if self._storage is not None:

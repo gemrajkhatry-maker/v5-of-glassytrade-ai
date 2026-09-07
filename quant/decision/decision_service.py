@@ -18,6 +18,7 @@ from quant.decision.pipeline import GatePipeline
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import Signal, SignalBuilder, is_min_stop_met
 from quant.decision.va_fade import detect_va_fade
+from quant.decision.data_quality import conviction_allowed
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,18 @@ class DecisionService:
         # emitting any DecisionProduced, leaving stale ENTER signals visible.)
         # allow_positioned=True (thesis-flip exit check) bypasses this — a
         # halt gates ENTRIES, never the opposing-signal EXIT.
+        if (
+            not allow_positioned
+            and ctx.data_quality is not None
+            and ctx.agent_probability >= 0.9
+            and not conviction_allowed(ctx.data_quality)
+        ):
+            return QuantDecision(
+                approved=False, signal=None, reason="DATA_QUALITY_BLOCKED", phase="",
+                gate_results=(), block_reasons=("Data quality is unavailable or inferred",),
+                model_label="",
+            )
+
         if ctx.risk_halted and not allow_positioned:
             return QuantDecision(
                 approved=False,

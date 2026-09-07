@@ -94,6 +94,16 @@ class IStorage(ABC):
     def get_recent_trades(self, limit: int = 5) -> list[dict[str, Any]]:
         """Retrieve the most recent closed trades (newest first)."""
 
+    def save_fill(self, fill: dict[str, Any]) -> None:
+        """Persist one idempotent fill-ledger record."""
+        raise NotImplementedError
+
+    def load_fills(
+        self, *, position_id: str | None = None, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Load fill-ledger records in event order."""
+        raise NotImplementedError
+
     @abstractmethod
     def save_position_event(self, event: dict[str, Any]) -> None:
         """Persist an append-only position lifecycle event."""

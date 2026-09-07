@@ -121,6 +121,7 @@ def _parse_symbol(name: str, data: dict) -> SymbolConfig:
         aggression_persistence_bars=data.get("aggression_persistence_bars", 3),
         ml_thresholds=_parse_ml_thresholds(data.get("ml_thresholds", {})),
         cost_profile=CostProfile(
+            fill_mode=str(cp.get("fill_mode", "bid_ask")),
             slippage_bps=cp.get("slippage_bps", 15),
             stt_pct=cp.get("stt_pct", 0.000625),
             exchange_fee_pct=cp.get("exchange_fee_pct", 0.000495),

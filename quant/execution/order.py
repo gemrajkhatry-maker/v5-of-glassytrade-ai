@@ -2,6 +2,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from quant.decision.signal_builder import Signal
+from quant.execution.trade_costs import TradeCosts
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class Position:
     pyramid_level: int = 0     # 0 = base trade, 1 = Pyramid 1, 2 = Pyramid 2
     is_pyramid: bool = False   # True for add-on positions (P1, P2)
     _id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False, repr=False)
+    entry_costs: TradeCosts | None = None  # costs charged by the entry fill
 
     @property
     def id(self) -> str:
@@ -33,7 +35,32 @@ class Fill:
     close_price: float
     close_time: str
     reason: str                 # "SL" | "TP" | "TRAIL" | "TIME" | "MANUAL"
-    pnl: float
+    pnl: float                  # authoritative net P&L for this fill
+    costs: TradeCosts | None = None  # costs charged by the exit fill
+    logical_id: str = ""         # durable idempotency key for this fill
+
+
+def _costs_to_dict(costs: TradeCosts | None) -> dict | None:
+    if costs is None:
+        return None
+    return {
+        "slippage": costs.slippage,
+        "stt": costs.stt,
+        "exchange_fee": costs.exchange_fee,
+        "brokerage": costs.brokerage,
+        "gst": costs.gst,
+        "sebi_charges": costs.sebi_charges,
+        "total": costs.total,
+    }
+
+
+def _costs_from_dict(value) -> TradeCosts | None:
+    if not value:
+        return None
+    return TradeCosts(**{
+        key: float(value.get(key, 0.0))
+        for key in ("slippage", "stt", "exchange_fee", "brokerage", "gst", "sebi_charges", "total")
+    })
 
 
 def position_to_row(symbol: str, position: Position) -> dict:
@@ -57,6 +84,7 @@ def position_to_row(symbol: str, position: Position) -> dict:
         "quantity": position.order.quantity,
         "pyramid_level": position.pyramid_level,
         "is_pyramid": position.is_pyramid,
+        "entry_costs": _costs_to_dict(position.entry_costs),
     }
 
 
@@ -81,5 +109,6 @@ def row_to_position(row: dict) -> Position:
         size=size,
         pyramid_level=int(row.get("pyramid_level") or 0),
         is_pyramid=bool(row.get("is_pyramid") or False),
+        entry_costs=_costs_from_dict(row.get("entry_costs")),
         _id=str(row.get("id") or ""),
     )

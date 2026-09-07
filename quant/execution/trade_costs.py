@@ -17,6 +17,19 @@ class TradeCosts:
     sebi_charges: float
     total: float
 
+    def prorated(self, fraction: float) -> "TradeCosts":
+        """Allocate this fill's costs to a partial quantity."""
+        fraction = max(0.0, min(1.0, float(fraction)))
+        return TradeCosts(
+            slippage=self.slippage * fraction,
+            stt=self.stt * fraction,
+            exchange_fee=self.exchange_fee * fraction,
+            brokerage=self.brokerage * fraction,
+            gst=self.gst * fraction,
+            sebi_charges=self.sebi_charges * fraction,
+            total=self.total * fraction,
+        )
+
     def breakdown_str(self) -> str:
         return (
             f"Slippage={self.slippage:.2f} "

@@ -15,6 +15,10 @@ from typing import FrozenSet
 class CostProfile:
     """Per-symbol cost model for realistic PnL simulation."""
 
+    # Production paper execution must use executable bid/ask prices. The
+    # reference-price mode remains available only to isolated simulator tests
+    # and explicitly named replay fixtures.
+    fill_mode: str = "bid_ask"
     slippage_bps: float = 15.0
     stt_pct: float = 0.000625
     exchange_fee_pct: float = 0.000495

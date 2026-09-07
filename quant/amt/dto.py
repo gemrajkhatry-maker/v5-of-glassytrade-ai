@@ -48,6 +48,13 @@ def amt_result_to_dto(r) -> dict:
             for ap in r.aggressive_prints
         ],
         "cvdSlope": r.cvd_slope,
+        # Canonical provenance: exact tick footprint when available, otherwise
+        # preserve the analyzer's explicit candle/proxy source.
+        "dataQuality": (
+            "TICK_EXACT" if r.footprints else
+            "CANDLE_DISTRIBUTED" if getattr(r, "cvd_source", "") in ("underlying", "option") else
+            "CANDLE_GAUSSIAN"
+        ),
         "cvdDivergence": r.cvd_divergence,
         "profileShape": r.profile_shape,
         "profileType": r.profile_type,

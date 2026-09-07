@@ -27,15 +27,40 @@ class PaperOMS:
         *,
         simulator: PaperExecutionSimulator | None = None,
         contract: ContractRef | None = None,
+        quote_provider=None,
     ) -> None:
         self._lot_size = lot_size
         self._simulator = simulator
         self._contract = contract
+        self._quote_provider = quote_provider
         self.last_fill: PaperFill | None = None
+
+    def _quote(self) -> tuple[float, float]:
+        """Return the current executable bid/ask, or an invalid quote.
+
+        The production factory configures ``bid_ask`` mode.  Returning zeros
+        here deliberately causes the simulator to reject an order when market
+        depth is absent; it must never silently downgrade to a reference-price
+        fill.
+        """
+        if self._quote_provider is None:
+            return 0.0, 0.0
+        try:
+            quote = self._quote_provider()
+            if quote is None:
+                return 0.0, 0.0
+            bid, ask = quote
+            return float(bid), float(ask)
+        except Exception:
+            return 0.0, 0.0
 
     @property
     def lot_size(self) -> float:
         return self._lot_size
+
+    def set_quote_provider(self, quote_provider) -> None:
+        """Attach the current executable quote source after construction."""
+        self._quote_provider = quote_provider
 
     def submit(self, signal: Signal, quantity: float) -> Position:
         if self._simulator is not None:
@@ -48,6 +73,8 @@ class PaperOMS:
                 side="BUY" if signal.type == "LONG" else "SELL",
                 quantity=int(snap_to_lot(quantity, self._lot_size)),
                 reference_price=signal.entry,
+                bid=self._quote()[0],
+                ask=self._quote()[1],
             )
             self.last_fill = paper_fill
             size = float(paper_fill.filled_quantity)
@@ -57,6 +84,7 @@ class PaperOMS:
                 open_price=paper_fill.fill_price,
                 open_time=signal.timestamp,
                 size=signed,
+                entry_costs=paper_fill.costs,
             )
         size = snap_to_lot(quantity, self._lot_size)
         signed = size if signal.type == "LONG" else -size
@@ -77,16 +105,20 @@ class PaperOMS:
                 side="SELL" if position.size > 0 else "BUY",
                 quantity=int(abs(position.size)),
                 reference_price=price,
+                bid=self._quote()[0],
+                ask=self._quote()[1],
             )
             self.last_fill = paper_fill
             gross = (paper_fill.fill_price - position.open_price) * position.size
-            pnl = gross - paper_fill.costs.total
+            entry_costs = position.entry_costs.total if position.entry_costs is not None else 0.0
+            pnl = gross - entry_costs - paper_fill.costs.total
             closed = Position(
                 order=position.order,
                 open_price=position.open_price,
                 open_time=position.open_time,
                 size=position.size,
                 realized_pnl=pnl,
+                entry_costs=position.entry_costs,
                 pyramid_level=position.pyramid_level,
                 is_pyramid=position.is_pyramid,
                 _id=position.id,
@@ -97,6 +129,8 @@ class PaperOMS:
                 close_time=time,
                 reason=reason,
                 pnl=pnl,
+                costs=paper_fill.costs,
+                logical_id=f"close:{position.id}:{time}:{reason}",
             )
         pnl = (price - position.open_price) * position.size
         # Preserve the original position's _id so close events can be matched
@@ -209,11 +243,16 @@ class PaperOMS:
                 side="SELL" if position.size > 0 else "BUY",
                 quantity=int(abs(closed_size)),
                 reference_price=price,
+                bid=self._quote()[0],
+                ask=self._quote()[1],
             )
             self.last_fill = paper_fill
             close_price = paper_fill.fill_price
+            fraction = abs(closed_size) / max(abs(position.size), 1.0)
+            entry_costs = position.entry_costs.prorated(fraction) if position.entry_costs else None
             partial_pnl = (
                 (close_price - position.open_price) * closed_size
+                - (entry_costs.total if entry_costs else 0.0)
                 - paper_fill.costs.total
             )
         else:
@@ -225,6 +264,7 @@ class PaperOMS:
             open_time=position.open_time,
             size=closed_size,
             realized_pnl=partial_pnl,
+            entry_costs=entry_costs if self._simulator is not None else None,
             pyramid_level=position.pyramid_level,
             is_pyramid=position.is_pyramid,
         )
@@ -234,6 +274,11 @@ class PaperOMS:
             close_time=time,
             reason=reason,
             pnl=partial_pnl,
+            costs=paper_fill.costs if self._simulator is not None else None,
+            logical_id=(
+                f"partial:{position.id}:{time}:{reason}"
+                if self._simulator is not None else ""
+            ),
         )
         # Remaining open position with reduced size — preserve _id so ExitEngine trail/breakeven persists
         remaining = Position(
@@ -243,6 +288,10 @@ class PaperOMS:
             size=remaining_size,
             pyramid_level=position.pyramid_level,
             is_pyramid=position.is_pyramid,
+            entry_costs=(
+                position.entry_costs.prorated(max(0.0, abs(remaining_size) / max(abs(position.size), 1.0)))
+                if self._simulator is not None and position.entry_costs is not None else position.entry_costs
+            ),
             _id=position._id,
         )
         return fill, remaining

@@ -152,6 +152,11 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         "include_futures": include_futures,
         "underlying_priority": _settings.SCANNER_UNDERLYING_PRIORITY,
         "live_oms_enabled": is_live_mode(),
+        # Paper execution consumes the same validated per-root cost profile
+        # that the config loader uses for the selected exchange. Keeping this
+        # mapping at composition time prevents the quant runtime from reading
+        # YAML or inventing brokerage/slippage defaults.
+        "cost_profiles": _coordinator_cost_profiles(config),
         # C2: the configured per-trade risk must reach the engines' SessionRisk.
         # NO silent fallback: the effective value is whatever the loader + live
         # validator settled on (config_models), and boot fails if it is absent.
@@ -198,6 +203,28 @@ def _require_risk_value(config: "Configuration", name: str):
             "no silent risk default."
         )
     return value
+
+
+def _coordinator_cost_profiles(config: "Configuration") -> dict[str, dict]:
+    """Expose validated per-root cost profiles to the quant coordinator."""
+    profiles: dict[str, dict] = {}
+    for exchange in getattr(config, "exchanges", {}).values():
+        for root, symbol_config in getattr(exchange, "symbols", {}).items():
+            profile = getattr(symbol_config, "cost_profile", None)
+            if profile is None:
+                raise ValueError(
+                    f"Refusing to start: cost profile missing for configured root {root!r}"
+                )
+            profiles[str(root).upper()] = {
+                "fill_mode": str(getattr(profile, "fill_mode", "bid_ask")),
+                "slippage_bps": float(profile.slippage_bps),
+                "stt_pct": float(profile.stt_pct),
+                "exchange_fee_pct": float(profile.exchange_fee_pct),
+                "brokerage_per_order": float(profile.brokerage_per_order),
+                "gst_on_brokerage_pct": float(profile.gst_on_brokerage_pct),
+                "sebi_charges_pct": float(profile.sebi_charges_pct),
+            }
+    return profiles
 
 
 def _coordinator_risk_config(config: "Configuration") -> dict:

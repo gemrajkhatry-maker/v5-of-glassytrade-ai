@@ -14,6 +14,7 @@ from quant.decision.context import DecisionContext
 from quant.session_gates import ist_dt, session_allow_entry
 from quant.amt.session.context import get_session_info
 from quant.bars import DEFAULT_INTERVAL_SEC
+from quant.decision.data_quality import normalize_data_quality
 
 logger = logging.getLogger(__name__)
 
@@ -361,6 +362,13 @@ class DecisionContextBuilder:
             consecutive_losses=risk_state.consecutive_losses,
             agent_direction=agent_direction,
             agent_probability=_DETERMINISTIC_CONVICTION,
+            data_quality=(
+                normalize_data_quality(
+                    amt_dto.get("dataQuality") or amt_dto.get("data_quality")
+                )
+                if ("dataQuality" in amt_dto or "data_quality" in amt_dto)
+                else None
+            ),
             setup_evidence=setup_evidence,
             market_state=amt_market_state,
             balance_ratio=float(amt_dto.get("balanceRatio") or 0.0),

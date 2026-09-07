@@ -116,6 +116,20 @@ CREATE TABLE IF NOT EXISTS position_events (
     created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
 
+CREATE TABLE IF NOT EXISTS fill_ledger (
+    fill_id TEXT PRIMARY KEY,
+    order_id TEXT,
+    position_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    fill_price REAL NOT NULL,
+    pnl REAL,
+    event_time TEXT NOT NULL,
+    extra TEXT,
+    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_ticks_symbol_time ON ticks(symbol, time);
 CREATE INDEX IF NOT EXISTS idx_trades_closed_at ON trades(closed_at);
 CREATE INDEX IF NOT EXISTS idx_perf_created ON performance_snapshots(created_at);
@@ -124,6 +138,8 @@ CREATE INDEX IF NOT EXISTS idx_position_events_pos_time ON position_events(posit
 CREATE INDEX IF NOT EXISTS idx_position_events_symbol_time ON position_events(symbol, created_at);
 CREATE INDEX IF NOT EXISTS idx_orders_symbol_status ON orders(symbol, status);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_fill_ledger_position_time ON fill_ledger(position_id, event_time);
+CREATE INDEX IF NOT EXISTS idx_fill_ledger_symbol_time ON fill_ledger(symbol, event_time);
 
 
 CREATE TABLE IF NOT EXISTS npoc_records (
@@ -788,6 +804,58 @@ class SQLiteStorageAdapter(IStorage):
                 (limit,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def save_fill(self, fill: dict[str, Any]) -> None:
+        """Persist one fill exactly once using its durable logical fill ID."""
+        fill_id = str(fill.get("fill_id") or "").strip()
+        if not fill_id:
+            raise ValueError("fill_id is required for fill-ledger persistence")
+        self._execute_write(
+            "INSERT OR IGNORE INTO fill_ledger "
+            "(fill_id, order_id, position_id, symbol, side, quantity, fill_price, pnl, event_time, extra) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                fill_id,
+                str(fill.get("order_id") or ""),
+                str(fill.get("position_id") or ""),
+                str(fill.get("symbol") or ""),
+                str(fill.get("side") or ""),
+                to_float(fill.get("quantity")),
+                to_float(fill.get("fill_price")),
+                to_float(fill.get("pnl")),
+                str(fill.get("event_time") or ""),
+                json.dumps({
+                    key: value for key, value in fill.items()
+                    if key not in {
+                        "fill_id", "order_id", "position_id", "symbol", "side",
+                        "quantity", "fill_price", "pnl", "event_time",
+                    }
+                }),
+            ),
+        )
+
+    def load_fills(
+        self, *, position_id: str | None = None, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Load the append-only fill ledger in event order."""
+        with self._lock:
+            query = "SELECT * FROM fill_ledger WHERE 1=1"
+            params: list[Any] = []
+            if position_id:
+                query += " AND position_id = ?"
+                params.append(position_id)
+            if symbol:
+                query += " AND symbol = ?"
+                params.append(symbol)
+            query += " ORDER BY event_time ASC, created_at ASC"
+            rows = self._conn.execute(query, params).fetchall()
+            result = []
+            for row in rows:
+                data = dict(row)
+                extra = json.loads(data.pop("extra", "{}") or "{}")
+                data.update(extra)
+                result.append(data)
+            return result
 
     def save_position_event(self, event: dict[str, Any]) -> None:
         with self._lock:

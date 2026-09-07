@@ -34,11 +34,26 @@ class PaperFill:
 class PaperExecutionSimulator:
     """Idempotent paper fills with explicit execution mode."""
 
-    def __init__(self, *, fill_mode: str = "instant_mid", slippage_bps: float = 15.0) -> None:
+    def __init__(
+        self,
+        *,
+        fill_mode: str = "instant_mid",
+        slippage_bps: float = 15.0,
+        stt_pct: float = 0.000625,
+        exchange_fee_pct: float = 0.000495,
+        brokerage_per_order: float = 20.0,
+        gst_pct: float = 0.18,
+        sebi_pct: float = 0.000001,
+    ) -> None:
         if fill_mode not in {"instant_mid", "bid_ask"}:
             raise ValueError(f"unsupported paper fill mode: {fill_mode}")
         self.fill_mode = fill_mode
         self.slippage_bps = float(slippage_bps)
+        self._stt_pct = float(stt_pct)
+        self._exchange_fee_pct = float(exchange_fee_pct)
+        self._brokerage_per_order = float(brokerage_per_order)
+        self._gst_pct = float(gst_pct)
+        self._sebi_pct = float(sebi_pct)
         self._resolver = PaperContractResolver()
         self._fills: dict[str, PaperFill] = {}
 
@@ -141,6 +156,11 @@ class PaperExecutionSimulator:
             notional=notional,
             slippage_bps=self.slippage_bps,
             is_sell=side == "SELL",
+            stt_pct=self._stt_pct,
+            exchange_fee_pct=self._exchange_fee_pct,
+            brokerage_per_order=self._brokerage_per_order,
+            gst_pct=self._gst_pct,
+            sebi_pct=self._sebi_pct,
         )
         cash_flow = -notional if side == "BUY" else notional
 

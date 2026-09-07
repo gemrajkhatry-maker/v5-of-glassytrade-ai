@@ -735,12 +735,21 @@ class EventStore:
         from quant.decision.signal_builder import Signal
         from quant.execution.order import Fill, Order, Position
         from quant.execution.risk import RiskState
+        from quant.execution.trade_costs import TradeCosts
         from quant.state_machine import Bar, PositionState
 
         event_type = event_dict.get("event_type", "")
         payload = event_dict.get("payload", {})
         symbol = event_dict.get("symbol", "")
         time = event_dict.get("time", "")
+
+        def _decode_costs(data):
+            if not data:
+                return None
+            return TradeCosts(**{
+                key: float(data.get(key, 0.0))
+                for key in ("slippage", "stt", "exchange_fee", "brokerage", "gst", "sebi_charges", "total")
+            })
 
         def _decode_signal(data: dict) -> Signal:
             return Signal(
@@ -784,6 +793,7 @@ class EventStore:
                     pyramid_level=int(data.get("pyramid_level") or 0),
                     is_pyramid=bool(data.get("is_pyramid") or False),
                     _id=str(data.get("_id") or data.get("id") or ""),
+                    entry_costs=_decode_costs(data.get("entry_costs")),
                 )
             return PositionState(
                 id=str(data.get("id") or ""),
@@ -804,6 +814,8 @@ class EventStore:
                 close_time=str(data.get("close_time") or ""),
                 reason=str(data.get("reason") or ""),
                 pnl=float(data.get("pnl") or 0.0),
+                costs=_decode_costs(data.get("costs")),
+                logical_id=str(data.get("logical_id") or ""),
             )
 
         if event_type == "BarClosed":

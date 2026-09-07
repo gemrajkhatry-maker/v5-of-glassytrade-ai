@@ -695,6 +695,10 @@ class QuantEngine:
     def events(self) -> tuple[Event, ...]:
         return tuple(self._trace)
 
+    @property
+    def live_cache(self) -> LiveQuoteCache:
+        return self._live
+
     # =========================================================================
     # 3. POSITION MANAGEMENT — entries, exits, pyramids, partials
     # =========================================================================
