@@ -14,7 +14,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 from quant.amt.analyzer import AMTAnalyzer
 from quant.amt.dto import amt_result_to_dto
@@ -132,11 +132,13 @@ class AMTEngine:
         get_depth: Callable[[], object | None] | None = None,
         get_risk_pnl: Callable[[], float] | None = None,
         interval_seconds: int = 60,
+        seed_scheduler: Any = None,
     ) -> None:
         self.symbol = symbol
         self._market = market
         self._session_levels = session_levels
         self._history_source = history_source
+        self._seed_scheduler = seed_scheduler
         self._underlying_fn = underlying_fn or (lambda: "NIFTY")
         self._get_depth = get_depth or (lambda: None)
         self._get_risk_pnl = get_risk_pnl or (lambda: 0.0)
@@ -159,6 +161,9 @@ class AMTEngine:
         self._last_amt_dto: dict | None = None
         self._last_underlying_close: float = 0.0
         self._warm_bars: int = 0
+        # Seed status: NOT_STARTED → SEEDING → READY | DEGRADED_RATE_LIMIT | DEGRADED_EMPTY | FAILED
+        from quant.execution.seed_scheduler import SeedStatus
+        self._seed_status: SeedStatus = SeedStatus.NOT_STARTED
         self._gex: object | None = None
         self._amt_fail_logged: bool = False
 
@@ -216,19 +221,41 @@ class AMTEngine:
         """Best-effort: seed the AMT candle ring from REST history.
 
         Synchronous so spawn cannot start live bars before today's session
-        profile exists. Staggered via _reserve_seed_slot to respect broker
-        rate limits.
+        profile exists. Uses the shared HistorySeedScheduler when available
+        to respect broker rate limits (DH-3001).
         """
         if self._history_source is None:
             return
 
+        from quant.execution.seed_scheduler import SeedStatus
+
+        self._seed_status = SeedStatus.SEEDING
         seed_interval = self._seed_interval_str()
         cache_key = (self.symbol, seed_interval)
         cached = _SEED_CACHE.get(cache_key)
         if cached and (time.monotonic() - cached[0]) < 300.0:
             logger.info("AMT history seed: reusing cached history for %s (%d candles)", self.symbol, len(cached[1]))
             candles = list(cached[1])
+        elif self._seed_scheduler is not None:
+            # Shared scheduler path: rate-limited, cached, deduplicated
+            try:
+                result = self._seed_scheduler.fetch(self.symbol, seed_interval, 500)
+                if result is not None:
+                    candles = list(result)
+                    if candles:
+                        _SEED_CACHE[cache_key] = (time.monotonic(), list(candles))
+                        self._seed_status = SeedStatus.READY
+                    else:
+                        self._seed_status = SeedStatus.DEGRADED_EMPTY
+                else:
+                    self._seed_status = SeedStatus.DEGRADED_RATE_LIMIT
+                    candles = []
+            except Exception as exc:
+                logger.warning("AMT history seed failed for %s: %s", self.symbol, exc)
+                self._seed_status = SeedStatus.FAILED
+                candles = []
         else:
+            # Legacy path: no scheduler (tests/replay)
             _reserve_seed_slot()
             candles: list = []
             for attempt in range(1, _SEED_FETCH_RETRIES + 1):
@@ -249,10 +276,10 @@ class AMTEngine:
                     candles = []
                 if candles:
                     _SEED_CACHE[cache_key] = (time.monotonic(), list(candles))
+                    self._seed_status = SeedStatus.READY
                     break
-                # ponytail: sync [] means no history source, not DH-3001. Only async
-                # empty responses (Dhan swallowed rate-limit) are retried.
                 if not awaitable:
+                    self._seed_status = SeedStatus.DEGRADED_EMPTY
                     break
                 if attempt < _SEED_FETCH_RETRIES:
                     delay = _SEED_FETCH_BASE_DELAY * (
@@ -263,6 +290,8 @@ class AMTEngine:
                         attempt + 1, _SEED_FETCH_RETRIES, self.symbol, delay,
                     )
                     time.sleep(delay)
+            if not candles and self._seed_status == SeedStatus.SEEDING:
+                self._seed_status = SeedStatus.FAILED
         if not candles:
             return
 

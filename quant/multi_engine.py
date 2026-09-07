@@ -342,6 +342,13 @@ class QuantCoordinator:
         # the active universe so stale contracts are quarantined, not restored.
         self._quarantined: set[str] = set()
         self._reconciliation_result: ReconciliationResult | None = None
+        # Shared history seed scheduler: one per coordinator so all engines
+        # serialize through one rate-limited fetch path (prevents DH-3001).
+        from quant.execution.seed_scheduler import HistorySeedScheduler
+        self._seed_scheduler = HistorySeedScheduler(
+            market_data,
+            min_interval_sec=float(os.environ.get("GLASSYTRADE_SEED_INTERVAL_SEC", "0.5")),
+        )
         # Serializes LIFECYCLE TRANSITIONS (start/rescan/switch/stop). These
         # compose multiple steps over the shared dicts + threads above — a
         # dict-level lock cannot close the check-then-act window between them
@@ -1395,6 +1402,7 @@ class QuantCoordinator:
             max_consecutive_losses=int(self.config.get("max_consecutive_losses", 3)),
             cooldown_minutes=int(self.config.get("cooldown_minutes", 15)),
             execution_enabled=execution_enabled,
+            seed_scheduler=self._seed_scheduler,
         )
         if advisor is not None:
             # Route advisor emissions through the engine's own bus exactly as

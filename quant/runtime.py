@@ -139,6 +139,7 @@ class QuantEngine:
         max_daily_loss_pct: float = 0.02,
         max_consecutive_losses: int = 3,
         execution_enabled: bool = True,
+        seed_scheduler=None,
     ) -> None:
         self._gateway = gateway
         self._underlying_gateway = underlying_gateway
@@ -224,6 +225,7 @@ class QuantEngine:
                 get_depth=lambda: self._last_depth,
                 get_risk_pnl=lambda: self._risk.state().daily_pnl if hasattr(self, '_risk') else 0.0,
                 interval_seconds=interval_seconds,
+                seed_scheduler=seed_scheduler,
             )
             # 2. Option contract AMT engine (option volume profile, POC, VAH, VAL)
             self._option_amt_engine = AMTEngine(
@@ -235,6 +237,7 @@ class QuantEngine:
                 get_depth=lambda: self._last_depth,
                 get_risk_pnl=lambda: self._risk.state().daily_pnl if hasattr(self, '_risk') else 0.0,
                 interval_seconds=interval_seconds,
+                seed_scheduler=seed_scheduler,
             )
         else:
             self._amt_engine = AMTEngine(
@@ -246,6 +249,7 @@ class QuantEngine:
                 get_depth=lambda: self._last_depth,
                 get_risk_pnl=lambda: self._risk.state().daily_pnl if hasattr(self, '_risk') else 0.0,
                 interval_seconds=interval_seconds,
+                seed_scheduler=seed_scheduler,
             )
         self._decision_service = DecisionService(min_rr=min_rr)
         # IOMS port: the engine never constructs its own OMS — the coordinator
