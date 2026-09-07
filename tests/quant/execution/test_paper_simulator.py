@@ -113,3 +113,18 @@ def test_bid_ask_mode_uses_executable_side():
 
     assert buy.fill_price == 100.2
     assert sell.fill_price == 99.8
+
+
+def test_fill_exposes_cost_breakdown_for_authoritative_net_pnl():
+    simulator = PaperExecutionSimulator(slippage_bps=15.0)
+
+    fill = simulator.submit(
+        order_id="paper-costs",
+        contract=_contract(),
+        side="BUY",
+        quantity=65,
+        reference_price=100.0,
+    )
+
+    assert fill.costs.total > 0.0
+    assert fill.net_cash_flow < 0.0

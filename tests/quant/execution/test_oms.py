@@ -1,13 +1,25 @@
 import pytest
 
+from quant.contracts.contracts import ContractRef
 from quant.decision.signal_builder import Signal
 from quant.execution.order import Order, Position
 from quant.execution.oms import PaperOMS
+from quant.execution.paper_simulator import PaperExecutionSimulator
 
 
 def _sig(direction="LONG"):
     return Signal(type=direction, reason="Triple-A", entry=100.0, sl=99.0,
                   tp=102.0, rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
+
+
+def _contract():
+    return ContractRef(
+        symbol="SYM",
+        exchange="NFO",
+        expiry="2026-09-30",
+        lot_size=65,
+        tick_size=0.05,
+    )
 
 
 def test_submit_long():
@@ -81,3 +93,35 @@ def test_lot_size_one_preserves_legacy_behavior():
     f = oms.close(p, price=102.0, time="t1", reason="TP")
     assert p.size == 10
     assert f.pnl == pytest.approx((102 - 100) * 10)
+
+
+def test_paper_oms_can_use_authoritative_simulator_fill():
+    simulator = PaperExecutionSimulator()
+    oms = PaperOMS(
+        lot_size=65,
+        simulator=simulator,
+        contract=_contract(),
+    )
+
+    position = oms.submit(_sig(), quantity=65)
+
+    assert position.open_price == 100.0
+    assert oms.last_fill is not None
+    assert oms.last_fill.filled_quantity == 65
+    assert simulator.fills[0].instrument_key.startswith("NFO:")
+
+
+def test_paper_oms_simulator_close_uses_actual_fill():
+    simulator = PaperExecutionSimulator()
+    oms = PaperOMS(
+        lot_size=65,
+        simulator=simulator,
+        contract=_contract(),
+    )
+    position = oms.submit(_sig(), quantity=65)
+
+    fill = oms.close(position, price=102.0, time="t1", reason="TP")
+
+    assert fill.close_price == 102.0
+    assert fill.pnl == pytest.approx(130.0)
+    assert len(simulator.fills) == 2

@@ -11,6 +11,7 @@ from enum import Enum
 
 from quant.contracts.contracts import ContractRef
 from quant.execution.paper_contracts import PaperContractResolver
+from quant.execution.trade_costs import TradeCosts, compute_trade_costs
 
 
 class PaperOrderStatus(str, Enum):
@@ -26,15 +27,18 @@ class PaperFill:
     filled_quantity: int
     fill_price: float
     status: PaperOrderStatus
+    costs: TradeCosts
+    net_cash_flow: float
 
 
 class PaperExecutionSimulator:
     """Idempotent paper fills with explicit execution mode."""
 
-    def __init__(self, *, fill_mode: str = "instant_mid") -> None:
+    def __init__(self, *, fill_mode: str = "instant_mid", slippage_bps: float = 15.0) -> None:
         if fill_mode not in {"instant_mid", "bid_ask"}:
             raise ValueError(f"unsupported paper fill mode: {fill_mode}")
         self.fill_mode = fill_mode
+        self.slippage_bps = float(slippage_bps)
         self._resolver = PaperContractResolver()
         self._fills: dict[str, PaperFill] = {}
 
@@ -81,6 +85,14 @@ class PaperExecutionSimulator:
         else:
             fill_price = float(reference_price)
 
+        notional = float(fill_price) * int(quantity)
+        costs = compute_trade_costs(
+            notional=notional,
+            slippage_bps=self.slippage_bps,
+            is_sell=side == "SELL",
+        )
+        cash_flow = -notional if side == "BUY" else notional
+
         fill = PaperFill(
             order_id=order_id,
             instrument_key=resolved.instrument_key,
@@ -89,6 +101,8 @@ class PaperExecutionSimulator:
             filled_quantity=int(quantity),
             fill_price=float(fill_price),
             status=PaperOrderStatus.FILLED,
+            costs=costs,
+            net_cash_flow=cash_flow - costs.total,
         )
         self._fills[order_id] = fill
         return fill

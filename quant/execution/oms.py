@@ -2,6 +2,9 @@ from quant.decision.signal_builder import Signal
 from quant.execution.lots import snap_to_lot
 from quant.execution.order import Fill, Order, Position
 from quant.execution.ports import IOMS
+from quant.execution.paper_contracts import PaperContract
+from quant.execution.paper_simulator import PaperExecutionSimulator, PaperFill
+from quant.contracts.contracts import ContractRef
 
 
 class PaperOMS:
@@ -18,14 +21,43 @@ class PaperOMS:
     a live fill would report. Default 1.0 keeps equities/legacy semantics.
     """
 
-    def __init__(self, lot_size: float = 1.0) -> None:
+    def __init__(
+        self,
+        lot_size: float = 1.0,
+        *,
+        simulator: PaperExecutionSimulator | None = None,
+        contract: ContractRef | None = None,
+    ) -> None:
         self._lot_size = lot_size
+        self._simulator = simulator
+        self._contract = contract
+        self.last_fill: PaperFill | None = None
 
     @property
     def lot_size(self) -> float:
         return self._lot_size
 
     def submit(self, signal: Signal, quantity: float) -> Position:
+        if self._simulator is not None:
+            if self._contract is None:
+                raise ValueError("PaperOMS simulator mode requires a ContractRef")
+            order_id = f"entry:{signal.signal_id}"
+            paper_fill = self._simulator.submit(
+                order_id=order_id,
+                contract=self._contract,
+                side="BUY" if signal.type == "LONG" else "SELL",
+                quantity=int(snap_to_lot(quantity, self._lot_size)),
+                reference_price=signal.entry,
+            )
+            self.last_fill = paper_fill
+            size = float(paper_fill.filled_quantity)
+            signed = size if signal.type == "LONG" else -size
+            return Position(
+                order=Order(signal=signal, quantity=size),
+                open_price=paper_fill.fill_price,
+                open_time=signal.timestamp,
+                size=signed,
+            )
         size = snap_to_lot(quantity, self._lot_size)
         signed = size if signal.type == "LONG" else -size
         return Position(
@@ -36,6 +68,35 @@ class PaperOMS:
         )
 
     def close(self, position: Position, price: float, time: str, reason: str) -> Fill:
+        if self._simulator is not None:
+            if self._contract is None:
+                raise ValueError("PaperOMS simulator mode requires a ContractRef")
+            paper_fill = self._simulator.submit(
+                order_id=f"close:{position.id}:{time}:{reason}",
+                contract=self._contract,
+                side="SELL" if position.size > 0 else "BUY",
+                quantity=int(abs(position.size)),
+                reference_price=price,
+            )
+            self.last_fill = paper_fill
+            pnl = (paper_fill.fill_price - position.open_price) * position.size
+            closed = Position(
+                order=position.order,
+                open_price=position.open_price,
+                open_time=position.open_time,
+                size=position.size,
+                realized_pnl=pnl,
+                pyramid_level=position.pyramid_level,
+                is_pyramid=position.is_pyramid,
+                _id=position.id,
+            )
+            return Fill(
+                position=closed,
+                close_price=paper_fill.fill_price,
+                close_time=time,
+                reason=reason,
+                pnl=pnl,
+            )
         pnl = (price - position.open_price) * position.size
         # Preserve the original position's _id so close events can be matched
         # to the state's position (prevents double-close false positives)
