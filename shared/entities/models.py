@@ -146,43 +146,6 @@ class Order:
     fills: List[dict] = field(default_factory=list)
     commission: float = 0.0
 
-    def __init__(self, **kwargs):
-        # Backward compatibility for 'symbol' and 'exchange'
-        symbol = kwargs.pop('symbol', None)
-        exchange = kwargs.pop('exchange', Exchange.NSE)
-        if symbol and 'instrument' not in kwargs:
-            kwargs['instrument'] = Instrument(symbol=symbol, exchange=exchange)
-        
-        # Convert strings to Enums if necessary
-        if 'side' in kwargs and isinstance(kwargs['side'], str):
-            kwargs['side'] = OrderSide(kwargs['side'].upper())
-        if 'order_type' in kwargs and isinstance(kwargs['order_type'], str):
-            kwargs['order_type'] = OrderType(kwargs['order_type'].upper())
-        if 'status' in kwargs and isinstance(kwargs['status'], str):
-            kwargs['status'] = OrderStatus(kwargs['status'].upper())
-
-        # Manually set fields since we're overriding __init__ in a dataclass
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-        
-        # Ensure default values for missing fields
-        if not hasattr(self, 'order_id'):
-            self.order_id = str(uuid.uuid4())
-        if not hasattr(self, 'order_type'):
-            self.order_type = OrderType.MARKET
-        if not hasattr(self, 'status'):
-            self.status = OrderStatus.PENDING
-        if not hasattr(self, 'timestamp'):
-            self.timestamp = datetime.now()
-        if not hasattr(self, 'filled_quantity'):
-            self.filled_quantity = 0
-        if not hasattr(self, 'fills'):
-            self.fills = []
-        if not hasattr(self, 'commission'):
-            self.commission = 0.0
-        if not hasattr(self, 'product_type'):
-            self.product_type = "INTRADAY"
-
 @dataclass(frozen=True)
 class DepthLevel:
     """Single level of market depth."""
@@ -304,15 +267,13 @@ class Position:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __init__(self, **kwargs):
-        # Backward compatibility for 'avg_price'
+        # Backward compatibility for 'avg_price' (Dhan API shape mapping)
         if 'avg_price' in kwargs and 'entry_price' not in kwargs:
             kwargs['entry_price'] = kwargs.pop('avg_price')
         
-        # Manually set fields
         for key, value in kwargs.items():
             setattr(self, key, value)
         
-        # Ensure default values
         if not hasattr(self, 'side'):
             self.side = OrderSide.BUY
         if not hasattr(self, 'id'):
