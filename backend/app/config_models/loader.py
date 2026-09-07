@@ -27,6 +27,7 @@ from app.config_models import (
     ExchangeConfig,
     FeatureFlags,
     MLThresholds,
+    PaperConfig,
     RiskConfig,
     SymbolConfig,
     SystemConfig,
@@ -269,6 +270,14 @@ def load_config(
             kelly_win_prob=risk_data.get("kelly_win_prob", 0.55),
             kelly_win_loss_ratio=risk_data.get("kelly_win_loss_ratio", 2.0),
             bootstrap_trade_count=risk_data.get("bootstrap_trade_count", 30),
+        ),
+        paper=PaperConfig(
+            capital_deployment_pct=float(
+                merged.get("paper", {}).get("capital_deployment_pct", 0.95)
+            ),
+            allow_extreme_risk=bool(
+                merged.get("paper", {}).get("allow_extreme_risk", False)
+            ),
         ),
         flags=flags,
     )

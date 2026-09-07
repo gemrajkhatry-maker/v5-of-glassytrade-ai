@@ -5,6 +5,10 @@ environment: "paper"
 broker_mode: "paper"
 log_level: "INFO"
 
+paper:
+  capital_deployment_pct: 0.95
+  allow_extreme_risk: false
+
 # Enable both exchanges (default to MCX via strategy file)
 exchanges:
   NSE:
@@ -14,10 +18,10 @@ exchanges:
 
 # Realistic risk
 risk:
-  risk_per_trade_pct: 0.95
-  max_daily_loss_pct: 0.50
-  max_consecutive_losses: 5
-  max_trades_per_session: 15
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.02
+  max_consecutive_losses: 3
+  max_trades_per_session: 6
   max_concurrent_positions: 5
 
 # Full realistic cost model
@@ -32,4 +36,3 @@ scanner:
   top_per_underlying: 2
   strikes_around_atm: 2
   expiry_index: 0
-

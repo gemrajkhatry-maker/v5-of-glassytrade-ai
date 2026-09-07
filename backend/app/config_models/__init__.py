@@ -118,6 +118,19 @@ class RiskConfig:
 
 
 @dataclass(frozen=True)
+class PaperConfig:
+    """Paper-only capital deployment policy.
+
+    ``capital_deployment_pct`` controls how much paper capital may be deployed
+    as notional. It is deliberately separate from ``RiskConfig``'s
+    ``risk_per_trade_pct``, which controls loss at the configured stop.
+    """
+
+    capital_deployment_pct: float = 0.95
+    allow_extreme_risk: bool = False
+
+
+@dataclass(frozen=True)
 class FeatureFlags:
     """All feature flags with defaults. Matches spec Phase -1, Component 3."""
 
@@ -165,6 +178,7 @@ class SystemConfig:
     broker_mode: str = "paper"
     exchanges: dict[str, ExchangeConfig] = field(default_factory=dict)
     risk: RiskConfig = field(default_factory=RiskConfig)
+    paper: PaperConfig = field(default_factory=PaperConfig)
     flags: FeatureFlags = field(default_factory=FeatureFlags)
     gap_fill: GapFillConfig = field(default_factory=GapFillConfig)
 

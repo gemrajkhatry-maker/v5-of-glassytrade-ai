@@ -117,6 +117,27 @@ def _validate_risk(config: "SystemConfig") -> tuple[list[str], list[str]]:
         if isinstance(value, bool) or int(value) != value or int(value) < 1:
             errors.append(f"RULE-14: {name} must be a positive integer. Got {value!r}.")
 
+    deployment = float(config.paper.capital_deployment_pct)
+    if not math.isfinite(deployment) or not 0.0 < deployment <= 1.0:
+        errors.append(
+            "RULE-15: paper capital_deployment_pct must be finite and in (0, 1]. "
+            f"Got {config.paper.capital_deployment_pct!r}."
+        )
+
+    if config.is_live() and config.paper.allow_extreme_risk:
+        errors.append("RULE-15: live mode cannot enable paper allow_extreme_risk.")
+
+    if (
+        config.is_paper()
+        and risk.risk_per_trade_pct >= 0.05
+        and not config.paper.allow_extreme_risk
+    ):
+        errors.append(
+            "RULE-15: paper risk_per_trade_pct >= 0.05 requires "
+            "paper.allow_extreme_risk=true; use capital_deployment_pct for "
+            "95% paper sizing."
+        )
+
     if config.is_live():
         if risk.risk_per_trade_pct > 0.02:
             errors.append(
