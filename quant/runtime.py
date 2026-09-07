@@ -135,6 +135,7 @@ class QuantEngine:
         max_trades_per_session: int = 6,
         advisor=None,
         risk_per_trade_pct: float | None = None,
+        capital_deployment_pct: float | None = None,
         max_daily_loss_pct: float = 0.02,
         max_consecutive_losses: int = 3,
         execution_enabled: bool = True,
@@ -284,6 +285,7 @@ class QuantEngine:
             symbol=self.symbol,
             portfolio_risk=self._portfolio_risk,
             max_trades_per_session=max_trades_per_session,
+            capital_deployment_pct=capital_deployment_pct,
             max_daily_loss_pct=max_daily_loss_pct,
             max_consecutive_losses=max_consecutive_losses,
             base_risk_pct=base_risk,
@@ -1587,4 +1589,3 @@ class QuantEngine:
                 for a in depth.get("asks", [])
             ),
         )
-

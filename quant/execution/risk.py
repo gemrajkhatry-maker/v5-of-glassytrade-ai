@@ -35,6 +35,7 @@ class SessionRisk:
                  max_daily_loss_pct: float = 0.02,       # 2% default max daily loss
                  max_consecutive_losses: int = 3,
                  max_trades_per_session: int = 6,
+                 capital_deployment_pct: float | None = None,
                  *,
                  storage: Any | None = None,
                  symbol: str = "",
@@ -50,6 +51,9 @@ class SessionRisk:
         self._max_daily_loss_pct = max_daily_loss_pct
         self._max_consecutive_losses = max_consecutive_losses
         self._max_trades_per_session = max_trades_per_session
+        self._capital_deployment_pct = (
+            None if capital_deployment_pct is None else float(capital_deployment_pct)
+        )
         self._daily_pnl = 0.0
         self._consecutive_losses = 0
         self._consecutive_wins = 0
@@ -292,11 +296,21 @@ class SessionRisk:
             if lot_size and lot_size > 1.0:
                 loss_per_lot = loss_per_unit * lot_size
                 lots = int(risk_amount // loss_per_lot) if loss_per_lot > 0 else 0
+                if self._capital_deployment_pct is not None:
+                    deployment_capital = max(
+                        0.0, sizing_equity * self._capital_deployment_pct
+                    )
+                    deployment_lots = int(
+                        deployment_capital // (entry * lot_size)
+                    ) if entry > 0 else 0
+                    lots = min(lots, deployment_lots)
                 if max_lots is not None and max_lots > 0:
                     lots = min(lots, max_lots)
                 return float(lots * lot_size)
             else:
                 qty = risk_amount / loss_per_unit
+                if self._capital_deployment_pct is not None and entry > 0:
+                    qty = min(qty, (sizing_equity * self._capital_deployment_pct) / entry)
                 if max_lots is not None and max_lots > 0:
                     qty = min(qty, float(max_lots))
                 return qty
@@ -381,4 +395,3 @@ class SessionRisk:
             0.30 * abs(self._daily_pnl) / self._equity,   # ≤30% of session profit
         ) if self._equity > 0 else 0.0
         return min(base + cushion_bonus, 0.005)           # hard ceiling 0.50%
-

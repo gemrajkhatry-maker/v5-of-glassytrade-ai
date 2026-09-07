@@ -1349,6 +1349,11 @@ class QuantCoordinator:
             max_trades_per_session=int(self.config.get("max_trades_per_session", 6)),
             advisor=advisor,
             risk_per_trade_pct=float(self.config.get("risk_per_trade_pct", 0.005)),
+            capital_deployment_pct=(
+                float(self.config["capital_deployment_pct"])
+                if "capital_deployment_pct" in self.config
+                else None
+            ),
             max_daily_loss_pct=float(self.config.get("max_daily_loss_pct", 0.02)),
             max_consecutive_losses=int(self.config.get("max_consecutive_losses", 3)),
             cooldown_minutes=int(self.config.get("cooldown_minutes", 15)),

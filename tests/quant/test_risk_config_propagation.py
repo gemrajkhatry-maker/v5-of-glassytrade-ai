@@ -22,3 +22,13 @@ def test_quant_engine_passes_all_session_limits_to_risk():
     assert engine._risk._max_daily_loss_pct == 0.01
     assert engine._risk._max_consecutive_losses == 2
     assert engine._risk._max_trades_per_session == 11
+
+
+def test_quant_engine_passes_paper_capital_deployment_to_risk():
+    engine = QuantEngine(
+        _Gateway(),
+        "TEST",
+        capital_deployment_pct=0.95,
+    )
+
+    assert engine._risk._capital_deployment_pct == 0.95

@@ -41,6 +41,33 @@ def test_position_size_risk_based():
     qty = r.position_size(entry=100.0, sl=99.0)
     assert qty == pytest.approx(250.0)
 
+
+def test_paper_capital_deployment_is_a_notional_ceiling():
+    """Deployment policy caps notional without replacing stop-loss risk sizing."""
+    r = SessionRisk(
+        starting_equity=100_000.0,
+        base_risk_pct=0.005,
+        capital_deployment_pct=0.95,
+    )
+
+    qty = r.position_size(entry=100.0, sl=99.0, lot_size=100.0)
+
+    # Conservative Fabio risk tier sizes 2 lots; deployment policy is only
+    # the independent 95% notional ceiling.
+    assert qty == pytest.approx(200.0)
+    assert qty * 100.0 <= 100_000.0 * 0.95
+    assert r.state().risk_per_trade_pct == pytest.approx(0.0025)
+
+
+def test_paper_capital_deployment_does_not_change_stop_risk_tier():
+    r = SessionRisk(
+        starting_equity=100_000.0,
+        base_risk_pct=0.005,
+        capital_deployment_pct=0.95,
+    )
+
+    assert r.state().risk_per_trade_pct == pytest.approx(0.0025)
+
 def test_cushion_tier_progression():
     """Test Fabio's tier escalation: CONSERVATIVE → CUSHION → MOMENTUM."""
     r = SessionRisk(starting_equity=100000.0)

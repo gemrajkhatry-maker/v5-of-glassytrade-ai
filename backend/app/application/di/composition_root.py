@@ -209,9 +209,9 @@ def _coordinator_risk_config(config: "Configuration") -> dict:
     return {
         "max_trades_per_session": int(_require_risk_value(config, "max_trades_per_session")),
         "risk_per_trade_pct": float(_require_risk_value(config, "risk_per_trade_pct")),
+        "capital_deployment_pct": float(config.paper.capital_deployment_pct),
         "max_daily_loss_pct": float(_require_risk_value(config, "max_daily_loss_pct")),
         "max_consecutive_losses": int(_require_risk_value(config, "max_consecutive_losses")),
     }
-
 
 
