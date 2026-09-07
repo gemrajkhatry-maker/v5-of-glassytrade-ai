@@ -3,6 +3,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from quant.contracts.aggregates import INITIAL_CAPITAL
@@ -11,6 +12,22 @@ from quant.contracts.timezones import IST
 logger = logging.getLogger(__name__)
 
 _IST = IST  # canonical — see contracts/timezones
+
+
+class RiskLoadStatus(str, Enum):
+    """Why SessionRisk started in its current state — for telemetry/readiness.
+
+    Previously all load failures collapsed into one warning, so a legitimate new
+    day looked identical to disk corruption or a storage outage. Each cause now
+    has a distinct classification so operators and readiness gates can react
+    correctly.
+    """
+
+    MISSING_INITIALIZED = "MISSING_INITIALIZED"  # No prior key for today — legitimate new session
+    LOADED = "LOADED"                              # Prior state present and valid
+    CORRUPT = "CORRUPT"                            # Prior state present but unparseable or cross-scale
+    STORAGE_ERROR = "STORAGE_ERROR"                # kv_get/kv_set raised — disk/connection failure
+    MEMORY_ONLY = "MEMORY_ONLY"                    # No storage wired — tests/replay
 
 
 def _today() -> str:
@@ -66,16 +83,37 @@ class SessionRisk:
         self._symbol = symbol
         # Always use today's date — never inherit a None date key
         self._date = date if (date and date != "None") else _today()
+        self._load_status: RiskLoadStatus = RiskLoadStatus.MEMORY_ONLY
         self._load()
 
     def _key(self) -> str:
         return f"daily_risk:{self._symbol}:{self._date}"
 
+    @property
+    def load_status(self) -> RiskLoadStatus:
+        """How this session's initial state was established — for telemetry."""
+        return self._load_status
+
     def _load(self) -> None:
         if self._storage is None:
+            self._load_status = RiskLoadStatus.MEMORY_ONLY
             return
+        raw = None
         try:
             raw = self._storage.kv_get(self._key())
+        except Exception as exc:
+            logger.critical(
+                "SessionRisk %s: storage failure reading %r — %s: %s. "
+                "Cannot persist trade outcomes; new entries will be blocked.",
+                self._symbol or "?", self._key(), type(exc).__name__, exc,
+            )
+            self._load_status = RiskLoadStatus.STORAGE_ERROR
+            return
+        if raw is None:
+            # Legitimate new session — no key for today.
+            self._load_status = RiskLoadStatus.MISSING_INITIALIZED
+            return
+        try:
             data = json.loads(raw)
             self._daily_pnl = float(data["daily_pnl"])
             self._consecutive_losses = int(data["consecutive_losses"])
@@ -83,55 +121,63 @@ class SessionRisk:
             self._trades_today = int(data.get("trades_today", 0))
             self._halted = bool(data["halted"])
             self._halt_reason = str(data["halt_reason"])
-            # If previous halt was purely due to lower max_trades limit and we are now under the new limit, unhalt.
-            # A genuine emergency stop with open positions/losses stays halted, but a clean process restart (0 trades, 0 loss) unhalts.
-            if (
-                self._halted
-                and "max trades/session reached" in self._halt_reason
-                and self._trades_today < self._max_trades_per_session
-                and not self._halt_reason.startswith("external")
-                and "emergency" not in self._halt_reason.lower()
-            ):
-                self._halted = False
-                self._halt_reason = ""
-            elif (
-                self._halted
-                and "SIGTERM shutdown" in self._halt_reason
-                and self._daily_pnl > -self._starting_equity * self._max_daily_loss_pct
-                and self._consecutive_losses < self._max_consecutive_losses
-            ):
-                self._halted = False
-                self._halt_reason = ""
-                self._save()
-
-            # Restore equity: starting capital adjusted by daily P&L
-            # Sanity clamp: this system risks 0.5%/trade with a 2% daily-loss
-            # halt, so a legit |daily_pnl| can never approach half the
-            # starting capital. Anything larger is cross-scale corruption
-            # (e.g. futures-priced fills on an option instrument) — reset
-            # instead of poisoning sizing/halts for the rest of the day.
-            if abs(self._daily_pnl) > self._starting_equity * 0.5:
-                logger.error(
-                    "SessionRisk %s: persisted daily_pnl=%.2f exceeds 50%% of "
-                    "starting equity %.2f — treating as corrupt, resetting",
-                    self._symbol or "?", self._daily_pnl, self._starting_equity,
-                )
-                self._daily_pnl = 0.0
-                self._consecutive_losses = 0
-                self._consecutive_wins = 0
-                self._trades_today = 0
-                self._halted = False
-                self._halt_reason = ""
-                # Persist the reset NOW — otherwise the corrupt value sits in
-                # the store until the next trade and any parallel reader
-                # (another engine, a restart) re-inherits it.
-                self._save()
-            self._equity = self._starting_equity + self._daily_pnl
-        except Exception:
-            logger.warning(
-                "SessionRisk %s: failed to load persisted state — starting fresh",
-                self._symbol or "?",
+        except Exception as exc:
+            logger.error(
+                "SessionRisk %s: corrupt persisted state for %r — %s: %s. "
+                "Treating as corrupt for money safety; new entries blocked.",
+                self._symbol or "?", self._key(), type(exc).__name__, exc,
             )
+            self._reset_fresh()
+            self._load_status = RiskLoadStatus.CORRUPT
+            return
+        # If previous halt was purely due to lower max_trades limit and we are now under the new limit, unhalt.
+        # A genuine emergency stop with open positions/losses stays halted, but a clean process restart (0 trades, 0 loss) unhalts.
+        if (
+            self._halted
+            and "max trades/session reached" in self._halt_reason
+            and self._trades_today < self._max_trades_per_session
+            and not self._halt_reason.startswith("external")
+            and "emergency" not in self._halt_reason.lower()
+        ):
+            self._halted = False
+            self._halt_reason = ""
+        elif (
+            self._halted
+            and "SIGTERM shutdown" in self._halt_reason
+            and self._daily_pnl > -self._starting_equity * self._max_daily_loss_pct
+            and self._consecutive_losses < self._max_consecutive_losses
+        ):
+            self._halted = False
+            self._halt_reason = ""
+            self._save()
+
+        # Restore equity: starting capital adjusted by daily P&L
+        # Sanity clamp: this system risks 0.5%/trade with a 2% daily-loss
+        # halt, so a legit |daily_pnl| can never approach half the
+        # starting capital. Anything larger is cross-scale corruption
+        # (e.g. futures-priced fills on an option instrument) — reset
+        # instead of poisoning sizing/halts for the rest of the day.
+        if abs(self._daily_pnl) > self._starting_equity * 0.5:
+            logger.error(
+                "SessionRisk %s: persisted daily_pnl=%.2f exceeds 50%% of "
+                "starting equity %.2f — cross-scale corruption, treating "
+                "as corrupt for money safety.",
+                self._symbol or "?", self._daily_pnl, self._starting_equity,
+            )
+            self._reset_fresh()
+            self._load_status = RiskLoadStatus.CORRUPT
+            return
+        self._equity = self._starting_equity + self._daily_pnl
+        self._load_status = RiskLoadStatus.LOADED
+
+    def _reset_fresh(self) -> None:
+        """Zero all mutable state — used for corrupt-data quarantine."""
+        self._daily_pnl = 0.0
+        self._consecutive_losses = 0
+        self._consecutive_wins = 0
+        self._trades_today = 0
+        self._halted = False
+        self._halt_reason = ""
 
     def _save(self) -> bool:
         """Persist risk state. Returns whether the write reached disk.
@@ -203,6 +249,10 @@ class SessionRisk:
                 return False, self._halt_reason
             if self._trades_today >= self._max_trades_per_session:
                 return False, f"max trades/session reached ({self._max_trades_per_session})"
+            if self._load_status == RiskLoadStatus.STORAGE_ERROR:
+                return False, "storage failure — cannot persist trade outcomes"
+            if self._load_status == RiskLoadStatus.CORRUPT:
+                return False, "corrupt risk state — entries blocked for money safety"
             return True, ""
 
     def halt(self, reason: str) -> None:
