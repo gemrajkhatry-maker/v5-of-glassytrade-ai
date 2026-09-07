@@ -31,6 +31,7 @@ def test_context_to_prompt_schema():
     assert '"market_state": "BALANCED"' in user_text
     assert '"absorption_side": "BUY"' in user_text
     assert '"cvd_slope": 5.5' in user_text
+    assert '"option_delta": null' in user_text
 
 
 def test_extract_llm_json_variants():

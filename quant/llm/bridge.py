@@ -53,7 +53,7 @@ def context_to_prompt(ctx: DecisionContext) -> Tuple[str, str]:
         "absorption_side": ctx.absorption_side or "NONE",
         "profile_shape": ctx.profile_shape or "D",
         "spread": round(ctx.ask - ctx.bid, 2) if (ctx.ask > 0 and ctx.bid > 0) else 0.0,
-        "option_delta": round(ctx.option_delta, 2),
+        "option_delta": round(ctx.option_delta, 2) if ctx.option_delta is not None else None,
         "is_expiry": ctx.is_expiry,
         "stacked_imbalance": ctx.stacked_imbalance_direction or "NONE",
         "position_open": ctx.position_open,
