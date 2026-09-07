@@ -395,6 +395,12 @@ class OptionSelector:
         if option_ltp <= 0:
             logger.warning("[OPTION TRANSLATE] %s: option LTP <= 0, cannot price option signal", option_symbol)
             return None
+        if delta is None or not math.isfinite(float(delta)) or not 0.0 < abs(float(delta)) <= 1.0:
+            logger.warning(
+                "[OPTION TRANSLATE] %s: explicit option Greek delta is required",
+                option_symbol,
+            )
+            return None
 
         # NOTE (re-audit, this session): a "cross-scale contamination" guard
         # here (rejecting when signal.entry is >5x or <0.2x option_ltp) was
@@ -436,7 +442,7 @@ class OptionSelector:
             )
             return None
 
-        eff_delta = max(MIN_EFFECTIVE_DELTA, min(1.0, abs(delta)))
+        eff_delta = max(MIN_EFFECTIVE_DELTA, min(1.0, abs(float(delta))))
         underlying_risk = abs(signal.entry - signal.sl)
         underlying_reward = abs(signal.tp - signal.entry)
         

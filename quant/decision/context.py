@@ -93,7 +93,7 @@ class DecisionContext:
     allow_reversion: bool = True
     is_expiry: bool = False
     profile_shape: str = ""
-    option_delta: float = 0.50
+    option_delta: float | None = None
     contested_bubble_zone: bool = False
     # Stacked footprint imbalance (Fabio volume bubble, audit Gap #2):
     # direction ("BUY"/"SELL"/""), magnitude (consecutive 3:1 levels), and

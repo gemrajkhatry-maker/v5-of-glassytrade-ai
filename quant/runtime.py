@@ -875,7 +875,7 @@ class QuantEngine:
             exec_bar = execution_bar or self._aggregator.current_bar or bar
             opt_ltp = float(exec_bar.close) if exec_bar and exec_bar.close > 0 else 0.0
             if opt_ltp > 0:
-                delta = float(getattr(ctx, "option_delta", 0.50) or 0.50)
+                delta = getattr(ctx, "option_delta", None)
                 selector = OptionSelector()
                 opt_signal = selector.translate_underlying_signal_to_option(
                     signal=decision.signal,

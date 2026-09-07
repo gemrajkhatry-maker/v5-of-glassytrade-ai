@@ -392,10 +392,13 @@ class DecisionContextBuilder:
             allow_reversion=allow_reversion,
             is_expiry=is_expiry,
             profile_shape=str(amt_dto.get("profileShape") or ""),
-            option_delta=float(
-                amt_dto.get("deltaNormalizedOption")
-                or amt_dto.get("optionDelta")
-                or 0.50
+            # deltaNormalizedOption is candle order-flow delta, not an option
+            # Greek. Only a chain-provided optionGreekDelta may reach option
+            # premium stop translation; missing Greeks stay None.
+            option_delta=(
+                float(amt_dto["optionGreekDelta"])
+                if amt_dto.get("optionGreekDelta") is not None
+                else None
             ),
             contested_bubble_zone=bool(amt_dto.get("contestedZone") or False),
             stacked_imbalance_direction=_si_dir,
