@@ -289,13 +289,3 @@ class LiveQuoteCache:
                 "depth": None,
             }
         return self._state[symbol]
-
-
-def StateProjector(*args, **kwargs):
-    """Removed — use EventStore.fold() + project_state() for state,
-    LiveQuoteCache for per-tick live quotes."""
-    raise RuntimeError(
-        "StateProjector has been removed. Use EventStore.fold() + "
-        "project_state() for position/portfolio state, or LiveQuoteCache "
-        "for per-tick live quotes (ltp/oi/depth/forming candle)."
-    )

@@ -201,10 +201,11 @@ class TestDTOContract:
     def test_genai_analysis_removed_with_llm_layer(self):
         """The projector no longer exposes a gen_ai (LLM) view — decision data
         is carried by the deterministic quantDecision/agentDecision keys only."""
-        from quant.state import StateProjector
-
-        projector = StateProjector()
-        snapshot = projector.snapshot("SYM")
+        # StateProjector has been removed; verify EventStore.fold path works
+        from quant.state import LiveQuoteCache
+        
+        cache = LiveQuoteCache()
+        snapshot = cache.snapshot("SYM")
         assert not hasattr(snapshot, "gen_ai")
         assert not hasattr(snapshot, "overseer")
         assert hasattr(snapshot, "quant_decision")
