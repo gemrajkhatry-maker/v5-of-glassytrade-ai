@@ -41,7 +41,6 @@ class OrderStatus(str, Enum):
     PENDING = "PENDING"
     OPEN = "OPEN"
     FILLED = "FILLED"
-    COMPLETED = "FILLED" # Alias
     CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
     CLOSED = "CLOSED"    # For position lifecycle

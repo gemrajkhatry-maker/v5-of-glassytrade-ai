@@ -1031,7 +1031,6 @@ class DhanBrokerAdapter(IBroker):
                 return
             durable = {
                 OrderStatus.FILLED: "FILLED",
-                OrderStatus.COMPLETED: "FILLED",
                 OrderStatus.CLOSED: "FILLED",
                 OrderStatus.REJECTED: "REJECTED",
                 OrderStatus.CANCELLED: "CANCELLED",
@@ -1082,7 +1081,6 @@ class DhanBrokerAdapter(IBroker):
     def _is_terminal(status: Any) -> bool:
         terminal = {
             OrderStatus.FILLED,
-            OrderStatus.COMPLETED,
             OrderStatus.CANCELLED,
             OrderStatus.CLOSED,
             OrderStatus.REJECTED,
@@ -1094,10 +1092,10 @@ class DhanBrokerAdapter(IBroker):
     @staticmethod
     def _is_filled(order: Any) -> bool:
         status = getattr(order, "status", None)
-        if status in {OrderStatus.FILLED, OrderStatus.COMPLETED}:
+        if status == OrderStatus.FILLED:
             return True
         status_value = str(status).strip().upper()
-        if status_value in {"FILLED", "COMPLETED"}:
+        if status_value == "FILLED":
             return True
 
         quantity = to_float(order.quantity)
