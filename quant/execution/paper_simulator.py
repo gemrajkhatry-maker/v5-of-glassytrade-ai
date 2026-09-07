@@ -46,6 +46,57 @@ class PaperExecutionSimulator:
     def fills(self) -> tuple[PaperFill, ...]:
         return tuple(self._fills.values())
 
+    def export_records(self) -> list[dict]:
+        """Return broker-neutral, JSON-safe fill records for persistence."""
+        return [
+            {
+                "order_id": fill.order_id,
+                "instrument_key": fill.instrument_key,
+                "side": fill.side,
+                "requested_quantity": fill.requested_quantity,
+                "filled_quantity": fill.filled_quantity,
+                "fill_price": fill.fill_price,
+                "status": fill.status.value,
+                "costs": {
+                    "slippage": fill.costs.slippage,
+                    "stt": fill.costs.stt,
+                    "exchange_fee": fill.costs.exchange_fee,
+                    "brokerage": fill.costs.brokerage,
+                    "gst": fill.costs.gst,
+                    "sebi_charges": fill.costs.sebi_charges,
+                    "total": fill.costs.total,
+                },
+                "net_cash_flow": fill.net_cash_flow,
+            }
+            for fill in self._fills.values()
+        ]
+
+    @classmethod
+    def from_records(cls, records: list[dict], *, fill_mode: str = "instant_mid"):
+        """Restore fills from broker-neutral records after a process restart."""
+        simulator = cls(fill_mode=fill_mode)
+        for record in records:
+            costs_data = record.get("costs") or {}
+            fill = PaperFill(
+                order_id=str(record["order_id"]),
+                instrument_key=str(record["instrument_key"]),
+                side=str(record["side"]),
+                requested_quantity=int(record["requested_quantity"]),
+                filled_quantity=int(record["filled_quantity"]),
+                fill_price=float(record["fill_price"]),
+                status=PaperOrderStatus(str(record["status"])),
+                costs=TradeCosts(**{
+                    key: float(costs_data.get(key, 0.0))
+                    for key in (
+                        "slippage", "stt", "exchange_fee", "brokerage",
+                        "gst", "sebi_charges", "total",
+                    )
+                }),
+                net_cash_flow=float(record["net_cash_flow"]),
+            )
+            simulator._fills[fill.order_id] = fill
+        return simulator
+
     def submit(
         self,
         *,
