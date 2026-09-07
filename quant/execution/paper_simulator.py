@@ -11,7 +11,7 @@ from enum import Enum
 
 from quant.contracts.contracts import ContractRef
 from quant.execution.paper_contracts import PaperContractResolver
-from quant.execution.trade_costs import TradeCosts, compute_trade_costs
+from quant.execution.trade_costs import TradeCosts, compute_fill_costs
 
 
 class PaperOrderStatus(str, Enum):
@@ -86,7 +86,7 @@ class PaperExecutionSimulator:
             fill_price = float(reference_price)
 
         notional = float(fill_price) * int(quantity)
-        costs = compute_trade_costs(
+        costs = compute_fill_costs(
             notional=notional,
             slippage_bps=self.slippage_bps,
             is_sell=side == "SELL",

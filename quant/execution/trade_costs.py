@@ -56,3 +56,37 @@ def compute_trade_costs(
         sebi_charges=sebi_charges,
         total=slippage + stt + exchange_fee + brokerage + gst + sebi_charges,
     )
+
+
+def compute_fill_costs(
+    notional: float,
+    *,
+    slippage_bps: float = 15.0,
+    is_sell: bool = False,
+    stt_pct: float = 0.000625,
+    exchange_fee_pct: float = 0.000495,
+    brokerage_per_order: float = 20.0,
+    gst_pct: float = 0.18,
+    sebi_pct: float = 0.000001,
+) -> TradeCosts:
+    """Compute costs for one actual fill/leg.
+
+    ``compute_trade_costs`` is retained for the legacy round-trip API. Paper
+    fills use this function so brokerage, exchange charges and SEBI charges
+    are not accidentally doubled on each leg.
+    """
+    slippage = notional * slippage_bps / 10000.0
+    stt = notional * stt_pct if is_sell else 0.0
+    exchange_fee = notional * exchange_fee_pct
+    brokerage = brokerage_per_order
+    gst = brokerage * gst_pct
+    sebi_charges = notional * sebi_pct
+    return TradeCosts(
+        slippage=slippage,
+        stt=stt,
+        exchange_fee=exchange_fee,
+        brokerage=brokerage,
+        gst=gst,
+        sebi_charges=sebi_charges,
+        total=slippage + stt + exchange_fee + brokerage + gst + sebi_charges,
+    )

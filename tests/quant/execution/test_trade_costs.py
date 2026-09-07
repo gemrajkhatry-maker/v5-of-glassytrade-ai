@@ -2,7 +2,11 @@
 
 import pytest
 
-from quant.execution.trade_costs import TradeCosts, compute_trade_costs
+from quant.execution.trade_costs import (
+    TradeCosts,
+    compute_fill_costs,
+    compute_trade_costs,
+)
 
 
 def test_buy_has_no_stt():
@@ -37,3 +41,17 @@ def test_round_trip_double_counted_costs():
     assert costs.brokerage == pytest.approx(40.0)  # 20 * 2 legs
     assert costs.gst == pytest.approx(40.0 * 0.18)
     assert costs.exchange_fee == pytest.approx(600_000 * 0.000495 * 2)
+
+
+def test_single_fill_costs_do_not_charge_two_orders():
+    costs = compute_fill_costs(notional=6_500, is_sell=False)
+
+    assert costs.brokerage == pytest.approx(20.0)
+    assert costs.exchange_fee == pytest.approx(6_500 * 0.000495)
+    assert costs.stt == 0.0
+
+
+def test_single_sell_fill_applies_stt_once():
+    costs = compute_fill_costs(notional=6_500, is_sell=True)
+
+    assert costs.stt == pytest.approx(6_500 * 0.000625)
