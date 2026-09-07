@@ -79,7 +79,8 @@ class PaperOMS:
                 reference_price=price,
             )
             self.last_fill = paper_fill
-            pnl = (paper_fill.fill_price - position.open_price) * position.size
+            gross = (paper_fill.fill_price - position.open_price) * position.size
+            pnl = gross - paper_fill.costs.total
             closed = Position(
                 order=position.order,
                 open_price=position.open_price,
@@ -190,8 +191,33 @@ class PaperOMS:
           (Fill for the partial close, new Position with reduced size)
         """
         closed_size = position.size * fraction
+        if self._simulator is not None:
+            lots = int(abs(position.size) / self._lot_size)
+            close_lots = max(1, round(lots * fraction))
+            close_lots = min(lots, close_lots)
+            closed_size = (1 if position.size > 0 else -1) * close_lots * self._lot_size
         remaining_size = position.size * (1.0 - fraction)
-        partial_pnl = (price - position.open_price) * closed_size
+        if self._simulator is not None:
+            remaining_size = position.size - closed_size
+        close_price = price
+        if self._simulator is not None:
+            if self._contract is None:
+                raise ValueError("PaperOMS simulator mode requires a ContractRef")
+            paper_fill = self._simulator.submit(
+                order_id=f"partial:{position.id}:{time}:{reason}",
+                contract=self._contract,
+                side="SELL" if position.size > 0 else "BUY",
+                quantity=int(abs(closed_size)),
+                reference_price=price,
+            )
+            self.last_fill = paper_fill
+            close_price = paper_fill.fill_price
+            partial_pnl = (
+                (close_price - position.open_price) * closed_size
+                - paper_fill.costs.total
+            )
+        else:
+            partial_pnl = (price - position.open_price) * closed_size
 
         fill_position = Position(
             order=position.order,
@@ -204,7 +230,7 @@ class PaperOMS:
         )
         fill = Fill(
             position=fill_position,
-            close_price=price,
+            close_price=close_price,
             close_time=time,
             reason=reason,
             pnl=partial_pnl,

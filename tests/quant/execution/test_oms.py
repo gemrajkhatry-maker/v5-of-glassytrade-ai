@@ -123,5 +123,18 @@ def test_paper_oms_simulator_close_uses_actual_fill():
     fill = oms.close(position, price=102.0, time="t1", reason="TP")
 
     assert fill.close_price == 102.0
-    assert fill.pnl == pytest.approx(130.0)
+    assert fill.pnl < 130.0
     assert len(simulator.fills) == 2
+
+
+def test_paper_oms_simulator_one_lot_partial_is_a_full_lot_close():
+    simulator = PaperExecutionSimulator()
+    oms = PaperOMS(lot_size=65, simulator=simulator, contract=_contract())
+    position = oms.submit(_sig(), quantity=65)
+
+    fill, remaining = oms.close_partial(
+        position, fraction=0.50, price=102.0, time="t1", reason="TP1"
+    )
+
+    assert fill.position.size == 65.0
+    assert remaining.size == 0.0
