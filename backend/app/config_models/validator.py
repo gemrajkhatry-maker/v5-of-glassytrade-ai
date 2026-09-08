@@ -156,6 +156,14 @@ def _validate_risk(config: "SystemConfig") -> tuple[list[str], list[str]]:
                 "RULE-14: live per_symbol_notional_cap must be ≤ portfolio_notional_cap."
             )
 
+    if config.execution_model not in {"independent", "cross_confirmed", "legacy_translated"}:
+        errors.append(
+            "RULE-16: execution_model must be one of independent, cross_confirmed, legacy_translated. "
+            f"Got {config.execution_model!r}."
+        )
+    if config.execution_model == "legacy_translated" and config.is_live():
+        errors.append("RULE-16: legacy_translated execution is forbidden in live mode.")
+
     return errors, []
 
 

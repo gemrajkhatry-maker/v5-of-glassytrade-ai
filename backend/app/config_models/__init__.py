@@ -180,6 +180,7 @@ class SystemConfig:
     capital: float = 5000000.0
     environment: str = "development"
     broker_mode: str = "paper"
+    execution_model: str = "independent"
     exchanges: dict[str, ExchangeConfig] = field(default_factory=dict)
     risk: RiskConfig = field(default_factory=RiskConfig)
     paper: PaperConfig = field(default_factory=PaperConfig)

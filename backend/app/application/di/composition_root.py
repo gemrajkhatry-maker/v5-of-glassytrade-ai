@@ -146,6 +146,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         "n": int(_settings.SCANNER_TOP_N or 8),
         "exchange": _settings.DEFAULT_EXCHANGE or "NSE",
         "strategy_name": getattr(_settings, "GLASSYTRADE_STRATEGY", None) or "mcx_options",
+        "execution_model": getattr(config, "execution_model", "independent"),
         "expiry_index": int(_settings.SCANNER_EXPIRY_INDEX or 0),
         "strikes_around_atm": int(_settings.STRIKES_AROUND_ATM or 2),
         "interval_seconds": candle_minutes * 60,

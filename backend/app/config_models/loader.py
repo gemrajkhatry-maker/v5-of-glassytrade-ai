@@ -256,6 +256,9 @@ def load_config(
         capital=float(sys_data.get("capital", 5000000)),
         environment=env_name,
         broker_mode=env_data.get("broker_mode", merged.get("broker_mode", "paper")),
+        execution_model=str(
+            merged.get("execution_model", merged.get("strategy", {}).get("execution_model", "independent"))
+        ).strip().lower(),
         exchanges=exchanges,
         risk=RiskConfig(
             risk_per_trade_pct=risk_data.get("risk_per_trade_pct", 0.005),
@@ -284,6 +287,9 @@ def load_config(
     )
 
     # STEP 6: Validate
+    from quant.execution.execution_model import validate_execution_model
+
+    validate_execution_model(config.execution_model)
     from app.config_models.validator import validate_config
 
     validate_config(config)

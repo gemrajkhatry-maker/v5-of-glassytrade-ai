@@ -60,14 +60,17 @@ class PaperBrokerAdapter(IBroker):
         self._cancelled_orders: set[str] = set()
 
     def execute_order(
-        self, signal: Signal, portfolio: Portfolio, symbol: str
+        self, signal: Signal, portfolio: Portfolio, symbol: str,
+        contract_ref=None,
     ) -> Position | None:
-        """Execute a paper order with realistic cost simulation.
+        """Execute a paper order, optionally validating its contract identity.
 
-        Delegates to Portfolio.open_position which enforces invariants.
-        If cost_model_enabled, applies slippage to entry price before execution.
-        Fabio Rule 4: LLM entries use 40/30/30 scale-in.
+        Delegates to Portfolio.open_position which enforces invariants. Costs
+        are applied by the configured paper execution layer.
         """
+        if contract_ref is not None and getattr(contract_ref, "symbol", symbol) != symbol:
+            return None
+
         entry_price = float(getattr(signal, "price", 0))
         if entry_price <= 0:
             logger.error(
@@ -110,12 +113,14 @@ class PaperBrokerAdapter(IBroker):
         quantity: int,
         portfolio: Portfolio,
         reference_price: float | None = None,
+        contract_ref=None,
     ) -> Position | None:
         """Close (or reduce) a paper position.
 
-        Simulates an opposing fill at the requested quantity. ``reference_price``
-        is accepted for interface parity with live brokers but unused in paper.
+        ``reference_price`` is accepted for interface parity with live brokers.
         """
+        if contract_ref is not None and getattr(contract_ref, "symbol", symbol) != symbol:
+            return None
         if quantity <= 0:
             return None
 
