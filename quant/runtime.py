@@ -47,6 +47,7 @@ from quant.amt_engine import AMTEngine
 from quant.amt.dto import empty_amt_dto
 from quant.amt.session.context import get_session_info
 from quant.bars import Bar
+from quant.contracts.contracts import ContractRef
 from quant.contracts.value_objects import OrderBook, OrderBookLevel
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
@@ -80,6 +81,11 @@ from quant.events import (
     SignalApproved,
     SignalBlocked,
     StopMoved,
+)
+from quant.execution.execution_model import (
+    ExecutionModel,
+    signal_matches_contract,
+    validate_execution_model,
 )
 from quant.execution.exits import ExitDecision, ExitEngine
 from quant.execution.oms import PaperOMS
@@ -153,6 +159,8 @@ class QuantEngine:
         market: str = "NSE",
         session_levels: SessionLevelStore | None = None,
         underlying_gateway=None,
+        execution_model: str | ExecutionModel | None = None,
+        contract: ContractRef | None = None,
         strategy: TradingStrategy | None = None,
         portfolio_risk=None,
         oms=None,
@@ -166,7 +174,29 @@ class QuantEngine:
         seed_scheduler=None,
     ) -> None:
         self._gateway = gateway
+        # Independent mode is the production default. Legacy dual-feed
+        # construction remains identifiable and is never implicit in the
+        # coordinator path.
+        self._execution_model = (
+            ExecutionModel.LEGACY_TRANSLATED
+            if execution_model is None and underlying_gateway is not None
+            else validate_execution_model(execution_model)
+        )
+        if self._execution_model is ExecutionModel.INDEPENDENT and underlying_gateway is not None:
+            raise ValueError(
+                "independent execution cannot attach an underlying_gateway; "
+                "construct separate engines for futures and options"
+            )
         self._underlying_gateway = underlying_gateway
+        if contract is not None:
+            if not isinstance(contract, ContractRef):
+                raise ValueError("QuantEngine contract must be a validated ContractRef")
+            if contract.symbol != str(symbol).strip():
+                raise ValueError(
+                    "QuantEngine contract symbol must match engine symbol: "
+                    f"{contract.symbol!r} != {symbol!r}"
+                )
+        self._contract = contract
         self._portfolio_risk = portfolio_risk  # shared PortfolioRiskAuthority | None
         self._execution_enabled = execution_enabled  # ponytail: False for underlying observer feeds in options mode
         self.symbol = symbol
@@ -465,7 +495,7 @@ class QuantEngine:
     def attach_storage(self, storage) -> None:
         """Project PositionOpened/Closed onto IStorage (restart book)."""
         from quant.persistence_bridge import PositionStorageBridge
-        PositionStorageBridge(storage).attach(self._bus)
+        PositionStorageBridge(storage, contract=self._contract).attach(self._bus)
         self._storage = storage
         try:
             from quant.amt.session.context import load_prior_profile
@@ -560,9 +590,8 @@ class QuantEngine:
             # Warning state is per-engine (self._underlying_warned) so one
             # engine's startup path never mutates a module global.
             self._underlying_warned = True
-            logger.warning(
-                "No underlying feed for %s — running AMT on the option premium. "
-                "Pass underlying_gateway to compute auction structure on the futures.",
+            logger.info(
+                "Independent scalping active for %s — running AMT directly on option premium.",
                 self.symbol,
             )
         self._amt_engine.seed()
@@ -981,6 +1010,22 @@ class QuantEngine:
 
         if decision.approved and decision.signal is not None:
             signal = decision.signal
+            if (
+                self._execution_model is ExecutionModel.INDEPENDENT
+                and self._contract is not None
+                and not signal_matches_contract(getattr(signal, "symbol", None), self.symbol)
+            ):
+                logger.warning(
+                    "[INDEPENDENT_CONTRACT_GUARD] %s: rejected signal for %s",
+                    self.symbol,
+                    getattr(signal, "symbol", None),
+                )
+                self._latch_or_signal_block(
+                    signal,
+                    "independent execution requires signal and engine contract to match",
+                    bar.time,
+                )
+                return
             # ponytail: underlying observer engines stream charts/data but must not submit orders
             if not getattr(self, "_execution_enabled", True):
                 logger.debug(

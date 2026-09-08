@@ -21,8 +21,23 @@ def _costs_dict(costs):
 
 
 class PositionStorageBridge:
-    def __init__(self, storage) -> None:
+    def __init__(self, storage, contract=None) -> None:
         self._storage = storage
+        self._contract = contract
+
+    def _identity(self) -> dict:
+        """Return durable broker-neutral identity without changing old schemas."""
+        if self._contract is None:
+            return {}
+        return {
+            "contract_exchange": self._contract.exchange,
+            "contract_expiry": self._contract.expiry,
+            "contract_lot_size": self._contract.lot_size,
+            "contract_tick_size": self._contract.tick_size,
+            "contract_strike": self._contract.strike,
+            "contract_option_type": self._contract.option_type,
+            "contract_multiplier": self._contract.multiplier,
+        }
 
     def attach(self, bus) -> None:
         bus.subscribe(PositionOpened, self.on_opened, priority=-50)
@@ -39,9 +54,9 @@ class PositionStorageBridge:
         costs = costs if costs is not None else (
             _costs_dict(getattr(fill, "costs", None)) if fill is not None else None
         )
-        self._storage.save_fill({
+        payload = {
             "fill_id": fill_id,
-            "order_id": getattr(fill, "logical_id", "") if fill is not None else "",
+            "order_id": getattr(fill, "logical_id", "") if fill is not None else f"entry:{position_id}",
             "position_id": position_id,
             "symbol": symbol,
             "side": side,
@@ -51,16 +66,21 @@ class PositionStorageBridge:
             "event_time": event_time,
             "costs": costs,
             "net_pnl": pnl,
-        })
+        }
+        payload.update(self._identity())
+        self._storage.save_fill(payload)
 
     def on_opened(self, event: PositionOpened) -> None:
         position = event.position
-        self._storage.save_open_position(position_to_row(event.symbol, position))
+        self._storage.save_open_position({
+            **position_to_row(event.symbol, position),
+            **self._identity(),
+        })
         self._save_fill(
             fill_id=f"entry:{position.id}",
             position_id=position.id,
             symbol=event.symbol,
-            side="LONG" if position.size > 0 else "SHORT",
+            side="BUY" if position.size > 0 else "SELL",
             quantity=abs(position.size),
             fill_price=position.open_price,
             pnl=0.0,
@@ -109,9 +129,10 @@ class PositionStorageBridge:
 
     def on_reduced(self, event: PositionReduced) -> None:
         """Persist both the partial fill and the still-open residual."""
-        self._storage.save_open_position(
-            position_to_row(event.symbol, event.remaining)
-        )
+        self._storage.save_open_position({
+            **position_to_row(event.symbol, event.remaining),
+            **self._identity(),
+        })
         partial = event.fill
         pos = partial.position
         self._save_fill(
