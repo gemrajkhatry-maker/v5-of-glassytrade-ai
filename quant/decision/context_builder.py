@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 
 from quant.contracts.enums import MarketState
+from quant.contracts.instrument_registry import is_option_contract
 from quant.decision.context import DecisionContext
 from quant.session_gates import ist_dt, session_allow_entry
 from quant.amt.session.context import get_session_info
@@ -315,6 +316,10 @@ class DecisionContextBuilder:
         # ponytail: a confirmed structural setup evidence establishes the trade direction
         if setup_evidence and getattr(setup_evidence, "direction", None) and getattr(setup_evidence, "is_complete", lambda: False)():
             agent_direction = setup_evidence.direction
+        if is_option_contract(symbol) and agent_direction == "SHORT":
+            # Retail scalpers are option buyers (long calls / long puts) with defined risk.
+            # Shorting naked options is disabled.
+            agent_direction = None
         pos = self._extract_position(position, close_px, bar_index, entry_bar_index)
         _si_dir, _si_mag, _si_low, _si_high = _latest_stacked_imbalance(amt_dto)
         _buy_wall_below, _sell_wall_above = _print_levels_from_dto(amt_dto, bar)
@@ -406,7 +411,7 @@ class DecisionContextBuilder:
             option_delta=(
                 float(amt_dto["optionGreekDelta"])
                 if amt_dto.get("optionGreekDelta") is not None
-                else None
+                else (0.50 if is_option_contract(symbol) else None)
             ),
             contested_bubble_zone=bool(amt_dto.get("contestedZone") or False),
             stacked_imbalance_direction=_si_dir,

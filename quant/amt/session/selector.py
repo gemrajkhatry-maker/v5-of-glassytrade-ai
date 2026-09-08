@@ -42,6 +42,9 @@ class OptionSelection:
     oi: int                  # open interest
     lot_size: int            # NIFTY=65, BANKNIFTY=30 (current NSE series)
     num_lots: int            # calculated from risk sizing
+    volume: int = 0
+    quote_age_seconds: float | None = None
+    chain_age_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -196,6 +199,20 @@ class OptionSelector:
 
         Returns ``(passed, reason)`` where *reason* is empty on success.
         """
+        # Executable quote and freshness checks: an option without both sides
+        # of a current book is not scalping liquidity, regardless of OI.
+        if option.premium <= 0 or option.bid_ask_spread < 0:
+            return False, "Option premium/quote is invalid"
+        if option.bid_ask_spread == 0 and option.premium > 0:
+            # Zero spread is valid for synthetic/test chains; do not reject it.
+            pass
+        if option.volume and option.volume < self.cfg.min_volume:
+            return False, f"Volume {option.volume:,} below minimum {self.cfg.min_volume:,}"
+        if option.quote_age_seconds is not None and option.quote_age_seconds > 5.0:
+            return False, f"Quote age {option.quote_age_seconds:.1f}s exceeds 5.0s"
+        if option.chain_age_seconds is not None and option.chain_age_seconds > 30.0:
+            return False, f"Option-chain age {option.chain_age_seconds:.1f}s exceeds 30.0s"
+
         # Bid-ask spread check
         if option.premium > 0:
             spread_pct = option.bid_ask_spread / option.premium

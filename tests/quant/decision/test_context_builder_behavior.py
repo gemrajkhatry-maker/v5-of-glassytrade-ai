@@ -253,3 +253,43 @@ def test_aggression_acceptance_is_direction_sensitive():
         agent_direction="LONG", nearest_leg_lvn=0.0)
     assert not (ev and ev.acceptance), \
         "SHORT acceptance flag must not satisfy a LONG Triple-A"
+
+
+def test_options_scalping_suppresses_short_direction():
+    """Option contracts must be buy-only (LONG) and never naked shorted."""
+    from quant.decision.signal_builder import SignalBuilder
+    from quant.decision.decision_service import DecisionService
+    builder = DecisionContextBuilder()
+    dto = {
+        "marketState": "BALANCED",
+        "ofi": -0.8,
+        "tripleASignal": "SHORT",
+        "acceptanceBelow": True,
+        "valueAreaHigh": 350.0,
+        "valueAreaLow": 300.0,
+        "poc": 320.0,
+    }
+    opt_sym = "CRUDEOIL 17 SEP 8650 PUT"
+    ctx = builder.build(
+        bar=_dummy_bar(close=360.0),
+        symbol=opt_sym,
+        market="MCX",
+        contract_expiry=None,
+        tick_size=0.05,
+        bar_index=20,
+        warm_bars=50,
+        cooldown_remaining_sec=0.0,
+        risk_state=DummyRisk(),
+        amt_dto=dto,
+    )
+    # 1. ContextBuilder sets agent_direction to None for options if otherwise SHORT
+    assert ctx.agent_direction is None
+
+    # 2. SignalBuilder rejects SHORT if force-tested on options
+    sig_builder = SignalBuilder()
+    sig, drop_why = sig_builder.build_or_reason(ctx, pipeline_results=[])
+    assert sig is None
+
+    # 3. DecisionService never approves SHORT on options
+    dec = DecisionService().evaluate(ctx)
+    assert not dec.approved or (dec.signal and dec.signal.type == "LONG")

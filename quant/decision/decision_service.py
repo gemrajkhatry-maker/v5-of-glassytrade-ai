@@ -13,6 +13,7 @@ from quant.contracts.enums import MarketState
 from dataclasses import dataclass, field
 from typing import Optional
 
+from quant.contracts.instrument_registry import is_option_contract
 from quant.decision.context import DecisionContext
 from quant.decision.pipeline import GatePipeline
 from quant.decision.result import GateResult
@@ -126,6 +127,9 @@ class DecisionService:
             import logging
             log = logging.getLogger(__name__)
         if fade and (ctx.agent_direction in (fade.direction, None)) and fade.rr >= self.min_rr:
+            # Option contracts are buy-only: never short naked options on VA-fade
+            if is_option_contract(ctx.symbol) and fade.direction == "SHORT":
+                return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
             if not is_min_stop_met(fade.entry, fade.sl):
                 return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
             sig = Signal(

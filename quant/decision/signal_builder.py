@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 
+from quant.contracts.instrument_registry import is_option_contract
 from quant.contracts.entities import derive_signal_id
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
@@ -108,6 +109,9 @@ class SignalBuilder:
         direction = ctx.agent_direction
         if direction not in ("LONG", "SHORT"):
             return None, "no direction"
+
+        if is_option_contract(ctx.symbol) and direction == "SHORT":
+            return None, "option scalping is buy-only (cannot short options)"
 
         if ctx.bar is None:
             return None, "no bar"
