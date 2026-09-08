@@ -15,12 +15,15 @@ sleep 1
 unset DEBUG
 
 # Start backend
-if [ "$1" = "mcx" ] || [ "$1" = "mcx_options" ] || [ "$GLASSYTRADE_STRATEGY" = "mcx_options" ]; then
-  STRATEGY="mcx_options"
-  EXCHANGE="MCX"
-elif [ "$1" = "nse" ] || [ "$1" = "nse_options" ]; then
+if [ "$1" = "nse" ] || [ "$1" = "nse_options" ]; then
   STRATEGY="nse_options"
   EXCHANGE="NSE"
+elif [ "$1" = "mcx" ] || [ "$1" = "mcx_options" ]; then
+  STRATEGY="mcx_options"
+  EXCHANGE="MCX"
+elif [ "$GLASSYTRADE_STRATEGY" = "mcx_options" ]; then
+  STRATEGY="mcx_options"
+  EXCHANGE="MCX"
 else
   STRATEGY="${GLASSYTRADE_STRATEGY:-nse_options}"
   EXCHANGE="${DEFAULT_EXCHANGE:-NSE}"

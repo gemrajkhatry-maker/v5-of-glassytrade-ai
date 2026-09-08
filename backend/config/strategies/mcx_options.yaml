@@ -6,7 +6,8 @@
 
 strategy:
   name: "mcx_options"
-  description: "MCX commodity options trading with AMT methodology"
+  execution_model: "independent"
+  description: "MCX commodity options trading with AMT methodology — each traded contract is an independent engine"
 
 # Route all sessions to MCX (development.yaml and similar must not leave MCX off / NSE on)
 exchanges:

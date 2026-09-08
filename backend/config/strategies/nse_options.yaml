@@ -13,7 +13,8 @@
 
 strategy:
   name: "nse_options"
-  description: "NSE index options trading with AMT methodology — NIFTY weekly primary, BANKNIFTY/FINNIFTY monthly secondary"
+  execution_model: "independent"
+  description: "NSE index options trading with AMT methodology — Fabio AMT is evaluated on each traded option contract"
 
 exchanges:
   NSE:
