@@ -77,6 +77,26 @@ def canonical_key(symbol: str) -> str:
     return (symbol or "").upper().strip()
 
 
+def canonical_contract_key(position: Any) -> str:
+    """Return a stable execution identity, falling back to legacy symbol rows.
+
+    Persisted rows store contract metadata under ``extra`` while broker rows
+    expose the same fields at the top level. A metadata-bearing row must not
+    match another expiry/strike/exchange merely because its display symbol is
+    equal.
+    """
+    if isinstance(position, Mapping):
+        metadata = position.get("extra") or position.get("metadata") or {}
+        if not isinstance(metadata, Mapping):
+            metadata = {}
+        merged = {**metadata, **position}
+        fields = ("exchange", "expiry", "strike", "option_type", "lot_size", "tick_size", "multiplier")
+        values = [merged.get(field) for field in fields]
+        if any(value not in (None, "") for value in values):
+            return "|".join([canonical_key(extract_symbol(position))] + [str(value or "").upper().strip() for value in values])
+    return canonical_key(extract_symbol(position))
+
+
 def extract_symbol(position: Any) -> str:
     """Extract a symbol from common DB/broker row shapes."""
     if hasattr(position, "trading_symbol"):
@@ -92,7 +112,7 @@ def extract_symbol(position: Any) -> str:
 def index_rows(
     rows: Any,
     *,
-    symbol_of: Callable[[Any], str] = extract_symbol,
+    symbol_of: Callable[[Any], str] = canonical_contract_key,
     size_of: Callable[[Any], float | None] | None = None,
 ) -> dict[str, float | None]:
     """Index raw rows by canonical key.

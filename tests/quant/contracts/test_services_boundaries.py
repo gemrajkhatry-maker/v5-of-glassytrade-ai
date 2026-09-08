@@ -194,3 +194,20 @@ def test_live_case_insensitive_match_restores(monkeypatch):
     assert result.restored == 1
     assert result.stale_removed == 0
     assert store.deleted == []
+
+
+def test_live_same_symbol_wrong_contract_identity_is_not_restored(monkeypatch):
+    monkeypatch.setattr("app.shared.mode.is_live_mode", lambda: True)
+    store = _FakeReconStorage([{
+        "id": "p1", "symbol": "NIFTY 30 SEP 25000 CE",
+        "extra": {"exchange": "NFO", "expiry": "2026-09-30", "strike": 25000, "option_type": "CE"},
+    }])
+    broker = _FakeReconBroker([{
+        "trading_symbol": "NIFTY 30 SEP 25000 CE",
+        "exchange": "NFO", "expiry": "2026-10-07", "strike": 25000, "option_type": "CE",
+    }])
+    result = StartupReconciliation(broker, store).reconcile()
+    assert result.restored == 0
+    assert result.orphaned_registered == 1
+    assert result.stale_removed == 0
+    assert len(result.discrepancies) >= 2
