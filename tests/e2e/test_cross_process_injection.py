@@ -26,7 +26,11 @@ except Exception:  # websockets missing etc.
 
 BASE = "http://127.0.0.1:9093"
 WS = "ws://127.0.0.1:9093/api/trading/ws/gameloop"
-T0 = 1_787_664_600  # in-session MCX evening anchor
+# The feed enforces monotonic exchange timestamps. Synthetic acceptance packets
+# must be anchored to the current process time, not a historical fixture epoch,
+# otherwise a live packet seen during startup can correctly cause them to be
+# discarded as late data.
+T0 = None
 
 
 def _is_trading_day() -> bool:
@@ -128,7 +132,7 @@ def test_leg_a_full_chain_http_to_ws():
         # Inject into the FIRST active symbol (sorted) so the WS subscription
         # observes it. Prices chosen at MCX-futures scale.
         story = []
-        sec = T0 + int(time.time() % 60)
+        sec = int(time.time())
         base_px = 25000.0
         for i in range(30):
             story.append(_packet(sec, base_px + 0.5 * ((i % 4) - 1.5), 8.0, 0.5, symbol))
