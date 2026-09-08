@@ -187,6 +187,11 @@ class EventBus:
         """
         import logging
 
+        # Events are frozen value objects, while the bus owns the per-engine
+        # ordering sequence. Attach the ID at the publication boundary so
+        # every public subscriber observes the same durable identity.
+        if not hasattr(event, "event_id"):
+            object.__setattr__(event, "event_id", self.next_event_id())
         logger = logging.getLogger(__name__)
         for _, handler in self._handlers.get(type(event), ()):
             try:

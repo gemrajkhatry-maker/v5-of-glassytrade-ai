@@ -291,6 +291,10 @@ class AMTAnalyzer:
         # Session VWAP accumulator (extracted from inline state — audit decomposition step 1)
         from quant.amt.profile.vwap import SessionVWAP
         self._vwap = SessionVWAP()
+        # Compatibility aliases for external audit/read-only consumers. The
+        # SessionVWAP object remains the sole mutation owner.
+        self._vwap_cum_vol = 0.0
+        self._vwap_cum_quote_vol = 0.0
         # Initial Balance tracker
         self._ib_tracker = InitialBalanceEngine(ib_minutes=IB_MINUTES)
         # Sticky IB break state (survives price re-entry into IB)
@@ -373,7 +377,10 @@ class AMTAnalyzer:
             self._triple_a.reset()
             self._vars_detector.reset()
             self._vwap.reset()
-        return self._vwap.update(current, typical_price)
+        result = self._vwap.update(current, typical_price)
+        self._vwap_cum_vol = self._vwap._cum_vol
+        self._vwap_cum_quote_vol = self._vwap._cum_quote_vol
+        return result
 
     # ponytail: dead methods below deleted — all callers migrated to
     # quant.amt.orderflow.compute, quant.amt.session.structure,
