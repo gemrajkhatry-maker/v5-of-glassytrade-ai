@@ -28,14 +28,83 @@ class PortfolioRiskAuthority:
         starting_equity: float = float(INITIAL_CAPITAL),
         max_portfolio_risk_pct: float = 0.95,   # max aggregate open risk: 95% of capital (aggressive)
         max_portfolio_daily_loss_pct: float = 0.95,  # global kill: 95% realized daily loss
+        separate_by: str = "root",  # "root" | "symbol" | "instrument_type"
+        max_root_risk_pct: float | None = None,
+        max_exchange_risk_pct: float | None = None,
     ) -> None:
         self._starting_equity = starting_equity
         self._max_open_risk = starting_equity * max_portfolio_risk_pct
         self._max_daily_loss = starting_equity * max_portfolio_daily_loss_pct
+        self._separate_by = separate_by
         self._lock = threading.RLock()
         self._open_risk = 0.0          # sum of (entry - sl) * qty for open positions
         self._realized_pnl = 0.0       # sum of closed-trade pnl across engines today
-        self._active_roots: dict[str, str] = {}  # root -> active symbol
+        self._max_root_risk = (
+            starting_equity * max_root_risk_pct
+            if max_root_risk_pct is not None else None
+        )
+        self._max_exchange_risk = (
+            starting_equity * max_exchange_risk_pct
+            if max_exchange_risk_pct is not None else None
+        )
+        self._root_open_risk: dict[str, float] = {}
+        self._exchange_open_risk: dict[str, float] = {}
+        self._active_roots: dict[str, str] = {}  # lock_key -> active symbol
+
+    def _lock_key(self, symbol: str) -> str:
+        if not symbol:
+            return ""
+        if self._separate_by == "symbol":
+            return symbol
+        root = root_token(symbol)
+        if not root:
+            return symbol
+        if self._separate_by == "instrument_type":
+            from quant.contracts.instrument_registry import is_option_contract
+            return f"{root}:{'OPT' if is_option_contract(symbol) else 'FUT'}"
+        return root
+
+    def _exchange_key(self, symbol: str) -> str:
+        spec = __import__("quant.contracts.instrument_registry", fromlist=["DEFAULT_REGISTRY"]).DEFAULT_REGISTRY.try_resolve(symbol)
+        return str(getattr(spec, "exchange", "")).upper() or "UNKNOWN"
+
+    def _budget_available(self, risk_rupees: float, symbol: str) -> bool:
+        if not symbol:
+            return True
+        amount = max(0.0, risk_rupees)
+        root = root_token(symbol)
+        if self._max_root_risk is not None and self._root_open_risk.get(root, 0.0) + amount > self._max_root_risk:
+            return False
+        exchange = self._exchange_key(symbol)
+        if self._max_exchange_risk is not None and self._exchange_open_risk.get(exchange, 0.0) + amount > self._max_exchange_risk:
+            return False
+        return True
+
+    def _add_budget(self, risk_rupees: float, symbol: str) -> None:
+        if not symbol:
+            return
+        amount = max(0.0, risk_rupees)
+        root = root_token(symbol)
+        exchange = self._exchange_key(symbol)
+        self._root_open_risk[root] = self._root_open_risk.get(root, 0.0) + amount
+        self._exchange_open_risk[exchange] = self._exchange_open_risk.get(exchange, 0.0) + amount
+
+    def _release_budget(self, risk_rupees: float, symbol: str) -> None:
+        if not symbol:
+            return
+        amount = max(0.0, risk_rupees)
+        root = root_token(symbol)
+        exchange = self._exchange_key(symbol)
+        self._root_open_risk[root] = max(0.0, self._root_open_risk.get(root, 0.0) - amount)
+        self._exchange_open_risk[exchange] = max(0.0, self._exchange_open_risk.get(exchange, 0.0) - amount)
+
+    def root_open_risk(self, root_or_symbol: str) -> float:
+        with self._lock:
+            return self._root_open_risk.get(root_token(root_or_symbol), 0.0)
+
+    def exchange_open_risk(self, exchange: str) -> float:
+        with self._lock:
+            return self._exchange_open_risk.get(str(exchange).upper(), 0.0)
 
     def register_open(self, risk_rupees: float, symbol: str = "", is_pyramid: bool = False) -> bool:
         """Register a new position's rupee risk. False = rejected (would breach or concurrent root)."""
@@ -44,24 +113,28 @@ class PortfolioRiskAuthority:
                 return False
             if self._open_risk + max(0.0, risk_rupees) > self._max_open_risk:
                 return False
+            if not self._budget_available(risk_rupees, symbol):
+                return False
             if symbol and not is_pyramid:
-                root = root_token(symbol)
-                if root and root in self._active_roots:
+                key = self._lock_key(symbol)
+                if key and key in self._active_roots:
                     return False
-                if root:
-                    self._active_roots[root] = symbol
+                if key:
+                    self._active_roots[key] = symbol
             self._open_risk += max(0.0, risk_rupees)
+            self._add_budget(risk_rupees, symbol)
             return True
 
     def record_close(self, risk_rupees: float, pnl: float, symbol: str = "", is_full_close: bool = False) -> None:
         """Release a closed position's reserved risk and record realized P&L."""
         with self._lock:
             self._open_risk = max(0.0, self._open_risk - max(0.0, risk_rupees))
+            self._release_budget(risk_rupees, symbol)
             self._realized_pnl += pnl
             if symbol and is_full_close:
-                root = root_token(symbol)
-                if root and self._active_roots.get(root) == symbol:
-                    self._active_roots.pop(root, None)
+                key = self._lock_key(symbol)
+                if key and self._active_roots.get(key) == symbol:
+                    self._active_roots.pop(key, None)
 
     def release(self, risk_rupees: float, symbol: str = "") -> None:
         """Unwind a reserved amount that never became an open position (C3).
@@ -73,10 +146,11 @@ class PortfolioRiskAuthority:
         """
         with self._lock:
             self._open_risk = max(0.0, self._open_risk - max(0.0, risk_rupees))
+            self._release_budget(risk_rupees, symbol)
             if symbol:
-                root = root_token(symbol)
-                if root and self._active_roots.get(root) == symbol:
-                    self._active_roots.pop(root, None)
+                key = self._lock_key(symbol)
+                if key and self._active_roots.get(key) == symbol:
+                    self._active_roots.pop(key, None)
 
     def can_accept(self, risk_rupees: float, symbol: str = "", is_pyramid: bool = False) -> tuple[bool, str]:
         with self._lock:
@@ -90,11 +164,13 @@ class PortfolioRiskAuthority:
                     f"portfolio daily-loss halt: {self._realized_pnl:.0f} "
                     f"<= -{self._max_daily_loss:.0f}"
                 )
+            if not self._budget_available(risk_rupees, symbol):
+                return False, "correlation or exchange risk budget exceeded"
             if symbol and not is_pyramid:
-                root = root_token(symbol)
-                if root and root in self._active_roots:
+                key = self._lock_key(symbol)
+                if key and key in self._active_roots:
                     return False, (
-                        f"concurrent root position: {root} already active in {self._active_roots[root]}"
+                        f"concurrent root position: {key} already active in {self._active_roots[key]}"
                     )
             return True, ""
 

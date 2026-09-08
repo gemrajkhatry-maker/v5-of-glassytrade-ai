@@ -20,6 +20,7 @@ import logging
 import math
 from typing import TYPE_CHECKING
 
+from quant.contracts.contracts import ContractRef
 from quant.contracts.ports.broker import IBroker
 from quant.decision.signal_builder import Signal as EngineSignal
 from quant.events import OrderFilled, OrderSubmitted
@@ -42,10 +43,19 @@ class LiveOMS:
     and broker domain (Decimal, BUY/SELL).
     """
 
-    def __init__(self, broker: IBroker, portfolio: Portfolio, lot_size: float = 1.0) -> None:
+    def __init__(
+        self,
+        broker: IBroker,
+        portfolio: Portfolio,
+        lot_size: float = 1.0,
+        contract: ContractRef | None = None,
+    ) -> None:
+        if contract is not None and not isinstance(contract, ContractRef):
+            raise ValueError("LiveOMS contract must be a validated ContractRef")
         self._broker = broker
         self._portfolio = portfolio
         self._lot_size = lot_size
+        self._contract = contract
         self._emit_fn = None  # set by coordinator after engine construction
 
     def set_emit_fn(self, emit_fn) -> None:
@@ -78,8 +88,25 @@ class LiveOMS:
         size = snap_to_lot(raw_quantity, lot_size)
         if not math.isfinite(float(size)) or size <= 0:
             raise ValueError(f"LiveOMS.submit: snapped quantity must be finite and > 0, got {size!r}")
+        if self._contract is not None and signal.symbol != self._contract.symbol:
+            raise ValueError(
+                "LiveOMS signal symbol must match its contract: "
+                f"{signal.symbol!r} != {self._contract.symbol!r}"
+            )
         broker_signal = to_broker_signal(signal, size)
-        broker_pos = self._broker.execute_order(broker_signal, self._portfolio, signal.symbol)
+        try:
+            broker_pos = self._broker.execute_order(
+                broker_signal, self._portfolio, signal.symbol,
+                contract_ref=self._contract,
+            )
+        except TypeError as exc:
+            # Compatibility for pre-contract-aware test/broker doubles; live
+            # adapters implement the extended port and receive the identity.
+            if "contract_ref" not in str(exc):
+                raise
+            broker_pos = self._broker.execute_order(
+                broker_signal, self._portfolio, signal.symbol,
+            )
 
         if broker_pos is None:
             # Broker rejection: raise so the engine's submit-error path unwinds
@@ -132,6 +159,11 @@ class LiveOMS:
         and returns a Fill with the actual broker fill price.
         """
         long = position.size > 0
+        if self._contract is not None and position.order.signal.symbol != self._contract.symbol:
+            raise ValueError(
+                "LiveOMS position symbol must match its contract: "
+                f"{position.order.signal.symbol!r} != {self._contract.symbol!r}"
+            )
         close_side = "SELL" if long else "BUY"
         qty = abs(int(position.size))
 
@@ -146,13 +178,25 @@ class LiveOMS:
                 pnl=0.0,
             )
 
-        broker_pos = self._broker.close_position(
-            symbol=position.order.signal.symbol,
-            side=close_side,
-            quantity=qty,
-            portfolio=self._portfolio,
-            reference_price=price,
-        )
+        try:
+            broker_pos = self._broker.close_position(
+                symbol=position.order.signal.symbol,
+                side=close_side,
+                quantity=qty,
+                portfolio=self._portfolio,
+                reference_price=price,
+                contract_ref=self._contract,
+            )
+        except TypeError as exc:
+            if "contract_ref" not in str(exc):
+                raise
+            broker_pos = self._broker.close_position(
+                symbol=position.order.signal.symbol,
+                side=close_side,
+                quantity=qty,
+                portfolio=self._portfolio,
+                reference_price=price,
+            )
 
         if broker_pos is None:
             raise RuntimeError(
@@ -216,6 +260,11 @@ class LiveOMS:
         remaining_size = position.size * (1.0 - fraction)
 
         long = position.size > 0
+        if self._contract is not None and position.order.signal.symbol != self._contract.symbol:
+            raise ValueError(
+                "LiveOMS position symbol must match its contract: "
+                f"{position.order.signal.symbol!r} != {self._contract.symbol!r}"
+            )
         close_side = "SELL" if long else "BUY"
         qty = abs(int(closed_size))
 
@@ -240,13 +289,25 @@ class LiveOMS:
                 position,
             )
 
-        broker_pos = self._broker.close_position(
-            symbol=position.order.signal.symbol,
-            side=close_side,
-            quantity=qty,
-            portfolio=self._portfolio,
-            reference_price=price,
-        )
+        try:
+            broker_pos = self._broker.close_position(
+                symbol=position.order.signal.symbol,
+                side=close_side,
+                quantity=qty,
+                portfolio=self._portfolio,
+                reference_price=price,
+                contract_ref=self._contract,
+            )
+        except TypeError as exc:
+            if "contract_ref" not in str(exc):
+                raise
+            broker_pos = self._broker.close_position(
+                symbol=position.order.signal.symbol,
+                side=close_side,
+                quantity=qty,
+                portfolio=self._portfolio,
+                reference_price=price,
+            )
 
         if broker_pos is None:
             raise RuntimeError(
@@ -347,7 +408,17 @@ class LiveOMS:
 
         # Submit to broker (same path as submit())
         broker_signal = to_broker_signal(pyramid_signal, size)
-        broker_pos = self._broker.execute_order(broker_signal, self._portfolio, pyramid_signal.symbol)
+        try:
+            broker_pos = self._broker.execute_order(
+                broker_signal, self._portfolio, pyramid_signal.symbol,
+                contract_ref=self._contract,
+            )
+        except TypeError as exc:
+            if "contract_ref" not in str(exc):
+                raise
+            broker_pos = self._broker.execute_order(
+                broker_signal, self._portfolio, pyramid_signal.symbol,
+            )
 
         if broker_pos is None:
             logger.warning(
