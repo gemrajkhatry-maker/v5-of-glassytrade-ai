@@ -1,8 +1,4 @@
-"""Broker-neutral tradable contract identity.
-
-Broker security identifiers, order payload fields and authentication details
-belong inside broker adapters. Quant/domain code uses ``ContractRef`` only.
-"""
+"""Broker-neutral tradable contract identity."""
 
 from __future__ import annotations
 
@@ -33,7 +29,6 @@ class ContractRef:
             option_type = "CE"
         elif option_type in {"PUT", "P"}:
             option_type = "PE"
-
         if not symbol or not exchange:
             raise ValueError("ContractRef symbol and exchange are required")
         if not expiry:
@@ -54,7 +49,6 @@ class ContractRef:
             raise ValueError("Option ContractRef requires strike")
         if self.strike is not None and float(self.strike) <= 0:
             raise ValueError("ContractRef strike must be positive")
-
         object.__setattr__(self, "symbol", symbol)
         object.__setattr__(self, "exchange", exchange)
         object.__setattr__(self, "expiry", expiry)
@@ -63,3 +57,27 @@ class ContractRef:
         object.__setattr__(self, "option_type", option_type)
         object.__setattr__(self, "multiplier", float(self.multiplier))
         object.__setattr__(self, "product_type", str(self.product_type).strip().upper())
+
+    @property
+    def instrument_type(self) -> str:
+        return "OPTION" if self.option_type else "FUTURE"
+
+    @property
+    def root(self) -> str:
+        from quant.contracts.instrument_registry import root_token
+        return root_token(self.symbol)
+
+    @property
+    def contract_id(self) -> str:
+        strike = "" if self.strike is None else f"{self.strike:g}"
+        return ":".join((self.exchange, self.root, self.instrument_type, self.expiry, strike, self.option_type))
+
+    def metadata(self) -> dict[str, object]:
+        return {
+            "contract_id": self.contract_id, "symbol": self.symbol,
+            "exchange": self.exchange, "root": self.root,
+            "instrument_type": self.instrument_type, "expiry": self.expiry,
+            "lot_size": self.lot_size, "tick_size": self.tick_size,
+            "strike": self.strike, "option_type": self.option_type,
+            "multiplier": self.multiplier, "product_type": self.product_type,
+        }
