@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from dataclasses import FrozenInstanceError
 
 from brokers.broker.dhan.infrastructure.websocket_client import DhanWebSocketClient
 from brokers.broker.dhan.ports import WSMessage
@@ -41,6 +42,10 @@ def test_queue_overflow_counts_drops_and_keeps_newest():
 
         assert client.dropped_message_count == 2
         assert client._message_queue.qsize() == 1
+        health = client.health_snapshot
+        assert health.received == 2
+        assert health.dropped == 2
+        assert health.queue_depth == 1
         # The oldest message is dropped; the newest survives.
         surviving = client._message_queue.get_nowait()
         assert surviving.data["security_id"] == "third"
@@ -65,3 +70,62 @@ def test_repr_exposes_drop_count():
     client = DhanWebSocketClient()
     client._dropped_message_count = 7
     assert "dropped=7" in repr(client)
+
+
+def test_health_snapshot_exposes_raw_feed_counters_and_queue_state():
+    client = DhanWebSocketClient()
+
+    async def _run() -> None:
+        client._message_queue = asyncio.Queue(maxsize=3)
+        client._enqueue_message(_msg("first"))
+        client._enqueue_message(_msg("second"))
+
+        health = client.health_snapshot
+
+        assert health.received == 2
+        assert health.processed == 0
+        assert health.dropped == 0
+        assert health.queue_depth == 2
+        assert health.queue_capacity == 3
+        assert health.reconnect_count == 0
+
+    asyncio.run(_run())
+
+
+def test_health_snapshot_counts_messages_when_consumed():
+    client = DhanWebSocketClient()
+
+    async def _run() -> None:
+        client._message_queue = asyncio.Queue(maxsize=3)
+        client._enqueue_message(_msg("only"))
+
+        message = await anext(client.messages())
+
+        assert message.data["security_id"] == "only"
+        assert client.health_snapshot.processed == 1
+        assert client.health_snapshot.queue_depth == 0
+
+    asyncio.run(_run())
+
+
+def test_health_snapshot_is_immutable():
+    client = DhanWebSocketClient()
+
+    try:
+        client.health_snapshot.received = 1
+    except FrozenInstanceError:
+        pass
+    else:
+        raise AssertionError("health snapshots must be immutable")
+
+
+def test_health_snapshot_counts_reconnect_attempts():
+    class _ReconnectableClient(DhanWebSocketClient):
+        async def connect(self) -> None:
+            self._connected = True
+
+    client = _ReconnectableClient(reconnect_delay=0, max_reconnect_attempts=1)
+
+    asyncio.run(client._attempt_reconnect())
+
+    assert client.health_snapshot.reconnect_count == 1

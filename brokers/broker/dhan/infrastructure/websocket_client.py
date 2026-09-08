@@ -29,6 +29,7 @@ Subscription message:
 import asyncio
 import json
 import struct
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional, Set
 
@@ -82,6 +83,18 @@ _RC_FULL        = 8
 _RC_DISCONNECT  = 50
 
 
+@dataclass(frozen=True)
+class DhanFeedHealthSnapshot:
+    """Point-in-time health counters for the raw Dhan feed transport."""
+
+    received: int
+    processed: int
+    dropped: int
+    queue_depth: int
+    queue_capacity: int
+    reconnect_count: int
+
+
 # ---------------------------------------------------------------------------
 # Dhan WebSocket Client
 # ---------------------------------------------------------------------------
@@ -117,6 +130,7 @@ class DhanWebSocketClient(IWebSocketClient):
         self._ws: Optional[ClientConnection] = None
         self._connected: bool = False
         self._reconnect_count: int = 0
+        self._total_reconnect_count: int = 0
 
         self._message_queue: Optional[asyncio.Queue] = None  # lazily initialized in connect()
         self._receive_task: Optional[asyncio.Task] = None
@@ -125,6 +139,8 @@ class DhanWebSocketClient(IWebSocketClient):
         # queue was full (backpressure). Exposed via dropped_message_count so
         # ops can detect a consumer that cannot keep up with the feed.
         self._dropped_message_count: int = 0
+        self._received_message_count: int = 0
+        self._processed_message_count: int = 0
 
         self._subscriptions: Set[str] = set()
         self._current_feed_type: int = FEED_TYPE_FULL
@@ -155,6 +171,19 @@ class DhanWebSocketClient(IWebSocketClient):
     def dropped_message_count(self) -> int:
         """Number of feed messages dropped due to queue overflow (since connect)."""
         return self._dropped_message_count
+
+    @property
+    def health_snapshot(self) -> DhanFeedHealthSnapshot:
+        """Return raw feed transport counters and current queue state."""
+        queue = self._message_queue
+        return DhanFeedHealthSnapshot(
+            received=self._received_message_count,
+            processed=self._processed_message_count,
+            dropped=self._dropped_message_count,
+            queue_depth=queue.qsize() if queue is not None else 0,
+            queue_capacity=queue.maxsize if queue is not None else 0,
+            reconnect_count=self._total_reconnect_count,
+        )
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -402,6 +431,7 @@ class DhanWebSocketClient(IWebSocketClient):
                 if self._message_queue is None:
                     break
                 msg = await asyncio.wait_for(self._message_queue.get(), timeout=1.0)
+                self._processed_message_count += 1
                 # Terminal: max reconnect attempts exhausted
                 if msg.type == "disconnected" and "Max reconnection" in str(msg.data.get("reason", "")):
                     yield msg
@@ -464,6 +494,7 @@ class DhanWebSocketClient(IWebSocketClient):
         ``dropped_message_count`` (and logged) so feed starvation is
         observable instead of silent.
         """
+        self._received_message_count += 1
         if self._message_queue is None:
             return
         try:
@@ -485,6 +516,7 @@ class DhanWebSocketClient(IWebSocketClient):
     async def _attempt_reconnect(self) -> None:
         while self._reconnect_count < self._max_reconnect_attempts:
             self._reconnect_count += 1
+            self._total_reconnect_count += 1
             delay = ReconnectPolicy(base=self._reconnect_delay, cap=60.0, max_attempts=self._max_reconnect_attempts).delay_for(self._reconnect_count - 1)
             logger.info(f"Reconnecting {self._reconnect_count}/{self._max_reconnect_attempts} in {delay}s")
             await asyncio.sleep(delay)
