@@ -187,6 +187,18 @@ class EventBus:
         """
         import logging
 
+        if isinstance(event, AmtUpdated) and isinstance(event.amt, dict):
+            # AMT DTOs contain the complete footprint history for UI/decision
+            # consumers, but retaining that history in every journal/trace
+            # event is quadratic in bars. Events carry only the latest candle;
+            # the live analyzer remains the owner of the full snapshot.
+            footprints = event.amt.get("footprints")
+            if isinstance(footprints, dict) and len(footprints) > 1:
+                latest_key = event.time if event.time in footprints else next(reversed(footprints))
+                bounded_amt = dict(event.amt)
+                bounded_amt["footprints"] = {latest_key: footprints[latest_key]}
+                object.__setattr__(event, "amt", bounded_amt)
+
         # Events are frozen value objects, while the bus owns the per-engine
         # ordering sequence. Attach the ID at the publication boundary so
         # every public subscriber observes the same durable identity.
