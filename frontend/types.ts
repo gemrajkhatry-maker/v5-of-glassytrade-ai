@@ -77,6 +77,7 @@ export interface AgentDecision {
     rrAchieved?: number;
   } | null;
   dynamicTrailStop?: number | null;
+  isAdvisory?: boolean;
 }
 
 export interface RiskState {
@@ -235,6 +236,7 @@ export interface QuantDecisionAnalysis {
     rr: number;
     modelLabel: string;  // replaces confidence
   } | null;
+  isAdvisory?: boolean;
 }
 
 /** Frozen VA checkpoints: {time, vah, val, poc} — used to detect expansion. */

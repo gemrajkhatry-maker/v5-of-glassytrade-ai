@@ -19,12 +19,14 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from quant.decision.context import DecisionContext
+from quant.session_gates import session_allow_entry
 
 logger = logging.getLogger(__name__)
 
 # Global singleton model cache
 _TIMESFM_MODEL: Any = None
 _TIMESFM_LOCK = threading.Lock()
+_TIMESFM_MODEL_LOAD_ERROR: Optional[str] = None
 
 
 def get_timesfm_model(device: str = "cpu") -> Any:
@@ -54,8 +56,18 @@ def get_timesfm_model(device: str = "cpu") -> Any:
                 logger.info("TimesFMEngine: Model loaded successfully in %.2fs", time.perf_counter() - t0)
             except Exception as e:
                 logger.error("TimesFMEngine: Failed to load TimesFM 3.0 model: %s", e)
+                global _TIMESFM_MODEL_LOAD_ERROR
+                _TIMESFM_MODEL_LOAD_ERROR = str(e)
                 raise
     return _TIMESFM_MODEL
+
+
+def reset_timesfm_model_cache() -> None:
+    """Reset the global model cache (for testing)."""
+    global _TIMESFM_MODEL, _TIMESFM_MODEL_LOAD_ERROR
+    with _TIMESFM_LOCK:
+        _TIMESFM_MODEL = None
+        _TIMESFM_MODEL_LOAD_ERROR = None
 
 
 class TimesFMEngine:
@@ -74,6 +86,52 @@ class TimesFMEngine:
         )
         self.scanning_agent = TimesFMScanningAgent(target_horizon=self.target_horizon)
         self.position_agent = TimesFMPositionAgent(target_horizon=self.target_horizon)
+        self._model_loaded = False
+
+    def warmup(self) -> bool:
+        """Load the model on startup. Returns True if model loaded successfully.
+
+        This method is idempotent — calling it multiple times is safe.
+        If the model fails to load, the engine falls back to rule-based mode.
+        """
+        if self._model_loaded:
+            return True
+        try:
+            get_timesfm_model(self.device)
+            self._model_loaded = True
+            logger.info("TimesFMEngine: warmup complete — model ready")
+            return True
+        except Exception as e:
+            logger.warning("TimesFMEngine: warmup failed — falling back to rule-based mode: %s", e)
+            self._model_loaded = False
+            return False
+
+    def is_healthy(self) -> bool:
+        """Return True if model is loaded and ready for inference."""
+        return self._model_loaded
+
+    @staticmethod
+    def health_check() -> Dict[str, Any]:
+        """Static health check that tries to load model and returns status dict.
+
+        Returns a dict with:
+        - status: "healthy" | "degraded" | "unavailable"
+        - model_loaded: bool
+        - error: error message if model failed to load
+        """
+        try:
+            get_timesfm_model()
+            return {
+                "status": "healthy",
+                "model_loaded": True,
+                "error": None,
+            }
+        except Exception as e:
+            return {
+                "status": "unavailable",
+                "model_loaded": False,
+                "error": _TIMESFM_MODEL_LOAD_ERROR or str(e),
+            }
 
     def add_context(self, ctx: DecisionContext) -> List[float]:
         """Record the latest price/close and return a 32-element array (padded if needed)."""
@@ -94,6 +152,38 @@ class TimesFMEngine:
         """Run TimesFM 3.0 forecasting and route to the proper specialized agent."""
         t0 = time.perf_counter()
         symbol = str(ctx.symbol or "UNKNOWN")
+
+        # Session Gate: check if new entries are allowed at this time/market
+        if ctx.time_str and not session_allow_entry(ctx.time_str, ctx.market):
+            return {
+                "role": "SCANNING",
+                "action": "FLAT",
+                "direction": "FLAT",
+                "setup": "NO_EDGE",
+                "reason": "SESSION_GATE_BLOCKED",
+                "confidence": "Low",
+                "confidenceScore": 0.0,
+                "rationale": f"Session gate blocked entry for {symbol} at {ctx.time_str} (market={ctx.market}).",
+                "forecastSteps": ["FLAT"] * self.target_horizon,
+                "quantileSpread": 0.0,
+                "meanForecast": float(ctx.bar.close if ctx.bar else 0.0),
+                "gateResults": [
+                    {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": False, "message": "Session gate blocked"},
+                    {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": True, "message": ""},
+                    {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": False, "message": "No trade"},
+                    {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": False, "message": "No trade"},
+                ],
+                "activePosition": None,
+                "dynamicTrailStop": None,
+                "modelVersions": {"timesfm": "3.0", "engine": "native_direct"},
+                "source": "TIMESFM_3.0_NATIVE",
+                "latencyMs": 0.1,
+                "modelLabel": "TimesFM-SessionGateBlocked",
+                "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
+                "timing": str(ctx.session_phase or "REGULAR"),
+                "sizeFraction": 0.0,
+                "latencyUs": 100,
+            }
 
         # Session & Risk Guards
         if ctx.risk_halted:
@@ -163,11 +253,23 @@ class TimesFMEngine:
         context_prices = self.add_context(ctx)
         curr_price = context_prices[-1]
 
-        # 2. Run TimesFM 3.0 inference
-        model = get_timesfm_model(self.device)
-        np_prices = np.array(context_prices, dtype=np.float32)
-        res = model.predict(context=np_prices, horizon=self.target_horizon, return_quantiles=True)
-        lat_ms = (time.perf_counter() - t0) * 1000.0
+        # 2. Run TimesFM 3.0 inference (with graceful fallback)
+        try:
+            model = get_timesfm_model(self.device)
+            self._model_loaded = True
+        except Exception as e:
+            # Graceful fallback: log error and return rule-based decision
+            logger.warning("TimesFMEngine: model not available (%s) — returning rule-based fallback", e)
+            return self._rule_based_fallback(ctx, curr_price, str(e))
+
+        try:
+            np_prices = np.array(context_prices, dtype=np.float32)
+            res = model.predict(context=np_prices, horizon=self.target_horizon, return_quantiles=True)
+            lat_ms = (time.perf_counter() - t0) * 1000.0
+        except Exception as e:
+            # Inference failed — graceful fallback to rule-based
+            logger.warning("TimesFMEngine: inference failed (%s) — returning rule-based fallback", e)
+            return self._rule_based_fallback(ctx, curr_price, str(e))
 
         # Quantile shape: (32, 9) where index 4 is p50, 0 is p10, 8 is p90
         quantiles = res.quantiles if hasattr(res, "quantiles") else None
@@ -216,3 +318,52 @@ class TimesFMEngine:
             return self.position_agent.evaluate(ctx, forecast)
         else:
             return self.scanning_agent.evaluate(ctx, forecast)
+
+    def _rule_based_fallback(self, ctx: DecisionContext, curr_price: float, error_msg: str) -> Dict[str, Any]:
+        """Return a valid decision payload in rule-based fallback mode.
+
+        This is used when the TimesFM model fails to load or inference fails.
+        The engine degrades gracefully — never crashes, always returns a valid payload.
+        """
+        logger.info("TimesFMEngine: using rule-based fallback for %s (error: %s)", ctx.symbol, error_msg)
+
+        # Simple rule-based direction from AMT context
+        direction = "FLAT"
+        if ctx.cvd_slope > 0 and ctx.absorption_side == "BUY":
+            direction = "LONG"
+        elif ctx.cvd_slope < 0 and ctx.absorption_side == "SELL":
+            direction = "SHORT"
+
+        forecast_steps = [direction] * self.target_horizon
+        if direction == "FLAT":
+            forecast_steps = ["FLAT"] * self.target_horizon
+
+        return {
+            "role": "POSITION_MANAGEMENT" if ctx.position_open else "SCANNING",
+            "action": "HOLD" if ctx.position_open else (f"ENTER_{direction}" if direction != "FLAT" else "FLAT"),
+            "direction": direction,
+            "setup": "RULE_BASED_FALLBACK",
+            "reason": "TIMESFM_FALLBACK",
+            "confidence": "Low",
+            "confidenceScore": 0.2,
+            "rationale": f"TimesFM unavailable ({error_msg[:100]}) — using rule-based AMT signals.",
+            "forecastSteps": forecast_steps,
+            "quantileSpread": 0.0,
+            "meanForecast": curr_price,
+            "gateResults": [
+                {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": True, "message": ""},
+                {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": True, "message": ""},
+                {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": False, "message": "Fallback mode"},
+                {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": False, "message": "Fallback mode"},
+            ],
+            "activePosition": None,
+            "dynamicTrailStop": None,
+            "modelVersions": {"timesfm": "unavailable", "engine": "rule_based_fallback"},
+            "source": "TIMESFM_FALLBACK",
+            "latencyMs": 0.1,
+            "modelLabel": "TimesFM-Fallback",
+            "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
+            "timing": str(ctx.session_phase or "REGULAR"),
+            "sizeFraction": 0.0,
+            "latencyUs": 100,
+        }

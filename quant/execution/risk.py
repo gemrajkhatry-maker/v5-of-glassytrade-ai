@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 
 _IST = IST  # canonical — see contracts/timezones
 
+# Day-of-week variance: Mondays & Fridays get defensive sizing (Fabio spec).
+# Applied as a final multiplier AFTER all other sizing calculations.
+DAY_OF_WEEK_MULTIPLIER = {
+    0: 0.5,  # Monday — defensive
+    1: 1.0,  # Tuesday — full
+    2: 1.0,  # Wednesday — full
+    3: 1.0,  # Thursday — full
+    4: 0.5,  # Friday — defensive
+}
+
 
 class RiskLoadStatus(str, Enum):
     """Why SessionRisk started in its current state — for telemetry/readiness.
@@ -57,6 +67,7 @@ class SessionRisk:
                  storage: Any | None = None,
                  symbol: str = "",
                  date: str | None = None,
+                 day_of_week: int | None = None,
                  portfolio_risk: Any | None = None) -> None:
         # Optional shared PortfolioRiskAuthority: when present, SIZING equity
         # reflects the whole book (starting capital + portfolio realized P&L)
@@ -83,6 +94,11 @@ class SessionRisk:
         self._symbol = symbol
         # Always use today's date — never inherit a None date key
         self._date = date if (date and date != "None") else _today()
+        # Day-of-week for defensive sizing on Mon/Fri (Fabio spec)
+        if day_of_week is None:
+            self._day_of_week = datetime.now(_IST).weekday()
+        else:
+            self._day_of_week = day_of_week
         self._load_status: RiskLoadStatus = RiskLoadStatus.MEMORY_ONLY
         self._load()
 
@@ -330,12 +346,12 @@ class SessionRisk:
                         lots = 1
                     if max_lots is not None and max_lots > 0:
                         lots = min(lots, max_lots)
-                    return float(lots * lot_size)
+                    qty = float(lots * lot_size)
                 else:
                     qty = target_capital / cost_per_unit
                     if max_lots is not None and max_lots > 0:
                         qty = min(qty, float(max_lots))
-                    return qty
+                return qty * DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
 
             # Standard stop-loss fractional risk sizing
             risk_amount = sizing_equity * self._risk_per_trade_pct()
@@ -359,14 +375,14 @@ class SessionRisk:
                     lots = min(lots, deployment_lots)
                 if max_lots is not None and max_lots > 0:
                     lots = min(lots, max_lots)
-                return float(lots * lot_size)
+                qty = float(lots * lot_size)
             else:
                 qty = risk_amount / loss_per_unit
                 if self._capital_deployment_pct is not None and entry > 0:
                     qty = min(qty, (sizing_equity * self._capital_deployment_pct) / entry)
                 if max_lots is not None and max_lots > 0:
                     qty = min(qty, float(max_lots))
-                return qty
+            return qty * DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
 
     def pyramid_position_size(
         self,

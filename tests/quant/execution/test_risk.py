@@ -125,3 +125,27 @@ def test_house_money_bonus_capped():
     assert pct <= 0.005 + 1e-9, "never exceed 0.50% total"
     bonus = pct - 0.004
     assert bonus <= 0.30 * 200_000 / 1_000_000 + 1e-9, "addition never exceeds 30% of session profit"
+
+
+def test_day_of_week_multiplier_monday_defensive():
+    """Monday (0) and Friday (4) apply 0.5x defensive multiplier."""
+    from quant.execution.risk import DAY_OF_WEEK_MULTIPLIER
+
+    # Monday: defensive sizing
+    r_mon = SessionRisk(starting_equity=100000.0, base_risk_pct=0.01, day_of_week=0)
+    qty_mon = r_mon.position_size(entry=100.0, sl=99.0)
+    assert qty_mon == pytest.approx(250.0 * DAY_OF_WEEK_MULTIPLIER[0])
+
+    # Tuesday: full sizing
+    r_tue = SessionRisk(starting_equity=100000.0, base_risk_pct=0.01, day_of_week=1)
+    qty_tue = r_tue.position_size(entry=100.0, sl=99.0)
+    assert qty_tue == pytest.approx(250.0 * DAY_OF_WEEK_MULTIPLIER[1])
+
+    # Friday: defensive sizing
+    r_fri = SessionRisk(starting_equity=100000.0, base_risk_pct=0.01, day_of_week=4)
+    qty_fri = r_fri.position_size(entry=100.0, sl=99.0)
+    assert qty_fri == pytest.approx(250.0 * DAY_OF_WEEK_MULTIPLIER[4])
+
+    # Monday and Friday should be half of Tuesday
+    assert qty_mon == pytest.approx(qty_tue * 0.5)
+    assert qty_fri == pytest.approx(qty_tue * 0.5)

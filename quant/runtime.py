@@ -91,6 +91,7 @@ from quant.execution.exits import ExitDecision, ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.ports import IOMS
 from quant.execution.risk import SessionRisk
+from quant.contracts.timezones import IST
 from quant.persistence import Journal
 from quant.state import LiveQuoteCache, _decision_to_view, _epoch_to_iso
 from quant.bars import DEFAULT_INTERVAL_SEC
@@ -347,6 +348,7 @@ class QuantEngine:
             max_daily_loss_pct=max_daily_loss_pct,
             max_consecutive_losses=max_consecutive_losses,
             base_risk_pct=base_risk,
+            day_of_week=datetime.now(tz=IST).weekday(),
         )
         self._bus = EventBus()
         # Passive hot-path trace (B7): bar/decision/fill phases are mapped by

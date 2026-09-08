@@ -77,15 +77,32 @@ def build_live_advisor(emit_fn) -> "LLMAdvisor | None":
             from quant.decision.timesfm_advisor import TimesFMAdvisor
 
             logger.info("Building TimesFMAdvisor (native=%s, llm_narrative=False)", use_native)
-            return TimesFMAdvisor(
+            advisor = TimesFMAdvisor(
                 emit_fn=emit_fn,
                 service_url=os.getenv("TIMESFM_SERVICE_URL", "http://localhost:8091"),
                 enable_llm_narrative=False,
                 use_native_engine=use_native,
             )
+
+            # Warmup: pre-load the model so the first tick doesn't pay the
+            # load cost. If warmup fails, we fall back to LLM/rule-based.
+            if use_native and hasattr(advisor, "_native_engine") and advisor._native_engine is not None:
+                try:
+                    if not advisor._native_engine.warmup():
+                        logger.warning("TimesFM warmup failed — falling back to LLM/rule-based advisor")
+                        raise RuntimeError("TimesFM warmup returned False")
+                    logger.info("TimesFM warmup complete — model is healthy")
+                except Exception as e:
+                    logger.warning("TimesFM warmup error (%s) — falling back to LLM/rule-based", e)
+                    raise
+
+            return advisor
         except Exception:
+            # TimesFM failed to initialize — fall back to MLX LLMAdvisor
+            # (which degrades to rule-based narrative when MLX_MODEL_PATH is unset).
             logger.exception("Failed to initialize TimesFMAdvisor — falling back to MLX/Rule LLMAdvisor")
 
+    # Fallback: MLX LLMAdvisor (or rule-based if no MLX model configured)
     try:
         from quant.llm.advisor import LLMAdvisor
 

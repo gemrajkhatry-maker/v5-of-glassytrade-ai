@@ -18,6 +18,7 @@ import {
     Lock,
     Crosshair,
     Radar,
+    Info,
 } from 'lucide-react';
 import { AgentDecision, QuantDecisionAnalysis, GateResult, Portfolio } from '../../types';
 
@@ -45,6 +46,7 @@ export const AIAdvisorCard: React.FC<AIAdvisorCardProps> = React.memo(({ agentDe
         ? `Managing open ${direction} position: tracking trailing stop and value area acceptance.`
         : 'Analyzing volume profile, multi-step horizon, and auction order flow...');
     const source = rawDecision.source || 'TIMESFM_3.0';
+    const isAdvisory = rawDecision.isAdvisory ?? /TIMESFM|LLM/i.test(source);
     const latencyMs = rawDecision.latencyMs ?? (rawDecision.latencyUs ? Math.round(rawDecision.latencyUs / 1000) : undefined);
 
     const forecastSteps = rawDecision.forecastSteps || [];
@@ -157,6 +159,19 @@ export const AIAdvisorCard: React.FC<AIAdvisorCardProps> = React.memo(({ agentDe
                         AI Market Thesis
                     </span>
 
+                    {/* Advisory vs Deterministic Badge */}
+                    <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[8.5px] font-mono font-bold uppercase tracking-wider border ${
+                            isAdvisory
+                                ? 'bg-amber-500/15 text-amber-300 border-amber-500/35 shadow-[0_0_8px_rgba(245,158,11,0.2)]'
+                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35 shadow-[0_0_8px_rgba(16,185,129,0.2)]'
+                        }`}
+                        title="Advisory signals are for reference only. Real orders are placed by the deterministic AMT engine."
+                    >
+                        {isAdvisory ? <Info className="w-2.5 h-2.5 text-amber-400" /> : <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />}
+                        {isAdvisory ? 'Advisory' : 'Deterministic'}
+                    </span>
+
                     {/* Dynamic Role Badge */}
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[8.5px] font-mono font-bold uppercase tracking-wider border ${
                         isPositionMgmt
@@ -186,6 +201,36 @@ export const AIAdvisorCard: React.FC<AIAdvisorCardProps> = React.memo(({ agentDe
                     </span>
                 </div>
             </div>
+
+            {/* Deterministic AMT Signal (Primary - Real Orders) */}
+            {!isAdvisory && quantDecision?.signal && (
+                <div className="p-2.5 rounded-lg bg-emerald-950/20 border border-emerald-500/25 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[9px] font-mono font-bold uppercase tracking-wider text-emerald-300">
+                        <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                        Deterministic AMT Signal — Primary
+                    </div>
+                    <div className="flex items-center gap-3 text-[9px] font-mono text-slate-300 flex-wrap">
+                        <span className="font-bold text-emerald-200 uppercase">{quantDecision.signal.type}</span>
+                        <span>Entry: <strong className="text-slate-200">₹{quantDecision.signal.entry}</strong></span>
+                        <span>SL: <strong className="text-rose-300">₹{quantDecision.signal.sl}</strong></span>
+                        <span>TP: <strong className="text-emerald-300">₹{quantDecision.signal.tp}</strong></span>
+                        <span>RR: <strong className="text-slate-200">{quantDecision.signal.rr.toFixed(2)}</strong></span>
+                        <span className="text-slate-500">{quantDecision.signal.modelLabel}</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Separator: Deterministic vs Advisory */}
+            {isAdvisory && (
+                <div className="flex items-center gap-2 py-1">
+                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-amber-500/40 to-transparent"></div>
+                    <span className="text-[8px] font-mono font-bold uppercase tracking-widest text-amber-400/80 flex items-center gap-1">
+                        <Info className="w-2.5 h-2.5" />
+                        Advisory Only — No Order Impact
+                    </span>
+                    <div className="flex-1 h-px bg-gradient-to-r from-transparent via-amber-500/40 to-transparent"></div>
+                </div>
+            )}
 
             {/* Action + Setup + Conviction + Metrics */}
             <div className="flex items-center justify-between gap-2 flex-wrap bg-black/30 p-2 rounded-lg border border-white/5">
