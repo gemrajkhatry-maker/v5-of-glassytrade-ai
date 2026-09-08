@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from app.infrastructure.storage.database import (
+    FillLedgerConflictError,
     ORDER_TERMINAL_STATES,
     SQLiteStorageAdapter,
 )
@@ -81,9 +82,39 @@ def test_load_orders_filter_by_symbol(storage):
     assert [r["order_id"] for r in rows] == ["b"]
 
 
-def test_save_order_is_upsert(storage):
-    storage.save_order(_order(status="SUBMITTED"))
-    storage.save_order(_order(status="FILLED"))  # same order_id -> replace
-    rows = storage.load_orders()
-    assert len(rows) == 1
-    assert rows[0]["status"] == "FILLED"
+
+
+def _fill(fill_id="fill-1", **overrides):
+    fill = {
+        "fill_id": fill_id,
+        "order_id": "entry:position-1",
+        "position_id": "position-1",
+        "symbol": "NIFTY 24800 CE",
+        "side": "BUY",
+        "quantity": 65.0,
+        "fill_price": 101.0,
+        "pnl": 0.0,
+        "event_time": "2026-09-07T09:15:00+05:30",
+    }
+    fill.update(overrides)
+    return fill
+
+
+def test_save_fill_identical_replay_is_idempotent(storage):
+    storage.save_fill(_fill())
+    storage.save_fill(_fill())
+    assert len(storage.load_fills(position_id="position-1")) == 1
+
+
+def test_save_fill_conflicting_replay_is_rejected(storage):
+    storage.save_fill(_fill())
+    with pytest.raises(FillLedgerConflictError, match="fill-1"):
+        storage.save_fill(_fill(quantity=64.0))
+    rows = storage.load_fills(position_id="position-1")
+    assert rows[0]["quantity"] == pytest.approx(65.0)
+
+
+def test_load_fills_orders_by_event_time(storage):
+    storage.save_fill(_fill("late", event_time="2026-09-07T09:16:00+05:30"))
+    storage.save_fill(_fill("early", event_time="2026-09-07T09:15:00+05:30"))
+    assert [row["fill_id"] for row in storage.load_fills()] == ["early", "late"]

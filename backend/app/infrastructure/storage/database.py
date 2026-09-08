@@ -199,6 +199,10 @@ _TICK_FLUSH_INTERVAL = 5.0  # seconds
 ORDER_TERMINAL_STATES = {"FILLED", "REJECTED", "CANCELLED", "EXPIRED"}
 
 
+class FillLedgerConflictError(ValueError):
+    """Raised when a fill ID is replayed with different accounting data."""
+
+
 class SQLiteStorageAdapter(IStorage):
     """SQLite-backed persistent storage with WAL mode and tick batching."""
 
@@ -806,33 +810,68 @@ class SQLiteStorageAdapter(IStorage):
             return [dict(r) for r in rows]
 
     def save_fill(self, fill: dict[str, Any]) -> None:
-        """Persist one fill exactly once using its durable logical fill ID."""
+        """Persist one fill idempotently and reject conflicting replays."""
         fill_id = str(fill.get("fill_id") or "").strip()
         if not fill_id:
             raise ValueError("fill_id is required for fill-ledger persistence")
-        self._execute_write(
-            "INSERT OR IGNORE INTO fill_ledger "
-            "(fill_id, order_id, position_id, symbol, side, quantity, fill_price, pnl, event_time, extra) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                fill_id,
-                str(fill.get("order_id") or ""),
-                str(fill.get("position_id") or ""),
-                str(fill.get("symbol") or ""),
-                str(fill.get("side") or ""),
-                to_float(fill.get("quantity")),
-                to_float(fill.get("fill_price")),
-                to_float(fill.get("pnl")),
-                str(fill.get("event_time") or ""),
-                json.dumps({
-                    key: value for key, value in fill.items()
-                    if key not in {
-                        "fill_id", "order_id", "position_id", "symbol", "side",
-                        "quantity", "fill_price", "pnl", "event_time",
-                    }
-                }),
-            ),
-        )
+
+        def accounting_payload(data: dict[str, Any]) -> str:
+            payload = dict(data)
+            payload.pop("created_at", None)
+            payload.pop("id", None)
+            return json.dumps(payload, sort_keys=True, default=str)
+
+        incoming = {
+            "fill_id": fill_id,
+            "order_id": str(fill.get("order_id") or ""),
+            "position_id": str(fill.get("position_id") or ""),
+            "symbol": str(fill.get("symbol") or ""),
+            "side": str(fill.get("side") or ""),
+            "quantity": to_float(fill.get("quantity")),
+            "fill_price": to_float(fill.get("fill_price")),
+            "pnl": to_float(fill.get("pnl")),
+            "event_time": str(fill.get("event_time") or ""),
+        }
+        incoming.update({
+            key: value for key, value in fill.items()
+            if key not in {
+                "fill_id", "order_id", "position_id", "symbol", "side",
+                "quantity", "fill_price", "pnl", "event_time",
+            }
+        })
+        with self._lock:
+            existing = self._conn.execute(
+                "SELECT * FROM fill_ledger WHERE fill_id = ?", (fill_id,)
+            ).fetchone()
+            if existing is not None:
+                stored = dict(existing)
+                extra = json.loads(stored.pop("extra", "{}") or "{}")
+                stored.update(extra)
+                stored.pop("created_at", None)
+                if accounting_payload(stored) != accounting_payload(incoming):
+                    raise FillLedgerConflictError(
+                        f"conflicting fill replay for fill_id={fill_id}"
+                    )
+                return
+            self._conn.execute(
+                "INSERT INTO fill_ledger "
+                "(fill_id, order_id, position_id, symbol, side, quantity, fill_price, pnl, event_time, extra) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    fill_id,
+                    incoming["order_id"], incoming["position_id"], incoming["symbol"],
+                    incoming["side"], incoming["quantity"], incoming["fill_price"],
+                    incoming["pnl"], incoming["event_time"],
+                    json.dumps({
+                        key: value for key, value in incoming.items()
+                        if key not in {
+                            "fill_id", "order_id", "position_id", "symbol", "side",
+                            "quantity", "fill_price", "pnl", "event_time",
+                        }
+                    }),
+                ),
+            )
+            self._conn.commit()
 
     def load_fills(
         self, *, position_id: str | None = None, symbol: str | None = None
