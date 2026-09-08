@@ -143,8 +143,20 @@ class DhanBrokerAdapter(IBroker):
             )
 
     def execute_order(
-        self, signal: Signal, portfolio: Portfolio, symbol: str
+        self, signal: Signal, portfolio: Portfolio, symbol: str,
+        contract_ref=None,
     ) -> Position | None:
+        if getattr(self, "_config", None) is not None and contract_ref is None:
+            logger.error("Rejecting order: validated ContractRef is required for live execution")
+            return None
+        if contract_ref is not None:
+            from quant.contracts.contracts import ContractRef
+            if not isinstance(contract_ref, ContractRef) or contract_ref.symbol != symbol:
+                logger.error("Rejecting order: contract identity does not match %s", symbol)
+                return None
+            if contract_ref.exchange not in {"NSE", "MCX", "NFO"}:
+                logger.error("Rejecting order: unsupported exchange %s", contract_ref.exchange)
+                return None
         broker = self._broker
         if broker is None:
             logger.error("DhanBroker not initialized")
@@ -368,7 +380,11 @@ class DhanBrokerAdapter(IBroker):
         quantity: int,
         portfolio: Portfolio,
         reference_price: float | None = None,
+        contract_ref=None,
     ) -> Position | None:
+        if getattr(self, "_config", None) is not None and contract_ref is None:
+            logger.error("Rejecting close: validated ContractRef is required for live execution")
+            return None
         """Close (or reduce) an open position by placing an opposing order.
 
         Args:
@@ -380,6 +396,12 @@ class DhanBrokerAdapter(IBroker):
         Returns:
             Position with entry_price = actual fill price, or None on failure.
         """
+        if contract_ref is not None:
+            from quant.contracts.contracts import ContractRef
+            if not isinstance(contract_ref, ContractRef) or contract_ref.symbol != symbol:
+                logger.error("Rejecting close: contract identity does not match %s", symbol)
+                return None
+
         broker = self._broker
         if broker is None:
             logger.error("DhanBroker not initialized")
