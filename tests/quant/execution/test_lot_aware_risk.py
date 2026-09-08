@@ -14,8 +14,8 @@ from tests.helpers.synthetic import SyntheticGateway
 
 
 def test_position_size_rounds_to_whole_lots():
-    # CONSERVATIVE tier uses 0.25% risk = ₹2,500
-    risk = SessionRisk(starting_equity=1_000_000.0)
+    # Standard mode (0.5% risk): CONSERVATIVE tier uses 0.25% risk = ₹2,500
+    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005)
     qty = risk.position_size(
         entry=100.0,
         sl=93.0,       # loss per unit = 7.0
@@ -85,7 +85,7 @@ def test_position_size_honors_is_expiry_at_call_site():
 
 
 def test_max_lots_cap_enforced():
-    risk = SessionRisk(starting_equity=1_000_000.0)
+    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005)
     # Without cap: lots = 23
     uncapped = risk.position_size(entry=100.0, sl=93.0, lot_size=15)
     assert uncapped == 23 * 15

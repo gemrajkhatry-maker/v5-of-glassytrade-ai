@@ -197,12 +197,12 @@ def test_session_risk_sizes_from_portfolio_equity():
     auth.register_open(5_000)
     auth.record_close(5_000, -20_000)  # portfolio down 2% today
 
-    risk = SessionRisk(starting_equity=1_000_000.0, portfolio_risk=auth,
+    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, portfolio_risk=auth,
                        storage=None, symbol="SYM")
     # Engine's OWN daily_pnl is 0 (equity 1M) but the book is down 20k.
     qty_portfolio = risk.position_size(entry=100.0, sl=95.0)
 
-    solo = SessionRisk(starting_equity=1_000_000.0, storage=None, symbol="SOLO")
+    solo = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, storage=None, symbol="SOLO")
     qty_solo = solo.position_size(entry=100.0, sl=95.0)
 
     assert qty_portfolio < qty_solo, (

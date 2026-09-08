@@ -83,8 +83,8 @@ feature_flags:
   allow_short: true
 
 risk:
-  risk_per_trade_pct: 0.005
-  max_daily_loss_pct: 0.02
+  risk_per_trade_pct: 0.05
+  max_daily_loss_pct: 0.10
   max_consecutive_losses: 3
   max_trades_per_session: 6
   max_concurrent_positions: 5

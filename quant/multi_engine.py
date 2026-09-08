@@ -406,13 +406,13 @@ class QuantCoordinator:
         self._lifecycle_lock = threading.RLock()
         # Shared cross-engine risk ceiling: every engine registers entries and
         # exits against ONE authority so the aggregate book can't risk more
-        # than the portfolio limit (8 engines x 0.5% each would otherwise
-        # simultaneously risk 4% of capital).
+        # than the portfolio limit (8 engines x 5% each would otherwise
+        # simultaneously risk 40% of capital).
         from quant.execution.portfolio_risk import PortfolioRiskAuthority
         self._portfolio_risk = PortfolioRiskAuthority(
             starting_equity=float(self.config.get("starting_equity", float(INITIAL_CAPITAL))),
-            max_portfolio_risk_pct=float(self.config.get("max_portfolio_risk_pct", 0.10)),
-            max_portfolio_daily_loss_pct=float(self.config.get("max_portfolio_daily_loss_pct", 0.02)),
+            max_portfolio_risk_pct=float(self.config.get("max_portfolio_risk_pct", 0.25)),
+            max_portfolio_daily_loss_pct=float(self.config.get("max_portfolio_daily_loss_pct", 0.15)),
             max_root_risk_pct=self.config.get("max_root_risk_pct"),
             max_exchange_risk_pct=self.config.get("max_exchange_risk_pct"),
             separate_by="symbol",
@@ -1541,13 +1541,13 @@ class QuantCoordinator:
             portfolio_risk=self._portfolio_risk,
             max_trades_per_session=int(self.config.get("max_trades_per_session", 6)),
             advisor=advisor,
-            risk_per_trade_pct=float(self.config.get("risk_per_trade_pct", 0.005)),
+            risk_per_trade_pct=float(self.config.get("risk_per_trade_pct", 0.05)),
             capital_deployment_pct=(
                 float(self.config["capital_deployment_pct"])
                 if "capital_deployment_pct" in self.config
                 else None
             ),
-            max_daily_loss_pct=float(self.config.get("max_daily_loss_pct", 0.02)),
+            max_daily_loss_pct=float(self.config.get("max_daily_loss_pct", 0.10)),
             max_consecutive_losses=int(self.config.get("max_consecutive_losses", 3)),
             cooldown_minutes=int(self.config.get("cooldown_minutes", 15)),
             execution_enabled=execution_enabled,

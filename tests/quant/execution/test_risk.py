@@ -4,8 +4,8 @@ from quant.execution.risk import SessionRisk
 def test_initial_state():
     r = SessionRisk()
     assert r.state().halted is False
-    # Fabio cushion system: first trades are CONSERVATIVE tier = 0.25% (was 0.5% static)
-    assert r.state().risk_per_trade_pct == 0.0025
+    # Aggressive mode (base_risk_pct >= 5%): risk_per_trade_pct returns base_risk_pct
+    assert r.state().risk_per_trade_pct == 0.05
     assert r.state().cushion_tier == "CONSERVATIVE"
 
 def test_losses_shrink_risk():
@@ -13,8 +13,8 @@ def test_losses_shrink_risk():
     r.record_trade(-200.0)
     r.record_trade(-300.0)
     assert r.state().consecutive_losses == 2
-    # 2+ consecutive losses → stays CONSERVATIVE = 0.25%
-    assert r.state().risk_per_trade_pct == 0.0025
+    # Aggressive mode: risk_per_trade_pct stays at base_risk_pct (5%)
+    assert r.state().risk_per_trade_pct == 0.05
 
 def test_win_resets_streak():
     r = SessionRisk()
@@ -36,7 +36,7 @@ def test_max_streak_halts():
 
 def test_position_size_risk_based():
     r = SessionRisk(starting_equity=100000.0, base_risk_pct=0.01)
-    # Fabio: first trades are CONSERVATIVE tier = 0.25%, not the base_risk_pct
+    # Conservative tier (base_risk_pct < 5%): first trades are CONSERVATIVE = 0.25%
     # quantity = 100000 * 0.0025 / 1.0 = 250
     qty = r.position_size(entry=100.0, sl=99.0)
     assert qty == pytest.approx(250.0)
@@ -117,7 +117,7 @@ def test_scratch_exit_does_not_count_as_consecutive_loss():
     assert not st.halted
 
 def test_house_money_bonus_capped():
-    r = SessionRisk(starting_equity=1_000_000)
+    r = SessionRisk(starting_equity=1_000_000, base_risk_pct=0.01)
     r._daily_pnl = 200_000      # huge winning day
     r._consecutive_wins = 2
     r._trades_today = 2         # past the 1-2 trade CONSERVATIVE warmup

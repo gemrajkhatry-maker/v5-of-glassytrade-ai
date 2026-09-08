@@ -436,14 +436,10 @@ def test_spawn_engine_uses_configured_risk_per_trade_pct(monkeypatch, tmp_path):
 
 
 def test_spawn_engine_safe_default_risk_when_unset(monkeypatch, tmp_path):
-    """C2: when the key is absent the fallback must be a safe 0.5%, never the
-    previous 0.95 (which deployed ~95% of capital per trade)."""
+    """C2: when the key is absent the fallback must be 5% (aggressive mode)."""
     eng = _spawn_coord(monkeypatch, tmp_path, {})
-    assert eng._risk._base_risk_pct == pytest.approx(0.005), (
-        f"safe default must be 0.005, got {eng._risk._base_risk_pct}"
-    )
-    assert eng._risk._base_risk_pct < 0.05, (
-        "default risk_per_trade_pct must stay below the 5% aggressive threshold"
+    assert eng._risk._base_risk_pct == pytest.approx(0.05), (
+        f"default risk_per_trade_pct must be 0.05, got {eng._risk._base_risk_pct}"
     )
 
 

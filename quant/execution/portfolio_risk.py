@@ -26,8 +26,8 @@ class PortfolioRiskAuthority:
     def __init__(
         self,
         starting_equity: float = float(INITIAL_CAPITAL),
-        max_portfolio_risk_pct: float = 0.95,   # max aggregate open risk: 95% of capital (aggressive)
-        max_portfolio_daily_loss_pct: float = 0.95,  # global kill: 95% realized daily loss
+        max_portfolio_risk_pct: float = 0.25,   # max aggregate open risk: 25% of capital
+        max_portfolio_daily_loss_pct: float = 0.15,  # global kill: 15% realized daily loss
         separate_by: str = "root",  # "root" | "symbol" | "instrument_type"
         max_root_risk_pct: float | None = None,
         max_exchange_risk_pct: float | None = None,

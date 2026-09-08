@@ -108,9 +108,10 @@ check("K1 equity tracks realized loss", r.state().equity == 970_000)
 r2 = SessionRisk(starting_equity=1_000_000.0, storage=None, symbol="V2")
 r2._daily_pnl = -500_000  # simulate corrupt store read
 r2._equity = 500_000
-# _load clamp only fires on load; verify position_size never exceeds 0.5% budget
+# Aggressive mode: position_size deploys 50% of equity as capital
+# qty = 500_000 / 100 = 5,000 (50% of 1M / entry price)
 q = r2.position_size(100.0, 95.0)
-check("K2 sizing uses risk budget not raw equity", q <= 1_000_000 * 0.005 / 5.0 * 1.05, f"q={q}")
+check("K2 sizing uses 50% deployment budget", q <= 1_000_000 * 0.50 / 100.0 * 1.05, f"q={q}")
 
 print()
 print(f"=== {sum(1 for _, ok, _ in RESULTS if ok)} passed, {sum(1 for _, ok, _ in RESULTS if not ok)} failed ===")

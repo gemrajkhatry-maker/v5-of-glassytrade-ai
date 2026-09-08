@@ -48,8 +48,8 @@ class RiskState:
 
 class SessionRisk:
     def __init__(self, starting_equity: float = float(INITIAL_CAPITAL),
-                 base_risk_pct: float = 0.005,          # 0.5% default, aggressive when >= 0.05
-                 max_daily_loss_pct: float = 0.02,       # 2% default max daily loss
+                 base_risk_pct: float = 0.05,          # 5% default risk budget (aggressive mode)
+                 max_daily_loss_pct: float = 0.10,      # 10% default max daily loss
                  max_consecutive_losses: int = 3,
                  max_trades_per_session: int = 6,
                  capital_deployment_pct: float | None = None,
@@ -312,11 +312,14 @@ class SessionRisk:
                     self._starting_equity
                     + float(getattr(self._portfolio_risk, "realized_pnl", 0.0))
                 )
-            # If base_risk_pct is aggressive (>= 5%), size by deploying up to 95% of available capital on premium
+            # Aggressive mode (>= 5% risk): deploy 50% of available equity as
+            # position capital. This is a 10:1 deployment-to-risk ratio —
+            # a 5% risk budget with 50% capital deployed.
             if self._base_risk_pct >= 0.05:
                 open_deployed = float(getattr(self._portfolio_risk, "open_risk", 0.0)) if self._portfolio_risk is not None else 0.0
-                available_capital = max(0.0, (sizing_equity * self._base_risk_pct) - open_deployed)
-                target_capital = available_capital if available_capital > (sizing_equity * 0.1) else (sizing_equity * self._base_risk_pct)
+                deployment_pct = 0.50  # 50% of equity deployed in aggressive mode
+                available_capital = max(0.0, (sizing_equity * deployment_pct) - open_deployed)
+                target_capital = available_capital if available_capital > (sizing_equity * 0.1) else (sizing_equity * deployment_pct)
                 if is_expiry:
                     target_capital *= 0.5
                 cost_per_unit = entry if entry > 0 else abs(entry - sl)
