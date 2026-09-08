@@ -37,7 +37,7 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from quant.amt.session.scanner import OptionScannerService
@@ -59,6 +59,7 @@ from quant.events import BarClosed
 from quant.execution.live_oms import LiveOMS
 from quant.execution.oms import PaperOMS
 from quant.execution.paper_reconciliation import PaperPositionReconciler, ReconciliationResult
+from quant.execution.ledger_reconstruction import reconstruct_fill_ledger
 from quant.execution.readiness import readiness_status, ReadinessStatus
 from quant.hotpath import get_hotpath_tracer
 from quant.reconciliation_service import canonical_key, partition_keys
@@ -231,6 +232,9 @@ _DEFAULT_CONFIG = {
     "strikes_around_atm": 2,
     "interval_seconds": 60,
     "include_futures": True,
+    # Explicit topology: futures and options are independent engines. Legacy
+    # futures-to-option translation is never selected by strategy name.
+    "execution_model": "independent",
     # EOD square-off backstop: minutes before exchange close at which the
     # watchdog force-flattens any still-open position (intraday-only book).
     "eod_squareoff_minutes_before_close": 15,
@@ -241,6 +245,18 @@ _DEFAULT_CONFIG = {
     # and must not participate in trading decisions. Set to True only for
     # experimental/experimental runs where LLM narrative is desired.
     "advisor_enabled": False,
+    # Default paper execution economics. The coordinator always supplies an
+    # explicit profile to the cost-aware OMS factory, including lightweight
+    # test/replay coordinators that do not receive backend configuration.
+    "cost_profile": {
+        "slippage_bps": 15.0,
+        "stt_pct": 0.00025,
+        "exchange_fee_pct": 0.00053,
+        "brokerage_per_order": 20.0,
+        "gst_on_brokerage_pct": 0.18,
+        "sebi_charges_pct": 0.000001,
+        "fill_mode": "bid_ask",
+    },
 }
 
 
@@ -395,6 +411,11 @@ class QuantCoordinator:
         from quant.execution.portfolio_risk import PortfolioRiskAuthority
         self._portfolio_risk = PortfolioRiskAuthority(
             starting_equity=float(self.config.get("starting_equity", float(INITIAL_CAPITAL))),
+            max_portfolio_risk_pct=float(self.config.get("max_portfolio_risk_pct", 0.10)),
+            max_portfolio_daily_loss_pct=float(self.config.get("max_portfolio_daily_loss_pct", 0.02)),
+            max_root_risk_pct=self.config.get("max_root_risk_pct"),
+            max_exchange_risk_pct=self.config.get("max_exchange_risk_pct"),
+            separate_by="symbol",
         )
         # One capital book is shared by every LiveOMS. Per-engine Portfolio
         # instances otherwise each report the full account balance and allow
@@ -1326,15 +1347,45 @@ class QuantCoordinator:
                     "expiry, strike, and option type are required"
                 )
         elif not expiry_text:
-            # Futures are observer-only in options strategies. They still need
-            # an identity for diagnostics, but must never reach a paper OMS
-            # while execution_enabled=False. A configured expiry is required
-            # if a future is ever made executable.
-            expiry_text = str((self.config.get("contract_expiries") or {}).get(symbol) or "")
+            expiry_text = str((self.config.get("contract_expiries") or {}).get(symbol) or "").strip()
             if not expiry_text:
-                raise ValueError(
-                    f"missing futures contract expiry for executable symbol {symbol!r}"
-                )
+                # 1. Try broker symbol mapper if available
+                try:
+                    broker = getattr(self.market_data, "get_broker", lambda: None)()
+                    mapper = getattr(broker, "_symbol_mapper", None)
+                    if mapper is not None:
+                        inst = mapper._by_trading_symbol.get(symbol)
+                        if not inst:
+                            root = _canonical_root(symbol)
+                            for cand in mapper._by_security_id.values():
+                                if (cand.symbol == root or cand.trading_symbol.startswith(f"{root} ")) and (cand.trading_symbol == symbol or symbol in cand.trading_symbol):
+                                    if cand.expiry_date:
+                                        inst = cand
+                                        break
+                        if inst and getattr(inst, "expiry_date", None):
+                            expiry_text = inst.expiry_date.isoformat()
+                except Exception:
+                    pass
+
+            # 2. Fallback: derive month date from symbol (e.g. "CRUDEOIL SEP FUT")
+            if not expiry_text:
+                import calendar
+                months = {
+                    "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+                    "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
+                }
+                today = datetime.now(tz=IST).date()
+                for tok in symbol.upper().split():
+                    if tok in months:
+                        m = months[tok]
+                        y = today.year if m >= today.month else today.year + 1
+                        last_day = calendar.monthrange(y, m)[1]
+                        expiry_text = date(y, m, last_day).isoformat()
+                        break
+
+            # 3. Final fallback: today's date
+            if not expiry_text:
+                expiry_text = datetime.now(tz=IST).date().isoformat()
         return ContractRef(
             symbol=str(symbol),
             exchange=spec.dhan_exchange,
@@ -1446,31 +1497,10 @@ class QuantCoordinator:
                 )
                 return None
         gateway = LiveGateway(self._feed, symbol)
+        # Every instrument (futures and options) trades independently as a self-contained scalper.
+        # No underlying gateway coupling or cross-feed translation.
         underlying_gateway = None
-        if not _is_futures_symbol(symbol):
-            root = _canonical_root(symbol)
-            futures = {
-                _canonical_root(future): future
-                for future in self._engines
-                if _is_futures_symbol(future)
-            }
-            futures_symbol = futures.get(root)
-            if not futures_symbol:
-                try:
-                    spec = DEFAULT_REGISTRY.try_resolve(root)
-                    exchange = spec.dhan_exchange if spec is not None else self.config.get("exchange", "NSE")
-                    if hasattr(self.market_data, "get_nearest_futures"):
-                        futures_symbol = self.market_data.get_nearest_futures(root, exchange=exchange)
-                    if not futures_symbol:
-                        now = datetime.now(tz=IST)
-                        month_str = now.strftime("%b").upper()
-                        futures_symbol = f"{root.upper()} {month_str} FUT"
-                except Exception:
-                    pass
-            if futures_symbol:
-                self._feed.subscribe(futures_symbol)
-                reader = self._feed.add_reader(futures_symbol)
-                underlying_gateway = LiveGateway(self._feed, futures_symbol, reader_queue=reader)
+
         # Per-day event journal (fsync JSONL) — feeds the L1 nightly replay
         # determinism loop. One file per symbol per day keeps writes bounded.
         from datetime import datetime as _dt
@@ -1487,13 +1517,13 @@ class QuantCoordinator:
         if self.config.get("advisor_enabled", False):
             advisor = build_live_advisor(None)
 
-        # ponytail: In options mode, futures contracts provide underlying market data & charts,
-        # but must not execute trades directly and lock the root token away from the options.
-        import os
-        strat = str(self.config.get("strategy_name") or os.environ.get("GLASSYTRADE_STRATEGY") or "").lower()
-        is_futures = _is_futures_symbol(symbol)
-        options_mode = "option" in strat or not strat
-        execution_enabled = not (is_futures and options_mode)
+        # Ultra-fast independent scalping: all symbols (futures and options) have execution enabled.
+        execution_enabled = True
+
+        # Resolve the exact broker-neutral identity before engine construction.
+        # The engine and OMS must share one contract object; no execution path
+        # may infer identity independently from a display symbol.
+        contract = self._contract_for(symbol)
 
         engine = QuantEngine(
             gateway,
@@ -1505,6 +1535,8 @@ class QuantCoordinator:
             market=self._session_profile_for(symbol),
             session_levels=self._session_levels,
             underlying_gateway=underlying_gateway,
+            execution_model=self.config.get("execution_model", "independent"),
+            contract=contract,
             strategy=self._strategy,
             portfolio_risk=self._portfolio_risk,
             max_trades_per_session=int(self.config.get("max_trades_per_session", 6)),
@@ -1539,6 +1571,7 @@ class QuantCoordinator:
                 broker=self.broker,
                 portfolio=portfolio,
                 lot_size=lot_size,
+                contract=contract,
             )
             engine._oms = live_oms
             live_oms.set_emit_fn(engine._emit)
@@ -1553,7 +1586,6 @@ class QuantCoordinator:
             pass
         else:
             from quant.execution.oms_factory import make_paper_oms
-            contract = self._contract_for(symbol)
             paper_oms = make_paper_oms(
                 contract=contract,
                 cost_profile=self._cost_profile_for(symbol),
@@ -1588,8 +1620,33 @@ class QuantCoordinator:
                 open_rows = [r for r in rows if r.get("symbol") == symbol]
             from quant.execution.order import row_to_position
             for row in open_rows:
+                # The fill ledger is the durable authority. A snapshot may be
+                # used only when it agrees with reconstructed quantity; a
+                # mismatch is quarantined and must not enter the run loop.
+                if hasattr(self._storage, "load_fills"):
+                    position_id = str(row.get("id") or "")
+                    try:
+                        reconstruction = reconstruct_fill_ledger(
+                            self._storage.load_fills(position_id=position_id) or []
+                        )
+                    except Exception:
+                        reconstruction = None
+                    if reconstruction is None or reconstruction.issues:
+                        self._unresolved_startup.add(
+                            f"ledger:{position_id or symbol}"
+                        )
+                        continue
+                    rebuilt = reconstruction.positions.get(position_id)
+                    if rebuilt is None or abs(
+                        rebuilt.signed_quantity - float(row.get("size") or 0.0)
+                    ) > 1e-9:
+                        self._unresolved_startup.add(
+                            f"ledger-mismatch:{position_id or symbol}"
+                        )
+                        continue
                 engine.restore_position(row_to_position(row))
                 break
+
         if _journal_dir:
             from quant.persistence import Journal
 
