@@ -735,3 +735,22 @@ class AMTOrderFlowEngine:
 | **7. Cushion Allocation** | Session PnL $> 0$ (Cushion Active) | Allocate $\text{Base} + 40\%\text{ Cushion}$. | If Cushion $\le 0$, use Base Risk ($0.25\%$). |
 | **8. Pyramid Add-On** | Base Trade Risk-Free + LVN Retest | Add $+50\%$ Size; Ratchet combined SL. | Maintain single base trade if no LVN retest. |
 | **9. Circuit Breaker** | Loss streak $\ge 3$ or PnL $\le -2.0\%$ | **SHUT DOWN TRADING FOR THE DAY.** | Immediate system lock until next session. |
+
+---
+
+## 16. Known Data Limitations
+
+### Range Bars
+The spec describes range bars (fixed price height, ATR-quantized). The current implementation uses **time-based candles** (1-minute) for strategy decisions. Range bars are available via `quant/aggregator.py` but are not the primary decision driver. This is an architectural choice, not a bug — the strategy works correctly with time bars.
+
+### Tick-Level Footprint
+The spec describes tick-level footprint data with trade-level aggression flags. The current implementation uses **candle delta** (close-to-close) as a proxy for buy/sell volume. True trade-level aggression flags require a tick feed not available from the current Dhan integration.
+
+### Order-Flow Imbalance
+The spec describes true order-flow imbalance from the full order book. The current implementation uses **5-level depth snapshots** from Dhan. Full L2 depth is not available from the current feed.
+
+### Day-of-Week Variance
+The spec describes "Mondays & Fridays: Defensive size." The current implementation applies a **0.5x multiplier** on Mon/Fri and **1.0x** on Tue/Wed/Thu via `SessionRisk.DAY_OF_WEEK_MULTIPLIER`.
+
+### TimesFM Integration
+The TimesFM 3.0 integration is an **advisory-only** layer. It never blocks ticks and never changes the deterministic 4-gate AMT decision. See `docs/amt/TIMESFM_INTEGRATION.md` for details.
