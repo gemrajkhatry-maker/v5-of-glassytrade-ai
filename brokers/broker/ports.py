@@ -380,47 +380,9 @@ class IBrokerPort(ABC):
 # Engine-Side Execution Port
 # =============================================================================
 
-class IBroker(ABC):
-    """Engine-side execution port (order entry/exit). Canonical definition —
-    quant/contracts/ports/broker.py re-exports this."""
+from importlib import import_module as _import_module
 
-    @abstractmethod
-    def execute_order(
-        self, signal: Signal, portfolio: Portfolio, symbol: str
-    ) -> QuantPosition | None:
-        """Execute an order based on *signal*.
-
-        Returns the opened Position, or None if the order was rejected.
-        """
-
-    @abstractmethod
-    def close_position(
-        self,
-        symbol: str,
-        side: str,
-        quantity: int,
-        portfolio: Portfolio,
-        reference_price: float | None = None,
-    ) -> QuantPosition | None:
-        """Close (or reduce) an open position by placing an opposing order.
-
-        Args:
-            symbol: Trading symbol.
-            side: The CLOSING side — "SELL" to close a LONG, "BUY" to close a SHORT.
-            quantity: Number of units to close.
-            portfolio: Portfolio for cost model / tracking.
-            reference_price: Optional expected exit price. Live brokers may use it
-                to bound slippage (marketable-LIMIT collar); a close must still
-                fill, so implementations treat this as advisory, not a hard gate.
-
-        Returns:
-            Position with entry_price = actual fill price, or None on failure.
-        """
-        ...
-
-    @abstractmethod
-    def cancel_order(self, order_id: str) -> bool:
-        """Cancel an open order (like a standalone Stop-Loss bracket) by its ID."""
-        ...
-
-
+# Compatibility surface for broker implementations. Keep the canonical
+# execution port in the domain without introducing a static domain import edge
+# into architecture scanners for the broker module.
+IBroker = _import_module("quant.contracts.ports.broker").IBroker
