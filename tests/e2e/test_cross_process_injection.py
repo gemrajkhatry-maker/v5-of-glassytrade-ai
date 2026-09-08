@@ -41,9 +41,9 @@ def _is_trading_day() -> bool:
         return True  # calendar unavailable: let the test try anyway
 
 
-def _packet(epoch: int, price: float, vol: float, buy_frac: float) -> dict:
+def _packet(epoch: int, price: float, vol: float, buy_frac: float, symbol: str) -> dict:
     return {
-        "symbol": "GOLDM SEP FUT",
+        "symbol": symbol,
         "ltp": price,
         "open": price,
         "high": price + 0.01,
@@ -72,6 +72,10 @@ def test_leg_a_full_chain_http_to_ws():
     py = py if py.exists() else Path(sys.executable)
     env = dict(os.environ)
     env["GLASSYTRADE_ENV"] = "development"
+    # The parent shell may carry a paper/live compatibility mirror.  Development
+    # is an explicit runtime mode for this synthetic-feed test, so do not let a
+    # stale inherited mirror prevent the application from importing.
+    env["TRADING_MODE"] = "development"
     env["PYTHONPATH"] = f"{repo / 'backend'}:{repo}"
     env.pop("HTTP_PROXY", None)
     env.pop("HTTPS_PROXY", None)
@@ -127,12 +131,12 @@ def test_leg_a_full_chain_http_to_ws():
         sec = T0 + int(time.time() % 60)
         base_px = 25000.0
         for i in range(30):
-            story.append(_packet(sec, base_px + 0.5 * ((i % 4) - 1.5), 8.0, 0.5))
+            story.append(_packet(sec, base_px + 0.5 * ((i % 4) - 1.5), 8.0, 0.5, symbol))
             sec += 1
         price = base_px + 0.5
         for i in range(20):
             price += 2.0
-            story.append(_packet(sec, price, 30.0, 0.85))
+            story.append(_packet(sec, price, 30.0, 0.85, symbol))
             sec += 1
 
         req = urllib.request.Request(
