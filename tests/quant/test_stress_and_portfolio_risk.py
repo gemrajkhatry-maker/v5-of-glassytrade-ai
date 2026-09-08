@@ -268,3 +268,32 @@ def test_portfolio_risk_enforces_single_active_position_per_root():
     auth.release(5000.0, symbol=sym2)
     assert auth.active_symbol_for_root("SILVERM") is None
 
+
+def test_portfolio_risk_independent_scalping_by_symbol():
+    """Verify that when separate_by='symbol', futures and options on the same root scalp independently."""
+    auth = PortfolioRiskAuthority(starting_equity=1_000_000.0, separate_by="symbol")
+
+    fut_sym = "CRUDEOIL SEP FUT"
+    put_sym = "CRUDEOIL 17 SEP 8650 PUT"
+    call_sym = "CRUDEOIL 17 SEP 8650 CALL"
+
+    # 1. Futures position opens
+    ok, why = auth.can_accept(5000.0, symbol=fut_sym)
+    assert ok is True
+    assert auth.register_open(5000.0, symbol=fut_sym) is True
+
+    # 2. Put option on same root CRUDEOIL opens concurrently without blocking
+    ok, why = auth.can_accept(3000.0, symbol=put_sym)
+    assert ok is True
+    assert auth.register_open(3000.0, symbol=put_sym) is True
+
+    # 3. Call option on same root CRUDEOIL opens concurrently without blocking
+    ok, why = auth.can_accept(3000.0, symbol=call_sym)
+    assert ok is True
+    assert auth.register_open(3000.0, symbol=call_sym) is True
+
+    # 4. Duplicate on SAME symbol is rejected
+    ok, why = auth.can_accept(3000.0, symbol=put_sym)
+    assert ok is False
+    assert "already active" in why
+
