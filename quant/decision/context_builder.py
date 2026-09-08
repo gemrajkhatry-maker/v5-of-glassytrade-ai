@@ -225,22 +225,58 @@ class DecisionContextBuilder:
 
     def _extract_position(self, position, close_px: float, bar_index: int,
                           entry_bar_index: int) -> dict:
-        """Extract position state into a flat dict for DecisionContext."""
+        """Extract position state into a flat dict for DecisionContext.
+        
+        Supports Position (quant/execution/order.py), PositionState (quant/state_machine.py),
+        and dict (frontend DTO / portfolio) transparently.
+        """
         if position is None:
             return {"pos_open": False, "pos_side": "", "pos_entry": 0.0,
                     "pos_size": 0.0, "pos_sl": 0.0, "pos_tp": 0.0,
                     "pos_pnl": 0.0, "pos_bars_held": 0}
+
+        if isinstance(position, dict):
+            raw_sz = float(position.get("size", 0.0))
+            pos_side = str(position.get("side", "")).upper() or ("LONG" if raw_sz > 0 else ("SHORT" if raw_sz < 0 else ""))
+            pos_entry = float(position.get("entryPrice", 0.0) or position.get("entry", 0.0) or position.get("open_price", 0.0) or 0.0)
+            pos_sl = float(position.get("stopLoss", 0.0) or position.get("sl", 0.0) or position.get("stop_loss", 0.0) or 0.0)
+            pos_tp = float(position.get("takeProfit", 0.0) or position.get("tp", 0.0) or position.get("take_profit", 0.0) or 0.0)
+            pos_pnl = float(position.get("pnl", 0.0))
+            pos_bars_held = int(position.get("barsHeld", 0) or 0)
+            if pos_bars_held == 0 and entry_bar_index > 0:
+                pos_bars_held = max(0, bar_index - entry_bar_index)
+            return {"pos_open": True, "pos_side": pos_side, "pos_entry": pos_entry,
+                    "pos_size": raw_sz, "pos_sl": pos_sl, "pos_tp": pos_tp,
+                    "pos_pnl": pos_pnl, "pos_bars_held": pos_bars_held}
+
         raw_sz = float(getattr(position, "size", 0.0))
-        pos_side = "LONG" if raw_sz > 0 else ("SHORT" if raw_sz < 0 else str(getattr(position, "side", "") or ""))
-        pos_entry = float(getattr(position, "open_price", 0.0) or getattr(position, "entry_price", 0.0) or 0.0)
+        pos_side = str(getattr(position, "side", "") or "").upper() or ("LONG" if raw_sz > 0 else ("SHORT" if raw_sz < 0 else ""))
+        pos_entry = float(
+            getattr(position, "entry", 0.0)
+            or getattr(position, "open_price", 0.0)
+            or getattr(position, "entry_price", 0.0)
+            or getattr(position, "entryPrice", 0.0)
+            or 0.0
+        )
         if hasattr(position, "order") and hasattr(position.order, "signal") and position.order.signal is not None:
             pos_sl = float(position.order.signal.sl or 0.0)
             pos_tp = float(position.order.signal.tp or 0.0)
         else:
-            pos_sl = float(getattr(position, "stop_loss", 0.0) or 0.0)
-            pos_tp = float(getattr(position, "take_profit", 0.0) or 0.0)
-        pos_pnl = (close_px - pos_entry) * raw_sz if close_px > 0 and pos_entry > 0 and raw_sz != 0 else 0.0
-        pos_bars_held = max(0, bar_index - entry_bar_index) if entry_bar_index > 0 else 0
+            pos_sl = float(
+                getattr(position, "sl", 0.0)
+                or getattr(position, "stop_loss", 0.0)
+                or getattr(position, "stopLoss", 0.0)
+                or 0.0
+            )
+            pos_tp = float(
+                getattr(position, "tp", 0.0)
+                or getattr(position, "take_profit", 0.0)
+                or getattr(position, "takeProfit", 0.0)
+                or 0.0
+            )
+        mult = 1.0 if pos_side == "LONG" else (-1.0 if pos_side == "SHORT" else 1.0)
+        pos_pnl = (close_px - pos_entry) * abs(raw_sz) * mult if close_px > 0 and pos_entry > 0 and raw_sz != 0 else float(getattr(position, "pnl", 0.0) or 0.0)
+        pos_bars_held = max(0, bar_index - entry_bar_index) if entry_bar_index > 0 else int(getattr(position, "bars_held", 0) or 0)
         return {"pos_open": True, "pos_side": pos_side, "pos_entry": pos_entry,
                 "pos_size": raw_sz, "pos_sl": pos_sl, "pos_tp": pos_tp,
                 "pos_pnl": pos_pnl, "pos_bars_held": pos_bars_held}

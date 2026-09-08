@@ -126,7 +126,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
             {/* ── Scrollable body ── */}
             <div className="flex-1 overflow-y-auto overscroll-contain px-3 py-3 space-y-3">
                 <QuantDecisionCard quantDecision={quantDecision} />
-                <AIAdvisorCard agentDecision={agentDecision} quantDecision={quantDecision} />
+                <AIAdvisorCard agentDecision={agentDecision} quantDecision={quantDecision} portfolio={portfolio} />
                 
                 {/* Section 01–02: 5m Macro Context */}
                 <div className="flex items-center justify-between px-1 pt-1">

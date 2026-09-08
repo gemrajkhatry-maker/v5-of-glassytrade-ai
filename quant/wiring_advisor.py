@@ -55,7 +55,7 @@ def _resolve_model_path(raw: str | None) -> str | None:
 
 
 def build_live_advisor(emit_fn) -> "LLMAdvisor | None":
-    """Build an LLMAdvisor from MLX_* env vars for LIVE/Paper trading.
+    """Build an LLMAdvisor or TimesFMAdvisor from env vars for LIVE/Paper trading.
 
     Returns None when LLM_ADVISOR_ENABLED is false/0 or when disabled,
     completely bypassing model loading and background worker threads.
@@ -68,6 +68,23 @@ def build_live_advisor(emit_fn) -> "LLMAdvisor | None":
     if enabled_val in ("0", "false", "no", "disable", "disabled"):
         logger.info("LLM advisor is DISABLED (LLM_ADVISOR_ENABLED=%s)", enabled_val)
         return None
+
+    # Check for TimesFM Prediction Engine (Native in-process or service)
+    timesfm_enabled = os.getenv("TIMESFM_ADVISOR_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+    use_native = os.getenv("TIMESFM_NATIVE", "true").strip().lower() in ("1", "true", "yes")
+    if timesfm_enabled:
+        try:
+            from quant.decision.timesfm_advisor import TimesFMAdvisor
+
+            logger.info("Building TimesFMAdvisor (native=%s, llm_narrative=False)", use_native)
+            return TimesFMAdvisor(
+                emit_fn=emit_fn,
+                service_url=os.getenv("TIMESFM_SERVICE_URL", "http://localhost:8091"),
+                enable_llm_narrative=False,
+                use_native_engine=use_native,
+            )
+        except Exception:
+            logger.exception("Failed to initialize TimesFMAdvisor — falling back to MLX/Rule LLMAdvisor")
 
     try:
         from quant.llm.advisor import LLMAdvisor
@@ -86,3 +103,4 @@ def build_live_advisor(emit_fn) -> "LLMAdvisor | None":
     except Exception:
         logger.exception("build_live_advisor failed — continuing without advisor")
         return None
+

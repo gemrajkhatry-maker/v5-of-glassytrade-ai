@@ -7,7 +7,7 @@ log_level: "INFO"
 
 paper:
   capital_deployment_pct: 0.95
-  allow_extreme_risk: false
+  allow_extreme_risk: true
 
 # Enable both exchanges (default to MCX via strategy file)
 exchanges:

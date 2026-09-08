@@ -1121,6 +1121,28 @@ class QuantEngine:
             pm.current_position = position
             self._entry_time_epoch = _bar_epoch_ms(bar.time) / 1000.0
             self._emit(PositionOpened(symbol=self.symbol, time=bar.time, position=position))
+            # Immediately notify advisor of new open position (switch role to Position Manager)
+            if hasattr(self, "_advisor") and self._advisor is not None:
+                try:
+                    pos_ctx = DecisionContextBuilder().build(
+                        bar=bar,
+                        symbol=self.symbol,
+                        market=self._market,
+                        contract_expiry=self._contract_expiry,
+                        tick_size=self._tick_size,
+                        bar_index=self._bar_index,
+                        warm_bars=self._amt_engine.warm_bars,
+                        cooldown_remaining_sec=0.0,
+                        risk_state=self._risk.state(),
+                        amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
+                        order_book=self._last_depth,
+                        position=position,
+                        entry_bar_index=self._entry_bar_index,
+                        recent_decisions=list(self._recent_decisions),
+                    )
+                    self._advisor.on_context(pos_ctx)
+                except Exception:
+                    pass
         else:
             # Market state changed — all open blocking episodes are stale.
             self._latch.clear()
@@ -1164,6 +1186,8 @@ class QuantEngine:
         """Single DecisionContext source shared by the flat-path ``_decide()``
         and the positioned thesis-flip check — extracted, not duplicated."""
         eval_symbol = self._underlying() if self._underlying_gateway is not None else self.symbol
+        pm = self._get_position_manager() if hasattr(self, "_get_position_manager") else None
+        active_pos = (pm.current_position if pm is not None else None) or self.state.position
         return DecisionContextBuilder().build(
             bar=bar,
             symbol=eval_symbol,
@@ -1176,7 +1200,7 @@ class QuantEngine:
             risk_state=self._risk.state(),
             amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
             order_book=self._last_depth,
-            position=self.state.position,
+            position=active_pos,
             entry_bar_index=self._entry_bar_index,
             recent_decisions=list(self._recent_decisions),
         )
@@ -1287,6 +1311,16 @@ class QuantEngine:
                 is_full_close=True,
             )
             self._open_trade_risk = 0.0
+        # Immediately notify advisor that position is closed (switch role back to Auction Scanner)
+        if hasattr(self, "_advisor") and self._advisor is not None:
+            try:
+                cooldown_sec = float(self._cooldown_bars * int(getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC) or DEFAULT_INTERVAL_SEC))
+                curr_bar = self._aggregator.current_bar or getattr(self.state, "last_bar", None)
+                if curr_bar is not None:
+                    close_ctx = self._build_context(curr_bar, self._amt_engine.last_amt_dto or {}, cooldown_sec)
+                    self._advisor.on_context(close_ctx)
+            except Exception:
+                pass
 
     def _get_position_manager(self) -> PositionManager:
         """Lazily create the PositionManager with the correct emit function."""
@@ -1392,6 +1426,7 @@ class QuantEngine:
         if hasattr(self, "_advisor") and self._advisor is not None:
             try:
                 risk_st = self._risk.state()
+                active_pos = remaining or self.state.position
                 if self._option_amt_dto is not None and self._last_underlying_bar is not None:
                     advisor_ctx = DecisionContextBuilder().build(
                         bar=bar,
@@ -1405,7 +1440,7 @@ class QuantEngine:
                         risk_state=risk_st,
                         amt_dto=self._option_amt_dto if self._option_amt_dto else amt_dto,
                         order_book=self._last_depth,
-                        position=self.state.position,
+                        position=active_pos,
                         entry_bar_index=self._entry_bar_index,
                         recent_decisions=list(self._recent_decisions),
                     )
@@ -1423,7 +1458,7 @@ class QuantEngine:
                         risk_state=risk_st,
                         amt_dto=amt_dto,
                         order_book=self._last_depth,
-                        position=self.state.position,
+                        position=active_pos,
                         entry_bar_index=self._entry_bar_index,
                         recent_decisions=list(self._recent_decisions),
                     )

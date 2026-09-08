@@ -37,14 +37,46 @@ export interface AIAnalysis {
   factorBreakdown: FactorBreakdown;
 }
 
+export interface GateResult {
+  gate_no: number;
+  gate_name: string;
+  passed: boolean;
+  message: string;
+}
+
 export interface AgentDecision {
-  direction: 'LONG' | 'SHORT' | 'FLAT';
-  modelLabel: string;  // replaces probability — "Triple-A" | "LVN_Sniper" | "VA_Fade" | ""
-  regime: string;
-  timing: string;
-  sizeFraction: number;
-  latencyUs: number;
-  rationale: string;
+  direction: 'LONG' | 'SHORT' | 'FLAT' | string;
+  role?: 'SCANNING' | 'POSITION_MANAGEMENT' | string;
+  action?: string;
+  setup?: string;
+  reason?: string;
+  modelLabel?: string;  // e.g. "TimesFM-SCANNING" | "TimesFM-POSITION_MANAGEMENT"
+  regime?: string;
+  timing?: string;
+  sizeFraction?: number;
+  latencyUs?: number;
+  rationale?: string;
+  confidence?: string;
+  confidenceScore?: number;
+  source?: string;
+  latencyMs?: number;
+  forecastSteps?: string[];
+  quantileSpread?: number;
+  meanForecast?: number;
+  gateResults?: GateResult[];
+  modelVersions?: Record<string, string>;
+  activePosition?: {
+    side: 'LONG' | 'SHORT' | string;
+    entryPrice: number;
+    currentPrice: number;
+    pnl: number;
+    stopLoss?: number | null;
+    takeProfit?: number | null;
+    barsHeld: number;
+    isRiskFree?: boolean;
+    rrAchieved?: number;
+  } | null;
+  dynamicTrailStop?: number | null;
 }
 
 export interface RiskState {

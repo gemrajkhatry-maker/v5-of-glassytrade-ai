@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from app.config_models import SystemConfig as Configuration
@@ -158,6 +159,10 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         # mapping at composition time prevents the quant runtime from reading
         # YAML or inventing brokerage/slippage defaults.
         "cost_profiles": _coordinator_cost_profiles(config),
+        "advisor_enabled": (
+            os.getenv("LLM_ADVISOR_ENABLED", "false").strip().lower() in ("true", "1", "yes")
+            or os.getenv("TIMESFM_ADVISOR_ENABLED", "false").strip().lower() in ("true", "1", "yes")
+        ),
         # C2: the configured per-trade risk must reach the engines' SessionRisk.
         # NO silent fallback: the effective value is whatever the loader + live
         # validator settled on (config_models), and boot fails if it is absent.

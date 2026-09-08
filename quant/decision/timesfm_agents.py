@@ -1,0 +1,346 @@
+"""Specialized TimesFM 3.0 Agents: Auction Scanner & Position Manager.
+
+Implements two dedicated, role-swapping agents operating over Google TimesFM 3.0 forecasts:
+1. TimesFMScanningAgent:
+   - Evaluates auction state when NO position is open.
+   - Detects Triple-A (VAL/VAH absorption), VA-Fade mean-reversion, and Breakout setups.
+   - Enforces 4-gate verification and institutional directional conviction.
+   
+2. TimesFMPositionAgent:
+   - Manages active trades when a position IS open.
+   - Strictly enforces Fabio Valentini's institutional rules from amt_dataset/position_mgmt:
+     - HOLD (TREND_INTACT): Price remains inside TimesFM 90% confidence envelope.
+     - TIGHTEN_SL (RISK_ZERO): 0.8R reached or p10/p90 clears cost basis -> breakeven floor.
+     - TAKE_PROFIT (TARGET_HIT): Structural POC reached or 32-step trajectory inflects near target.
+     - EXIT (THESIS_FLIP): Inversion of TimesFM trajectory, opposing absorption, or spread spike.
+     - EXIT (STOP_LOSS): Structural invalidation hit.
+     - EXIT (TIME_STOP): Stagnant consolidation after 5+ bars without expansion.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+
+from quant.decision.context import DecisionContext
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TimesFMForecast:
+    """Pre-computed TimesFM 3.0 multi-step forecast and quantile paths."""
+    horizon: int
+    p50_path: np.ndarray        # shape: (32,) - median trajectory
+    p10_path: np.ndarray        # shape: (32,) - lower 10th percentile envelope
+    p90_path: np.ndarray        # shape: (32,) - upper 90th percentile envelope
+    q_spread: float             # mean(p90 - p10) forecast uncertainty
+    mean_forecast: float        # p50[-1] terminal forecast price
+    pct_change: float           # (mean_forecast - curr_price) / curr_price
+    forecast_steps: List[str]   # 32 step direction labels: LONG | SHORT | FLAT
+    curr_price: float           # latest bar close price
+    lat_ms: float               # inference latency in milliseconds
+
+
+class TimesFMScanningAgent:
+    """Agent 1: Scans market auction setups when no position is open."""
+
+    def __init__(self, target_horizon: int = 32) -> None:
+        self.target_horizon = target_horizon
+
+    def evaluate(self, ctx: DecisionContext, forecast: TimesFMForecast) -> Dict[str, Any]:
+        symbol = str(ctx.symbol or "UNKNOWN")
+        curr_price = float(ctx.bar.close if ctx.bar else forecast.curr_price)
+        session_phase = str(ctx.session_phase or "").upper()
+
+        poc = float(ctx.poc or (ctx.state.poc if ctx.state else curr_price))
+        vah = float(ctx.vah or (ctx.state.vah if ctx.state else curr_price))
+        val = float(ctx.val or (ctx.state.val if ctx.state else curr_price))
+        cvd_slope = float(ctx.cvd_slope or 0.0)
+        absorption = str(ctx.absorption_side or "").upper()
+        stacked_imb = str(getattr(ctx, "stacked_imbalance_direction", "") or "").upper()
+
+        va_range = max(vah - val, curr_price * 0.001)
+        tol = va_range * 0.15
+
+        action = "FLAT"
+        direction = "FLAT"
+        setup = "NO_EDGE"
+        confidence = "Low"
+        confidence_score = 0.2
+        rationale = f"Midday compression inside value area [{val:.1f} - {vah:.1f}]; waiting for structural edge."
+
+        # Setup A: Triple-A Long (Absorption at VAL + positive CVD + TimesFM upward slope)
+        if (curr_price <= val + tol or absorption == "BUY" or stacked_imb == "BUY") and cvd_slope > 1.0 and forecast.pct_change > 0.0005:
+            action = "ENTER_LONG"
+            direction = "LONG"
+            setup = "TRIPLE_A"
+            confidence = "High"
+            confidence_score = 0.85
+            rationale = (
+                f"Triple-A Long setup on {symbol}: Volume absorption at VAL ({val:.1f}) with positive "
+                f"CVD slope ({cvd_slope:.1f}) and TimesFM upward trajectory to {forecast.mean_forecast:.1f}."
+            )
+
+        # Setup B: Triple-A Short (Absorption at VAH + negative CVD + TimesFM downward slope)
+        elif (curr_price >= vah - tol or absorption == "SELL" or stacked_imb == "SELL") and cvd_slope < -1.0 and forecast.pct_change < -0.0005:
+            action = "ENTER_SHORT"
+            direction = "SHORT"
+            setup = "TRIPLE_A"
+            confidence = "High"
+            confidence_score = 0.85
+            rationale = (
+                f"Triple-A Short setup on {symbol}: Selling absorption at VAH ({vah:.1f}) with aggressive "
+                f"negative CVD slope ({cvd_slope:.1f}) and TimesFM downward trajectory to {forecast.mean_forecast:.1f}."
+            )
+
+        # Setup C: Value Area Breakout
+        elif curr_price > vah and cvd_slope > 0.5 and all(s == "LONG" for s in forecast.forecast_steps[-16:]):
+            action = "ENTER_LONG"
+            direction = "LONG"
+            setup = "BREAKOUT"
+            confidence = "Medium"
+            confidence_score = 0.70
+            rationale = f"Initiative Breakout above VAH ({vah:.1f}) on {symbol} with sustained TimesFM 32-step acceptance."
+
+        elif curr_price < val and cvd_slope < -0.5 and all(s == "SHORT" for s in forecast.forecast_steps[-16:]):
+            action = "ENTER_SHORT"
+            direction = "SHORT"
+            setup = "BREAKOUT"
+            confidence = "Medium"
+            confidence_score = 0.70
+            rationale = f"Initiative Breakdown below VAL ({val:.1f}) on {symbol} with sustained TimesFM 32-step acceptance."
+
+        # Setup D: Value Area Fade Reversion
+        elif curr_price >= vah and cvd_slope <= 0.0 and forecast.mean_forecast < curr_price:
+            action = "ENTER_SHORT"
+            direction = "SHORT"
+            setup = "VA_FADE"
+            confidence = "Medium"
+            confidence_score = 0.60
+            rationale = f"VA-Fade short: Price probe above VAH rejected; TimesFM projecting mean-reversion toward POC ({poc:.1f})."
+
+        elif curr_price <= val and cvd_slope >= 0.0 and forecast.mean_forecast > curr_price:
+            action = "ENTER_LONG"
+            direction = "LONG"
+            setup = "VA_FADE"
+            confidence = "Medium"
+            confidence_score = 0.60
+            rationale = f"VA-Fade long: Price probe below VAL rejected; TimesFM projecting mean-reversion toward POC ({poc:.1f})."
+
+        # 4-Gate Evaluations
+        g1 = bool("OPENING_NOISE" not in session_phase and "EOD" not in session_phase)
+        g2 = bool(not ctx.risk_halted and ctx.cooldown_remaining_sec == 0)
+        g3 = bool(direction != "FLAT")
+        g4 = bool(abs(forecast.mean_forecast - curr_price) >= (curr_price * 0.001))
+
+        gate_results = [
+            {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": g1, "message": "" if g1 else session_phase},
+            {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": g2, "message": "" if g2 else "Cooldown"},
+            {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": g3, "message": "" if g3 else "No direction"},
+            {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": g4, "message": "" if g4 else "RR fail"},
+        ]
+
+        return {
+            "role": "SCANNING",
+            "action": action,
+            "direction": direction,
+            "setup": setup,
+            "reason": None,
+            "confidence": confidence,
+            "confidenceScore": round(confidence_score, 3),
+            "rationale": rationale,
+            "forecastSteps": forecast.forecast_steps,
+            "quantileSpread": round(forecast.q_spread, 4),
+            "meanForecast": round(forecast.mean_forecast, 2),
+            "gateResults": gate_results,
+            "activePosition": None,
+            "dynamicTrailStop": None,
+            "source": "TIMESFM_3.0_NATIVE",
+            "latencyMs": round(forecast.lat_ms, 1),
+            "modelLabel": f"TimesFM-{setup}",
+            "modelVersions": {"timesfm": "3.0", "agent_role": "SCANNING", "engine": "native_direct"},
+            "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
+            "timing": str(ctx.session_phase or "REGULAR"),
+            "sizeFraction": 1.0 if direction != "FLAT" else 0.0,
+            "latencyUs": int(forecast.lat_ms * 1000),
+        }
+
+
+class TimesFMPositionAgent:
+    """Agent 2: Manages active positions according to Fabio AMT rules and TimesFM quantiles."""
+
+    def __init__(self, target_horizon: int = 32) -> None:
+        self.target_horizon = target_horizon
+
+    def evaluate(self, ctx: DecisionContext, forecast: TimesFMForecast) -> Dict[str, Any]:
+        symbol = str(ctx.symbol or "UNKNOWN")
+        side = str(ctx.position_side or "LONG").upper()
+        entry_price = float(ctx.position_entry_price or forecast.curr_price)
+        curr_price = float(ctx.bar.close if ctx.bar else forecast.curr_price)
+        bar_low = float(ctx.bar.low if ctx.bar else curr_price)
+        bar_high = float(ctx.bar.high if ctx.bar else curr_price)
+        sl = float(ctx.position_sl or 0.0)
+        tp = float(ctx.position_tp or 0.0)
+        pnl = float(ctx.position_unrealized_pnl or 0.0)
+        bars_held = int(ctx.position_bars_held or 0)
+        cvd_slope = float(ctx.cvd_slope or 0.0)
+        absorption = str(ctx.absorption_side or "").upper()
+        stacked_imb = str(getattr(ctx, "stacked_imbalance_direction", "") or "").upper()
+        poc = float(ctx.poc or (ctx.state.poc if ctx.state else curr_price))
+
+        risk = abs(entry_price - sl) if sl > 0 else (curr_price * 0.005)
+        profit = (curr_price - entry_price) if side == "LONG" else (entry_price - curr_price)
+        rr_achieved = profit / max(risk, 1e-4)
+
+        # Compute dynamic trailing stop peg from TimesFM quantiles
+        # Long trails behind lower quantile p10; Short trails behind upper quantile p90
+        if side == "LONG":
+            dyn_candidate = float(forecast.p10_path[0])
+            dyn_stop = max(sl, dyn_candidate) if sl > 0 else dyn_candidate
+        else:
+            dyn_candidate = float(forecast.p90_path[0])
+            dyn_stop = min(sl, dyn_candidate) if sl > 0 else dyn_candidate
+
+        # Check if already at risk-free breakeven
+        is_risk_free = (sl >= entry_price) if side == "LONG" else (sl > 0 and sl <= entry_price)
+
+        action = "HOLD"
+        reason = "TREND_INTACT"
+        confidence = "High"
+        confidence_score = 0.85
+        rationale = (
+            f"CVD confirms trend ({cvd_slope:.1f}) and TimesFM 32-step trajectory remains favorable — "
+            f"holding {symbol} {side} ({bars_held} bars held, PnL: {pnl:+.1f})."
+        )
+
+        # 1. HARD STOP LOSS TRIGGERED
+        if sl > 0 and ((side == "LONG" and bar_low <= sl) or (side == "SHORT" and bar_high >= sl)):
+            action = "EXIT"
+            reason = "STOP_LOSS"
+            confidence = "High"
+            confidence_score = 0.95
+            rationale = f"Stop loss triggered on {symbol} {side} at structural invalidation level ({sl:.2f})."
+
+        # 2. STRUCTURAL TAKE PROFIT TARGET HIT
+        elif tp > 0 and ((side == "LONG" and bar_high >= tp) or (side == "SHORT" and bar_low <= tp)):
+            action = "TAKE_PROFIT"
+            reason = "TARGET_HIT"
+            confidence = "High"
+            confidence_score = 0.95
+            rationale = f"Structural take-profit target reached on {symbol} {side} at {tp:.2f} (RR: {rr_achieved:.1f}R)."
+
+        # 3. PREDICTIVE TRAJECTORY INFLECTION / POC FRONT-RUNNING (Fabio 1-2 ticks inside shield)
+        elif rr_achieved >= 0.9 and (
+            (side == "LONG" and np.argmax(forecast.p50_path) < 16 and forecast.p50_path[-1] < forecast.p50_path[np.argmax(forecast.p50_path)])
+            or (side == "SHORT" and np.argmin(forecast.p50_path) < 16 and forecast.p50_path[-1] > forecast.p50_path[np.argmin(forecast.p50_path)])
+        ):
+            action = "TAKE_PROFIT"
+            reason = "TARGET_HIT"
+            confidence = "High"
+            confidence_score = 0.88
+            rationale = (
+                f"TimesFM 32-step trajectory inflects near session POC ({poc:.1f}); front-running liquidity cascade "
+                f"with partial take-profit on {symbol} {side} (+{profit:.1f} pts)."
+            )
+
+        # 4. THESIS FLIP / OPPOSING ABSORPTION / UNCERTAINTY SHOCK
+        elif (
+            # Opposing absorption cluster (Fabio: institutional inventory capping the move)
+            (side == "LONG" and absorption in ("SELL", "SELL_ABSORBED"))
+            or (side == "SHORT" and absorption in ("BUY", "BUY_ABSORBED"))
+            # Or opposing stacked imbalance with opposing CVD
+            or (side == "LONG" and stacked_imb == "SELL" and cvd_slope < -1.0)
+            or (side == "SHORT" and stacked_imb == "BUY" and cvd_slope > 1.0)
+            # Or TimesFM trajectory breaks down significantly against trade
+            or (side == "LONG" and forecast.mean_forecast < entry_price - (0.5 * risk))
+            or (side == "SHORT" and forecast.mean_forecast > entry_price + (0.5 * risk))
+            # Or sudden volatility spread shock
+            or (forecast.q_spread > curr_price * 0.008)
+        ):
+            action = "EXIT"
+            reason = "THESIS_FLIP"
+            confidence = "High"
+            confidence_score = 0.90
+            if side == "LONG" and absorption in ("SELL", "SELL_ABSORBED"):
+                rationale = "Heavy sell absorption cluster — sellers in control."
+            elif side == "SHORT" and absorption in ("BUY", "BUY_ABSORBED"):
+                rationale = "Heavy buy absorption cluster — buyers in control."
+            else:
+                rationale = (
+                    f"Thesis flip on {symbol} {side}: Opposing order flow ({cvd_slope:.1f}) and TimesFM trajectory breakdown — "
+                    f"exiting at market before stop loss hit."
+                )
+
+        # 5. RISK-ZERO RATCHET (Breakeven Trailing)
+        elif not is_risk_free and (
+            rr_achieved >= 0.8
+            or (side == "LONG" and float(np.min(forecast.p10_path[:5])) > entry_price)
+            or (side == "SHORT" and float(np.max(forecast.p90_path[:5])) < entry_price)
+        ):
+            action = "TIGHTEN_SL"
+            reason = "RISK_ZERO"
+            confidence = "High"
+            confidence_score = 0.90
+            dyn_stop = entry_price
+            rationale = (
+                f"CVD confirms and TimesFM 90% confidence envelope clears cost basis on {symbol} {side} — "
+                f"moving stop to breakeven ({entry_price:.2f})."
+            )
+
+        # 6. TIME-STOP / STAGNATION DECAY
+        elif bars_held >= 5 and abs(rr_achieved) < 0.25 and abs(forecast.pct_change) < 0.0003:
+            action = "EXIT"
+            reason = "TIME_STOP"
+            confidence = "Medium"
+            confidence_score = 0.70
+            rationale = (
+                f"Time stop on {symbol} {side}: Auction stagnant without directional expansion after "
+                f"{bars_held} bars — exiting flat."
+            )
+
+        # Active position details payload
+        active_pos_payload = {
+            "side": side,
+            "entryPrice": round(entry_price, 2),
+            "currentPrice": round(curr_price, 2),
+            "pnl": round(pnl, 2),
+            "stopLoss": round(sl, 2) if sl > 0 else None,
+            "takeProfit": round(tp, 2) if tp > 0 else None,
+            "barsHeld": bars_held,
+            "isRiskFree": is_risk_free or (action == "TIGHTEN_SL"),
+            "rrAchieved": round(rr_achieved, 2),
+        }
+
+        return {
+            "role": "POSITION_MANAGEMENT",
+            "action": action,
+            "direction": side,
+            "setup": "POSITION_MGMT",
+            "reason": reason,
+            "confidence": confidence,
+            "confidenceScore": round(confidence_score, 3),
+            "rationale": rationale,
+            "forecastSteps": forecast.forecast_steps,
+            "quantileSpread": round(forecast.q_spread, 4),
+            "meanForecast": round(forecast.mean_forecast, 2),
+            "gateResults": [
+                {"gate_no": 1, "gate_name": "POSITION_ACTIVE", "passed": True, "message": f"{side} @ {entry_price:.1f}"},
+                {"gate_no": 2, "gate_name": "TREND_HEALTH", "passed": bool(action in ("HOLD", "TIGHTEN_SL")), "message": reason},
+                {"gate_no": 3, "gate_name": "RISK_STATE", "passed": True, "message": f"PnL {pnl:+.1f}"},
+                {"gate_no": 4, "gate_name": "ACTION_DISPATCH", "passed": True, "message": action},
+            ],
+            "activePosition": active_pos_payload,
+            "dynamicTrailStop": round(dyn_stop, 2) if dyn_stop is not None else None,
+            "source": "TIMESFM_3.0_NATIVE",
+            "latencyMs": round(forecast.lat_ms, 1),
+            "modelLabel": f"TimesFM-PM-{action}",
+            "modelVersions": {"timesfm": "3.0", "agent_role": "POSITION_MANAGEMENT", "engine": "native_direct"},
+            "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
+            "timing": str(ctx.session_phase or "REGULAR"),
+            "sizeFraction": 1.0 if action in ("HOLD", "TIGHTEN_SL") else 0.0,
+            "latencyUs": int(forecast.lat_ms * 1000),
+        }

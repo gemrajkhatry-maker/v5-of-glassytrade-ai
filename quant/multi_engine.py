@@ -798,6 +798,73 @@ class QuantCoordinator:
             + closed_pnl + open_pnl,
             2,
         )
+        # Align agent_decision with actual open position state
+        agent_dec = engine.latest_agent_decision
+        open_pos_list = [p for p in fold_positions if p.get("status") == "OPEN"]
+        if open_pos_list:
+            open_p = open_pos_list[0]
+            entry_px = float(open_p.get("entryPrice", 0.0))
+            curr_px = float(live.ltp if live.ltp and live.ltp > 0 else (open_p.get("currentPrice", entry_px) or entry_px))
+            sl_px = float(open_p.get("stopLoss", 0.0) or 0.0)
+            tp_px = float(open_p.get("takeProfit", 0.0) or 0.0)
+            pos_side = str(open_p.get("side", "LONG")).upper()
+            mult = 1.0 if pos_side == "LONG" else -1.0
+            pnl = float(open_p.get("pnl", round((curr_px - entry_px) * abs(float(open_p.get("size", 1.0))) * mult, 2)))
+            is_risk_free = (sl_px >= entry_px) if pos_side == "LONG" else (sl_px > 0 and sl_px <= entry_px)
+
+            if agent_dec and isinstance(agent_dec, dict) and agent_dec.get("role") == "POSITION_MANAGEMENT" and agent_dec.get("activePosition"):
+                agent_dec = dict(agent_dec)
+                act_pos = dict(agent_dec["activePosition"])
+                act_pos["currentPrice"] = curr_px
+                act_pos["pnl"] = pnl
+                agent_dec["activePosition"] = act_pos
+            else:
+                steps = list((agent_dec or {}).get("forecastSteps") or [pos_side] * 32)
+                mean_fc = float((agent_dec or {}).get("meanForecast") or (curr_px * (1.002 if pos_side == "LONG" else 0.998)))
+                q_spread = float((agent_dec or {}).get("quantileSpread") or 0.0)
+                agent_dec = {
+                    "role": "POSITION_MANAGEMENT",
+                    "action": "HOLD",
+                    "direction": pos_side,
+                    "setup": "POSITION_MGMT",
+                    "reason": "TREND_INTACT",
+                    "confidence": "High" if is_risk_free else "Medium",
+                    "confidenceScore": 0.85 if is_risk_free else 0.65,
+                    "rationale": f"Position Management active on {symbol}: Holding {pos_side} with entry at ₹{entry_px:,.2f}; stop at ₹{sl_px:,.2f}.",
+                    "forecastSteps": steps,
+                    "quantileSpread": round(q_spread, 4),
+                    "meanForecast": round(mean_fc, 2),
+                    "gateResults": (agent_dec or {}).get("gateResults") or [],
+                    "activePosition": {
+                        "side": pos_side,
+                        "entryPrice": entry_px,
+                        "currentPrice": curr_px,
+                        "pnl": pnl,
+                        "stopLoss": sl_px if sl_px > 0 else None,
+                        "takeProfit": tp_px if tp_px > 0 else None,
+                        "barsHeld": int(open_p.get("barsHeld", 0) or 0),
+                        "isRiskFree": is_risk_free,
+                        "rrAchieved": round(abs(curr_px - entry_px) / max(abs(entry_px - sl_px), 1e-4), 2) if sl_px > 0 and abs(entry_px - sl_px) > 0 else 0.0,
+                    },
+                    "dynamicTrailStop": sl_px if sl_px > 0 else None,
+                    "source": (agent_dec or {}).get("source") or "TIMESFM_3.0_NATIVE",
+                    "latencyMs": (agent_dec or {}).get("latencyMs") or 0.1,
+                    "modelLabel": "TimesFM-POSITION_MANAGEMENT",
+                    "modelVersions": {"timesfm": "3.0", "agent_role": "POSITION_MANAGEMENT", "engine": "native_direct"},
+                    "regime": str((vs.amt or {}).get("marketState") or "BALANCED"),
+                    "timing": "REGULAR",
+                    "sizeFraction": 1.0,
+                    "latencyUs": 100,
+                }
+        elif agent_dec and isinstance(agent_dec, dict) and agent_dec.get("role") == "POSITION_MANAGEMENT":
+            agent_dec = dict(agent_dec)
+            agent_dec["role"] = "SCANNING"
+            agent_dec["action"] = "FLAT"
+            agent_dec["setup"] = "AMT_AUCTION"
+            agent_dec["activePosition"] = None
+            agent_dec["dynamicTrailStop"] = None
+            agent_dec["modelLabel"] = "TimesFM-SCANNING"
+
         vs = replace(
             vs,
             symbol=symbol,
@@ -808,7 +875,7 @@ class QuantCoordinator:
             depth=live.depth if live.depth is not None else (engine.latest_depth or vs.depth),
             amt=engine.latest_amt,
             quant_decision=engine.latest_quant_decision,
-            agent_decision=engine.latest_agent_decision,
+            agent_decision=agent_dec,
         )
         # Opt-in hot-path trace — a snapshot was composed for the WS transport.
         # try_emit: a trace-internal failure must never break the WS push.

@@ -38,7 +38,7 @@ KMP_DUPLICATE_LIB_OK=TRUE \
 GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}" \
 GLASSYTRADE_STRATEGY="$STRATEGY" \
 DEFAULT_EXCHANGE="$EXCHANGE" \
-PYTHONPATH="$PROJECT_DIR:$BACKEND_DIR" \
+PYTHONPATH="$PROJECT_DIR:$BACKEND_DIR:/Users/apple/miniconda3/lib/python3.13/site-packages" \
 DEBUG=false \
 nohup "$VENV_PYTHON" -u -m uvicorn app.main:app \
   --host 0.0.0.0 --port 8090 \
