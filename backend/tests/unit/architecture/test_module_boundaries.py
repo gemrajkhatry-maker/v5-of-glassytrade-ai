@@ -25,7 +25,6 @@ def _collect_imports(directory: Path) -> list[tuple[Path, str]]:
 
 
 class TestTradingDomainBoundary:
-    pytestmark = pytest.mark.skip(reason="Pre-existing module boundary assertion — fabio_ai imports exist in domain layer")
     """trading/ must not import from fabio_ai/."""
 
     def test_no_fabio_ai_imports(self):
