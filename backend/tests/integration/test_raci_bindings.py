@@ -16,16 +16,16 @@ from quant.contracts.enums import MarketState
 
 
 class TestProfileToMarketStateBinding:
-    pytestmark = pytest.mark.skip(reason="Pre-existing assertion — MarketState logic mismatch (PROBING vs BALANCED)")
     """RACI: VolumeProfile → MarketStateEngine (VolumeProfile is R, MarketStateEngine is C)."""
 
-    def test_poc_drives_no_trade(self):
-        """POC from VolumeProfile drives NO_TRADE state."""
+    def test_poc_near_poc_drives_balanced_near_poc(self):
+        """Price near POC within VA → BALANCED state, NEAR_POC zone."""
         result = detect_market_state(
             price=100.05, poc=100.0, vah=105.0, val=95.0,
             tick_size=0.10, has_displacement=False, has_acceptance=False,
+            balance_ratio=0.8,
         )
-        assert result.state == MarketState.NO_TRADE
+        assert result.state == MarketState.BALANCED
         assert result.zone == "NEAR_POC"
 
     def test_vah_val_drives_balanced(self):
@@ -33,6 +33,7 @@ class TestProfileToMarketStateBinding:
         result = detect_market_state(
             price=100.0, poc=97.0, vah=105.0, val=95.0,
             tick_size=0.10, has_displacement=False, has_acceptance=False,
+            balance_ratio=0.8,
         )
         assert result.state == MarketState.BALANCED
 
@@ -55,24 +56,23 @@ class TestProfileToMarketStateBinding:
 
 
 class TestOrderFlowToAggressionBinding:
-    pytestmark = pytest.mark.skip(reason="AggressionScorer.score() called as static but is instance method")
     """RACI: OrderFlow modules → AggressionScorer (OrderFlow is R, AggressionScorer is C)."""
 
     def test_footprint_to_aggression(self):
         """FootprintEngine output feeds into AggressionScorer."""
-        result = AggressionScorer.score(footprint_confirmed=True)
+        result = AggressionScorer().score(footprint_confirmed=True)
         assert result.score == pytest.approx(1.0)
         assert result.breakdown["footprint"] == 1.0
 
     def test_cvd_to_aggression(self):
         """CVDEngine output feeds into AggressionScorer."""
-        result = AggressionScorer.score(cvd_confirmed=True)
+        result = AggressionScorer().score(cvd_confirmed=True)
         assert result.score == pytest.approx(1.0)
         assert result.breakdown["cvd"] == 1.0
 
     def test_all_orderflow_to_aggression(self):
         """All order flow signals aggregate correctly."""
-        result = AggressionScorer.score(
+        result = AggressionScorer().score(
             footprint_confirmed=True,
             cvd_confirmed=True,
             big_trade_confirmed=True,
