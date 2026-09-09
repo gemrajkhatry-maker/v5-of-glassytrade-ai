@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from time import perf_counter
 from typing import Any
 
 import numpy as np
@@ -38,6 +39,7 @@ class ForecastProvider:
             )
             self._cache[key] = snapshot
             return snapshot
+        started = perf_counter()
         try:
             model = self._model_loader()
             result = model.predict(
@@ -57,6 +59,10 @@ class ForecastProvider:
                 decision_sequence=decision_sequence,
                 status=ForecastStatus.AVAILABLE,
                 model_version="timesfm",
+                p10_path=tuple(float(v) for v in p10),
+                p50_path=tuple(float(v) for v in p50),
+                p90_path=tuple(float(v) for v in p90),
+                latency_ms=(perf_counter() - started) * 1000.0,
                 expected_return=float((p50[-1] - current) / max(abs(current), 1e-6)),
                 dispersion=float(np.mean(p90 - p10)),
                 velocity=float(p50[-1] - p50[0]),

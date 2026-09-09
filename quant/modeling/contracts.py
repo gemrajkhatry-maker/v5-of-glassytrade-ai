@@ -23,6 +23,10 @@ class ForecastSnapshot:
     symbol: str
     decision_sequence: int
     status: ForecastStatus
+    p10_path: tuple[float, ...] = ()
+    p50_path: tuple[float, ...] = ()
+    p90_path: tuple[float, ...] = ()
+    latency_ms: float = 0.0
     model_version: str | None = None
     failure_reason: str | None = None
     expected_return: float | None = None
