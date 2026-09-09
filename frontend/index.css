@@ -236,3 +236,58 @@ html, body, #root {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-glassy-border-prominent);
 }
+
+/* Scanner Scrollbar — Dedicated, Always-Visible Institutional Scrollbar */
+.scanner-scrollbar {
+  overflow-y: scroll !important;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-glassy-border-prominent) rgba(10, 14, 23, 0.6);
+}
+
+.scanner-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  display: block;
+}
+
+.scanner-scrollbar::-webkit-scrollbar-track {
+  background: rgba(10, 14, 23, 0.6);
+  border-left: 1px solid var(--color-glassy-border-subtle);
+  border-radius: 0 4px 4px 0;
+}
+
+.scanner-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-glassy-border-prominent);
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.scanner-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-glassy-ai-primary);
+  box-shadow: 0 0 6px rgba(124, 92, 252, 0.5);
+}
+
+/* General Custom Scrollbar */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-glassy-border-prominent) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  display: block;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-glassy-border-prominent);
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-glassy-border-focus);
+}
+

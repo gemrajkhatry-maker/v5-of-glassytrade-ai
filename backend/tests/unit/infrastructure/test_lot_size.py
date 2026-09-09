@@ -62,7 +62,7 @@ def test_dhan_adapter_get_lot_size():
     mock_exchange_config.get_lot_size.assert_called_once_with("BANKNIFTY")
 
 def test_dhan_broker_get_lot_size_logic():
-    """Test the internal logic of DhanBroker.get_lot_size with mocks."""
+    """Test the internal logic of DhanBroker.get_lot_size fallback with mocks."""
     mock_config = MagicMock()
     broker = DhanBroker(config=mock_config)
     
@@ -76,9 +76,24 @@ def test_dhan_broker_get_lot_size_logic():
     broker.resolve_symbol = _resolved
     broker._run_async = MagicMock(side_effect=lambda coro: asyncio.run(coro))
     
-    # Since we mocked _run_async, it won't actually call resolve_symbol (async)
-    # but we can check if it returns the right value
-    lot_size = broker.get_lot_size("CRUDEOIL", Exchange.MCX)
+    lot_size = broker.get_lot_size("UNKNOWN_DERIVATIVE_XYZ", Exchange.NSE)
     
     assert lot_size == 75
     broker._run_async.assert_called_once()
+
+
+def test_dhan_broker_get_lot_size_mcx_canonical():
+    """DhanBroker and DhanExchangeConfig must return canonical lot sizes for MCX contracts."""
+    mock_config = MagicMock()
+    broker = DhanBroker(config=mock_config)
+    cfg = broker.get_exchange_config()
+
+    assert broker.get_lot_size("GOLDM OCT FUT") == 10
+    assert broker.get_lot_size("CRUDEOIL SEP FUT") == 100
+    assert broker.get_lot_size("SILVERM NOV FUT") == 5
+    assert broker.get_lot_size("NATURALGAS SEP FUT") == 1250
+
+    assert cfg.get_lot_size("GOLDM OCT FUT") == 10
+    assert cfg.get_lot_size("CRUDEOIL SEP FUT") == 100
+    assert cfg.get_lot_size("SILVERM NOV FUT") == 5
+    assert cfg.get_lot_size("NATURALGAS SEP FUT") == 1250

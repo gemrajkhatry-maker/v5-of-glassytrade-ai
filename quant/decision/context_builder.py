@@ -334,15 +334,24 @@ class DecisionContextBuilder:
             if asks: best_ask = float(asks[0].price)
 
         # Session & Expiry
-        bar_text = str(bar.time if bar else "").strip()
-        is_epoch = bar_text.replace(".", "", 1).lstrip("-").isdigit() and len(bar_text) >= 9 and "T" not in bar_text
-        is_iso = "T" in bar_text or "+" in bar_text or ":" in bar_text
+        effective_time = str((bar.time if bar else None) or amt_dto.get("time") or "").strip()
+        is_epoch = (
+            effective_time.replace(".", "", 1).lstrip("-").isdigit()
+            and len(effective_time) >= 9
+            and "T" not in effective_time
+        )
+        is_iso = "T" in effective_time or "+" in effective_time or ":" in effective_time
         session_info = None
         if is_epoch or is_iso:
-            try: session_info = get_session_info(bar.time, market=market)
+            try: session_info = get_session_info(effective_time, market=market)
             except Exception: pass
+        elif not effective_time:
+            # Fallback for live contexts where bar is not yet assembled
+            try: session_info = get_session_info(market=market)
+            except Exception: pass
+
         session_phase = session_info.session if session_info else "PRIMARY"
-        bar_dt = ist_dt(bar.time) if (bar and bar.time and (is_epoch or is_iso)) else None
+        bar_dt = ist_dt(effective_time) if (effective_time and (is_epoch or is_iso)) else None
         is_expiry = (bar_dt.date() == contract_expiry) if (contract_expiry and bar_dt) else False
 
         # Direction, Setup, Position via extracted helpers
@@ -377,7 +386,7 @@ class DecisionContextBuilder:
         elif raw_ms == "IMBALANCED": amt_market_state = MarketState.IMBALANCED
         else: amt_market_state = MarketState.BALANCED
 
-        bar_time = bar.time if bar is not None else str(amt_dto.get("time") or "")
+        bar_time = effective_time
         allow_trend = session_info.allow_trend if session_info else True
         allow_reversion = session_info.allow_reversion if session_info else True
 
@@ -387,8 +396,8 @@ class DecisionContextBuilder:
             symbol=symbol,
             market=market,
             session_open=session_allow_entry(
-                bar_time, market=market, contract_expiry=contract_expiry
-            ) if bar_time else True,
+                effective_time, market=market, contract_expiry=contract_expiry
+            ) if effective_time else (session_info.allow_entry if session_info else True),
             warmup_complete=(bar_index + warm_bars) >= warmup_bars,
             position_open=pos["pos_open"],
             position_side=pos["pos_side"],
@@ -435,7 +444,7 @@ class DecisionContextBuilder:
             leg_lvn=nearest_leg_lvn,
             bid=float(amt_dto.get("bid") or best_bid or 0.0),
             ask=float(amt_dto.get("ask") or best_ask or 0.0),
-            time_str=str(bar.time if bar else ""),
+            time_str=effective_time,
             session_phase=session_phase,
             allow_trend=allow_trend,
             allow_reversion=allow_reversion,

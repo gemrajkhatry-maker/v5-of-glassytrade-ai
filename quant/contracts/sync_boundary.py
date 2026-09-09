@@ -41,3 +41,25 @@ def ensure_async_adapter_result(
         )
 
     return callable_obj(*args, **kwargs)
+
+
+def invoke_sync_or_async(
+    callable_obj: Callable[..., Any],
+    *args,
+    **kwargs,
+) -> Any:
+    """Invoke a sync or async callable synchronously, even from within an active asyncio event loop."""
+    import asyncio
+    import concurrent.futures
+
+    result = callable_obj(*args, **kwargs)
+    if inspect.isawaitable(result):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(asyncio.run, result).result()
+        return asyncio.run(result)
+    return result

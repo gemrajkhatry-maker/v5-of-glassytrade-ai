@@ -11,9 +11,9 @@ import {
   IPriceLine,
   SeriesMarker,
 } from 'lightweight-charts';
-import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, ChartMode, AggressivePrint, HalfTrendPoint, QuantDecisionAnalysis, LLMHistoryEntry } from '../types';
+import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, ChartMode, AggressivePrint, HalfTrendPoint, QuantDecisionAnalysis, LLMHistoryEntry, Portfolio } from '../types';
 import { IST_OFFSET_SECONDS } from '../constants';
-import DecisionCard from './chart/DecisionCard';
+import AIAdvisorCard from './ai/AIAdvisorCard';
 
 // Extracted chart components (Phase 3)
 import {
@@ -52,6 +52,7 @@ interface ChartSceneProps {
   mode?: ChartMode;
   tickBus?: EventTarget;
   symbol?: string;
+  portfolio?: Portfolio | null;
 }
 
 // Helper to convert Hex to RGBA for intensity
@@ -102,8 +103,20 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   mode = 'STANDARD',
   tickBus,
   symbol,
+  portfolio,
 }) => {
-const chartContainerRef = useRef<HTMLDivElement>(null);
+  const effectivePortfolio = useMemo(() => {
+    if (portfolio) return portfolio;
+    return {
+      balance: 0,
+      equity: 0,
+      leverage: 1,
+      positions: positions || [],
+      closedTrades: closedTrades || [],
+    } as Portfolio;
+  }, [portfolio, positions, closedTrades]);
+
+  const chartContainerRef = useRef<HTMLDivElement>(null);
     const overlayRef = useRef<HTMLCanvasElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -1516,13 +1529,15 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
           </div>
         )}
 
-        {/* Current Decision Card */}
-        {(agentDecision?.direction || agentDecision?.rationale) && (
-          <div className="absolute top-4 right-4 z-40 w-72 max-h-[80%] overflow-hidden">
-            <DecisionCard
-              direction={agentDecision.direction || 'FLAT'}
-              regime={agentDecision.regime || ''}
-              rationale={agentDecision.rationale || ''}
+        {/* AI Market Thesis (replacing legacy Current Decision Card) */}
+        {(agentDecision?.direction || agentDecision?.rationale || agentDecision?.source || agentDecision?.forecastSteps) && (
+          <div className="absolute top-3 right-3 z-40 w-80 sm:w-[350px] max-h-[calc(100%-1.5rem)] flex flex-col pointer-events-auto">
+            <AIAdvisorCard
+              agentDecision={agentDecision}
+              quantDecision={quantDecision}
+              portfolio={effectivePortfolio}
+              collapsible={true}
+              defaultExpanded={true}
             />
           </div>
         )}
@@ -1611,6 +1626,7 @@ function chartSceneAreEqual(prev: ChartSceneProps, next: ChartSceneProps): boole
     if (prev.quantDecision !== next.quantDecision) return false;
     if ((prev.decisionHistory?.length ?? 0) !== (next.decisionHistory?.length ?? 0)) return false;
     if (prev.agentDecision !== next.agentDecision) return false;
+    if (prev.portfolio !== next.portfolio) return false;
     if (prev.amtAnalysis !== next.amtAnalysis) return false;
     // HalfTrend is fed as its own prop (not part of amtAnalysis) — the
     // overlay must re-render when new history/live rows arrive.

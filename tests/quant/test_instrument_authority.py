@@ -133,3 +133,22 @@ def test_unknown_root_does_not_default_tick_or_lot():
     nse = ExchangeConfig.for_exchange("NSE")
     with pytest.raises(KeyError):
         nse.get_lot_size("NIFTYNXT50")
+
+
+def test_resolve_lot_size_mcx_ignores_broker_dummy_one():
+    from quant.multi_engine import QuantCoordinator
+
+    class _DhanBrokerWithDummyLot:
+        def get_lot_size(self, symbol):
+            # Dhan scrip master reports 1.0 for all MCX derivatives
+            return 1.0
+
+    coord = QuantCoordinator(
+        market_data=_DhanBrokerWithDummyLot(),
+        config={"underlyings": ["GOLDM"], "exchange": "MCX", "n": 1},
+    )
+    assert coord._resolve_lot_size("GOLDM OCT FUT") == 10.0
+    assert coord._resolve_lot_size("GOLDM 25 SEP 153000 PUT") == 10.0
+    assert coord._resolve_lot_size("CRUDEOIL SEP FUT") == 100.0
+    assert coord._resolve_lot_size("SILVERM NOV FUT") == 5.0
+    assert coord._resolve_lot_size("NATURALGAS SEP FUT") == 1250.0

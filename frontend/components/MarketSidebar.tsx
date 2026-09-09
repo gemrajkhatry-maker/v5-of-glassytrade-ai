@@ -199,7 +199,10 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
     // (recent-trades panel removed — closedTrades is canonical in JournalPage)
 
     return (
-        <GlassPanel className="h-full w-[280px] flex flex-col border-r border-glassy-border-default rounded-none rounded-r-md bg-glassy-bg-secondary shadow-xl z-50">
+        <GlassPanel
+            className="h-full w-[280px] flex flex-col border-r border-glassy-border-default rounded-none rounded-r-md bg-glassy-bg-secondary shadow-xl z-50 overflow-hidden"
+            contentClassName="h-full flex flex-col min-h-0"
+        >
 
             {/* --- MARKET SCANNER (Top Section) --- */}
             <div className="flex-1 flex flex-col min-h-0">
@@ -266,7 +269,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                 </div>
 
                 {/* Symbol List */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-1 relative">
+                <div className="flex-1 overflow-y-scroll scanner-scrollbar p-2 pr-1.5 space-y-1 relative min-h-0">
                     {/* HALTED overlay — covers all rows when risk limits are hit */}
                     {isHalted && (
                         <div className="sticky top-0 z-20 mb-2 px-2 py-1.5 rounded border border-rose-500/40 bg-rose-950/70 backdrop-blur-sm flex items-center gap-2">

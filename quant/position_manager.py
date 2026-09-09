@@ -124,6 +124,7 @@ class PositionManager:
         bar_index: int,
         entry_bar_index: int,
         entry_time_epoch: float,
+        timesfm_forecast: object | None = None,
     ):
         """Evaluate exit conditions for an open position.
 
@@ -148,14 +149,12 @@ class PositionManager:
         if session_force_exit(
             bar.time, market=self._market, contract_expiry=self._contract_expiry
         ):
-            exit_dec = ExitDecision(True, "SESSION_CLOSE", float(bar.close))
+            exit_dec = ExitDecision(True, "SESSION_CLOSE", bar.close)
         else:
             book = self._get_depth()
             best_bid = float(book.bids[0].price) if book and book.bids else None
             best_ask = float(book.asks[0].price) if book and book.asks else None
             ist_dt = _ist_dt(bar.time)
-            # Use the passed-in amt_dto (from the engine's analyze() call)
-            # instead of re-reading last_amt_dto which could be stale.
             raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
             if raw_ms == "IMBALANCED":
                 market_state = MarketState.IMBALANCED
@@ -166,14 +165,6 @@ class PositionManager:
             if ist_dt is not None:
                 info = get_session_info(bar.time, market=self._market)
                 session_phase = str(info.session)
-                # Phase 2: the Tuesday-weekday heuristic this used to OR in
-                # (`is_expiry_day`) is wrong for monthly-only underlyings
-                # (BANKNIFTY/FINNIFTY/MIDCPNIFTY) and for Thursday-expiry
-                # SENSEX/BANKEX — it would flag every Tuesday as an expiry
-                # day regardless of the actual contract held. The real,
-                # already-correct signal is the traded contract's own
-                # expiry date (mirrors context_builder.py's entry-side
-                # `is_expiry` — same computation, same source of truth).
                 is_expiry = (
                     self._contract_expiry is not None
                     and ist_dt.date() == self._contract_expiry
@@ -199,6 +190,7 @@ class PositionManager:
                 now_epoch=now_epoch,
                 bar_close=bar.close,
                 session_vwap=session_vwap,
+                timesfm_forecast=timesfm_forecast,
             )
 
             # Emit StopMoved for any stop-level change detected this bar.

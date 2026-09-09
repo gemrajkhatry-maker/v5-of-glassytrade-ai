@@ -1,5 +1,5 @@
 import React from 'react';
-import { Zap, ShieldCheck, Clock, CheckCircle2, XCircle } from 'lucide-react';
+import { Zap, ShieldCheck, Clock, CheckCircle2, XCircle, Database, Activity } from 'lucide-react';
 import { QuantDecisionAnalysis } from '../../types';
 
 interface QuantDecisionCardProps {
@@ -229,6 +229,66 @@ const QuantDecisionCard = React.memo<QuantDecisionCardProps>(({ quantDecision })
                     </div>
                 </div>
             )}
+
+            {/* 5. Model Context Transparency */}
+            {(() => {
+                const d = quantDecision as any;
+                const ctxBars: number | undefined = d.contextBarsUsed ?? d.signal?.contextBarsUsed;
+                const evtProc: number | undefined = d.eventsProcessed ?? d.signal?.eventsProcessed;
+                const infWin: number | undefined = d.inferenceWindow ?? d.signal?.inferenceWindow ?? 32;
+                if (ctxBars == null && evtProc == null) return null;
+                const warmPct = ctxBars != null ? Math.min(100, Math.round((ctxBars / 512) * 100)) : 0;
+                const isWarm = (ctxBars ?? 0) >= 32;
+                return (
+                    <div className="mt-3 pt-2.5 border-t border-white/5">
+                        <div className="flex items-center gap-1 mb-1.5">
+                            <Database className="w-3 h-3 text-slate-400" />
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Model Context</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5 text-[9px] font-mono">
+                            <div className={`p-1.5 rounded-lg border ${isWarm ? 'border-emerald-500/20 bg-emerald-950/10' : 'border-amber-500/20 bg-amber-950/10'}`}>
+                                <div className="text-[7.5px] uppercase tracking-wider text-slate-500 mb-0.5">Hist Bars</div>
+                                <div className={`font-bold text-[10px] ${isWarm ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                    {ctxBars != null ? ctxBars.toLocaleString() : '—'}
+                                </div>
+                                <div className="text-[7px] text-slate-600">of 512 buf</div>
+                            </div>
+                            <div className="p-1.5 rounded-lg border border-white/5 bg-slate-800/30">
+                                <div className="text-[7.5px] uppercase tracking-wider text-slate-500 mb-0.5">Live Events</div>
+                                <div className="font-bold text-[10px] text-sky-400">
+                                    {evtProc != null ? evtProc.toLocaleString() : '—'}
+                                </div>
+                                <div className="text-[7px] text-slate-600">bars processed</div>
+                            </div>
+                            <div className="p-1.5 rounded-lg border border-white/5 bg-slate-800/30">
+                                <div className="text-[7.5px] uppercase tracking-wider text-slate-500 mb-0.5">Infer Win</div>
+                                <div className="font-bold text-[10px] text-violet-400">{infWin ?? 32}</div>
+                                <div className="text-[7px] text-slate-600">steps fwd</div>
+                            </div>
+                        </div>
+                        {/* Warmup progress bar */}
+                        {ctxBars != null && (
+                            <div className="mt-1.5">
+                                <div className="flex justify-between text-[7.5px] font-mono mb-0.5">
+                                    <span className="text-slate-500">Context warmup</span>
+                                    <span className={isWarm ? 'text-emerald-400' : 'text-amber-400'}>{warmPct}%</span>
+                                </div>
+                                <div className="w-full bg-slate-800/80 rounded-full h-1 overflow-hidden">
+                                    <div
+                                        className={`h-full rounded-full transition-all duration-500 ${isWarm ? 'bg-gradient-to-r from-emerald-600 to-emerald-400' : 'bg-gradient-to-r from-amber-600 to-amber-400'}`}
+                                        style={{ width: `${warmPct}%` }}
+                                    />
+                                </div>
+                                {!isWarm && (
+                                    <div className="mt-1 text-[7px] text-amber-400/80 font-mono">
+                                        ⚠ Warming up — model using padded context ({ctxBars ?? 0}/32 bars)
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                );
+            })()}
         </div>
     );
 });

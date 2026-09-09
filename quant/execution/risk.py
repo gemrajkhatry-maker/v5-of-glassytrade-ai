@@ -318,6 +318,8 @@ class SessionRisk:
         max_rupee_risk_cap: float | None = None,
         is_expiry: bool = False,
         max_lots: int | None = None,
+        forecast: Any | None = None,
+        side: str = "LONG",
     ) -> float:
         if entry == sl or entry <= 0:
             return 0.0
@@ -328,6 +330,42 @@ class SessionRisk:
                     self._starting_equity
                     + float(getattr(self._portfolio_risk, "realized_pnl", 0.0))
                 )
+
+            # TimesFM Model-Driven Dynamic Sizing (replaces static heuristics)
+            if forecast is not None:
+                try:
+                    from quant.decision.timesfm_sizing import TimesFMPositionSizer
+                    sizer = getattr(self, "_timesfm_sizer", None)
+                    if sizer is None:
+                        sizer = TimesFMPositionSizer()
+                        self._timesfm_sizer = sizer
+
+                    # Fabio aggressive sizing: high directional concordance (>=70% steps) or profit cushion
+                    same_steps = (
+                        sum(1 for s in forecast.forecast_steps if s == side.upper())
+                        if hasattr(forecast, "forecast_steps") and forecast.forecast_steps
+                        else 0
+                    )
+                    total_steps = len(forecast.forecast_steps) if hasattr(forecast, "forecast_steps") and forecast.forecast_steps else 1
+                    is_conviction = (same_steps / total_steps) >= 0.70
+                    has_cushion = bool(self._daily_pnl > 0 or self._consecutive_wins >= 1)
+                    aggressive = bool(self._base_risk_pct >= 0.02 or is_conviction or has_cushion)
+
+                    res = sizer.compute_size(
+                        equity=sizing_equity,
+                        entry=entry,
+                        side=side,
+                        forecast=forecast,
+                        lot_size=lot_size,
+                        override_sl=sl if sl > 0 else None,
+                        is_aggressive=aggressive,
+                        max_lots=max_lots,
+                        max_rupee_risk_cap=max_rupee_risk_cap,
+                    )
+                    return float(res.quantity)
+                except Exception as exc:
+                    logger.warning("TimesFM dynamic sizing error (%s) — falling back to deterministic risk", exc)
+
             # Aggressive mode (>= 5% risk): deploy 50% of available equity as
             # position capital. This is a 10:1 deployment-to-risk ratio —
             # a 5% risk budget with 50% capital deployed.
@@ -391,8 +429,13 @@ class SessionRisk:
         lot_size: float = 1.0,
         is_expiry: bool = False,
         max_lots: int | None = None,
+        forecast: Any | None = None,
+        side: str = "LONG",
     ) -> float:
-        base = self.position_size(entry, sl, lot_size=lot_size, is_expiry=is_expiry, max_lots=max_lots)
+        base = self.position_size(
+            entry, sl, lot_size=lot_size, is_expiry=is_expiry, max_lots=max_lots,
+            forecast=forecast, side=side,
+        )
         if lot_size and lot_size > 1.0:
             lots = int(base // lot_size)
             pyr_lots = max(0, lots // 2)

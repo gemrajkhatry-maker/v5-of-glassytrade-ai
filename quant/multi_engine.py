@@ -694,12 +694,14 @@ class QuantCoordinator:
             try:
                 scanner = OptionScannerService(self.market_data)
                 exchange = spec.dhan_exchange if spec is not None else self.config.get("exchange", "NSE")
+                tfm_forecasts = self._compute_timesfm_forecasts([root])
                 results = scanner.scan_top_n(
                     n=4,
                     underlyings=[root],
                     exchange=exchange,
                     expiry_index=int(self.config.get("expiry_index", 0)),
                     strikes_around_atm=int(self.config.get("strikes_around_atm", 3)),
+                    timesfm_forecasts=tfm_forecasts,
                 )
                 replacement = None
                 with self._lock:
@@ -1328,6 +1330,7 @@ class QuantCoordinator:
         option_symbols: list[str] = []
         if n_options:
             scanner = OptionScannerService(self.market_data)
+            tfm_forecasts = self._compute_timesfm_forecasts(self.config["underlyings"])
             results = scanner.scan_top_n(
                 n=n_options,
                 underlyings=self.config["underlyings"],
@@ -1335,6 +1338,7 @@ class QuantCoordinator:
                 expiry_index=self.config["expiry_index"],
                 strikes_around_atm=self.config["strikes_around_atm"],
                 underlying_priority=self.config.get("underlying_priority"),
+                timesfm_forecasts=tfm_forecasts,
             )
             option_symbols = [
                 r.symbol for r in results if (r.ltp or 0) > 0
@@ -1373,6 +1377,113 @@ class QuantCoordinator:
                     self._gex_by_root[root_k.upper()] = gex_obj
         except Exception:
             logger.debug("Failed computing startup GEX", exc_info=True)
+
+    def _compute_timesfm_forecasts(self, roots: list[str]) -> dict[str, Any]:
+        """Compute TimesFM 3.0 forecasts for underlying roots to guide option selection."""
+        forecasts: dict[str, Any] = {}
+        tfm_enabled = (
+            os.getenv("TIMESFM_CONTRACT_SELECTION", "true").strip().lower() in ("1", "true", "yes")
+            or os.getenv("TIMESFM_ADVISOR_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+        )
+        if not tfm_enabled:
+            return forecasts
+
+        try:
+            from quant.decision.timesfm_engine import get_timesfm_model
+            from quant.decision.timesfm_agents import TimesFMForecast
+            import numpy as np
+
+            model = get_timesfm_model()
+            if model is None:
+                return forecasts
+
+            for root in roots:
+                prices: list[float] = []
+                with self._lock:
+                    futures_symbol = next(
+                        (s for s in self._engines if _is_futures_symbol(s) and _canonical_root(s) == root),
+                        None,
+                    )
+                    eng = self._engines.get(futures_symbol) if futures_symbol else None
+                if eng is not None and hasattr(eng, "_aggregator") and eng._aggregator:
+                    recent_bars = getattr(eng._aggregator, "bars", []) or []
+                    if recent_bars:
+                        prices = [float(b.close) for b in recent_bars[-32:]]
+
+                if len(prices) < 32 and self.market_data is not None:
+                    fut_sym = futures_symbol or f"{root.upper()} {datetime.now(tz=IST).strftime('%b').upper()} FUT"
+                    if hasattr(self.market_data, "fetch_history"):
+                        try:
+                            from quant.contracts.sync_boundary import invoke_sync_or_async
+                            candles = invoke_sync_or_async(
+                                self.market_data.fetch_history,
+                                fut_sym,
+                                interval="5m",
+                                limit=32,
+                            )
+                            if not candles:
+                                candles = invoke_sync_or_async(
+                                    self.market_data.fetch_history,
+                                    root,
+                                    interval="5m",
+                                    limit=32,
+                                )
+                            if candles:
+                                closes = [float(getattr(c, "close", 0.0) or getattr(c, "c", 0.0) or 0.0) for c in candles]
+                                prices = [c for c in closes if c > 0]
+                        except Exception:
+                            pass
+                    if len(prices) < 32 and hasattr(self.market_data, "get_broker") and hasattr(self.market_data, "_make_instrument"):
+                        try:
+                            raw_b = self.market_data.get_broker()
+                            if hasattr(raw_b, "get_historical"):
+                                inst = self.market_data._make_instrument(fut_sym or root)
+                                end_dt = datetime.now(tz=IST)
+                                start_dt = end_dt - timedelta(days=5)
+                                df = raw_b.get_historical(instrument=inst, from_date=start_dt, to_date=end_dt, interval="5")
+                                if df is not None and not df.empty and "close" in df.columns:
+                                    prices = [float(c) for c in df["close"].tail(32)]
+                        except Exception:
+                            pass
+
+                if prices:
+                    if len(prices) < 32:
+                        prices = [prices[0]] * (32 - len(prices)) + prices
+                    np_prices = np.array(prices[-32:], dtype=np.float32)
+                    res = model.predict(context=np_prices, horizon=32, return_quantiles=True)
+                    quantiles = getattr(res, "quantiles", None)
+                    curr_price = float(np_prices[-1])
+                    if quantiles is not None and len(quantiles) > 0:
+                        p50 = quantiles[:, 4]
+                        p10 = quantiles[:, 0]
+                        p90 = quantiles[:, 8]
+                        q_spread = float(np.mean(p90 - p10))
+                    else:
+                        p50 = np.full(32, curr_price)
+                        p10 = np.full(32, curr_price * 0.998)
+                        p90 = np.full(32, curr_price * 1.002)
+                        q_spread = 0.0
+
+                    mean_forecast = float(p50[-1])
+                    pct_change = (mean_forecast - curr_price) / max(curr_price, 1e-4)
+                    forecasts[root] = TimesFMForecast(
+                        horizon=32,
+                        p50_path=p50,
+                        p10_path=p10,
+                        p90_path=p90,
+                        q_spread=q_spread,
+                        mean_forecast=mean_forecast,
+                        pct_change=pct_change,
+                        forecast_steps=["LONG" if p > curr_price else "SHORT" for p in p50],
+                        curr_price=curr_price,
+                        lat_ms=5.0,
+                    )
+                    logger.info("TimesFM forecast computed for %s (drift=%.2f%%, spread=%.2f)", root, pct_change * 100, q_spread)
+        except Exception as e:
+            logger.debug("Failed computing TimesFM forecasts for option selection: %s", e)
+
+        return forecasts
+
 
     def _session_profile_for(self, symbol: str) -> str:
         """NSE/MCX session clock for *symbol* — never the coordinator's mode flag."""
@@ -1477,14 +1588,19 @@ class QuantCoordinator:
         return DEFAULT_REGISTRY.resolve(symbol).tick_size
 
     def _resolve_lot_size(self, symbol: str) -> float:
-        """Broker lot if present, else InstrumentRegistry. Unknown roots raise."""
+        """InstrumentRegistry lot for MCX/derivatives, else broker lot if > 1. Unknown roots raise."""
+        spec = DEFAULT_REGISTRY.try_resolve(symbol)
+        if spec is not None and (spec.exchange == "MCX" or spec.lot_size > 1):
+            return float(spec.lot_size)
         try:
             raw = self.market_data.get_lot_size(symbol)
             lot_size = float(raw or 0)
-            if lot_size > 0:
+            if lot_size > 1:
                 return lot_size
         except Exception:
             pass
+        if spec is not None:
+            return float(spec.lot_size)
         return float(DEFAULT_REGISTRY.resolve(symbol).lot_size)
 
     # ------------------------------------------------------------------
@@ -1619,11 +1735,38 @@ class QuantCoordinator:
             cooldown_minutes=int(self.config.get("cooldown_minutes", 15)),
             execution_enabled=execution_enabled,
             seed_scheduler=self._seed_scheduler,
+            max_lots=(
+                int(self.config["max_lots"])
+                if "max_lots" in self.config
+                else (2 if self._session_profile_for(symbol) == "MCX" else 10)
+            ),
         )
         if advisor is not None:
             # Route advisor emissions through the engine's own bus exactly as
             # the previous in-constructor wiring did.
             advisor.set_emit_fn(engine._emit)
+
+        # Wire TimesFM historical pre-seed: when AMT finishes seeding session
+        # candles, push those closes into TimesFMEngine so the model starts
+        # with a full context window instead of a single repeated price.
+        if hasattr(engine, "_amt_engine") and engine._amt_engine is not None:
+            seed_targets = []
+            if advisor is not None and getattr(advisor, "_native_engine", None) is not None:
+                seed_targets.append(advisor._native_engine.seed_history)
+            strat = getattr(engine, "_strategy", None)
+            if strat is not None and getattr(strat, "_engine", None) is not None:
+                if strat._engine.seed_history not in seed_targets:
+                    seed_targets.append(strat._engine.seed_history)
+
+            if seed_targets:
+                def _seed_all_timesfm(sym: str, prices: list[float]) -> None:
+                    for s_fn in seed_targets:
+                        try:
+                            s_fn(sym, prices)
+                        except Exception:
+                            pass
+                engine._amt_engine._timesfm_seed_fn = _seed_all_timesfm
+
         root_upper = _canonical_root(symbol).upper()
         if root_upper in self._gex_by_root and hasattr(engine, "_amt_engine"):
             engine._amt_engine.set_gex(self._gex_by_root[root_upper])

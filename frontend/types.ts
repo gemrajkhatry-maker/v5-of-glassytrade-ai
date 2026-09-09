@@ -120,6 +120,7 @@ export interface TradePosition {
   pnl: number;
   entryTime: string;
   status: 'OPEN' | 'CLOSED';
+  currentPrice?: number;
   exitPrice?: number;
   exitTime?: string;
   closeReason?: string;

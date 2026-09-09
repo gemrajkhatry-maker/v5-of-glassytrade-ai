@@ -292,7 +292,8 @@ describe('ChartScene', () => {
         }}
       />
     );
-    expect(screen.getByText(/▲ LONG/)).toBeInTheDocument();
+    expect(screen.getByText(/LONG \(ENTER\)/)).toBeInTheDocument();
+    expect(screen.getByText(/AI Market Thesis/)).toBeInTheDocument();
   });
 
   it('stabilizes redraws when re-rendered with separately decoded but equal profile arrays', () => {

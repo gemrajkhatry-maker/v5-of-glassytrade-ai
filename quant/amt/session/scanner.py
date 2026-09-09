@@ -14,11 +14,11 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from quant.amt.profile.gamma import compute_gamma_exposure
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY, UnknownInstrumentError
-from quant.contracts.sync_boundary import ensure_sync_adapter_result
-from quant.contracts.timezones import today_ist
+from quant.contracts.sync_boundary import ensure_sync_adapter_result, invoke_sync_or_async
+from quant.contracts.timezones import IST, today_ist
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,9 @@ class ScanResult:
     bias_reason: str = ""
     delta: float = 0.0
     iv: float = 0.0
+    expected_roc: float = 0.0
+    timesfm_edge: float = 0.0
+    theta_viable: bool = True
 
 
 class OptionScannerService:
@@ -73,8 +76,32 @@ class OptionScannerService:
         )
         self.big_move_min_dte = int(os.environ.get("SCANNER_BIG_MOVE_MIN_DTE", "2"))
 
+    def _fetch_historical_closes(self, symbol: str, limit: int = 32) -> list[float]:
+        """Safely fetch historical candle close prices from broker (sync or async)."""
+        if not hasattr(self._broker, "fetch_history"):
+            return []
+        try:
+            result = invoke_sync_or_async(
+                self._broker.fetch_history,
+                symbol,
+                interval="5m",
+                limit=limit,
+            )
+            if result:
+                closes = [
+                    float(getattr(c, "close", 0.0) or getattr(c, "c", 0.0) or 0.0)
+                    for c in result
+                ]
+                return [c for c in closes if c > 0]
+        except Exception as e:
+            logger.debug("History fetch for %s failed: %s", symbol, e)
+        return []
+
     @staticmethod
-    def _score_contract(strike, atm, interval, oi, vol, opt, ltp, bid, ask, underlying_upper, bias=None, opt_type=None, median_vol=1000) -> tuple:
+    def _score_contract(
+        strike, atm, interval, oi, vol, opt, ltp, bid, ask, underlying_upper,
+        bias=None, opt_type=None, median_vol=1000, timesfm_forecast=None,
+    ) -> tuple:
         """Score an option contract based on ATM proximity, liquidity, and momentum.
         
         Returns (score, atm_dist, delta_val).
@@ -115,6 +142,33 @@ class OptionScannerService:
             if spread_pct > 0.5:
                 score -= min(20, (spread_pct - 0.5) * 10)
 
+        # TimesFM payoff simulation enrichment & model-driven scoring
+        if timesfm_forecast is not None and ltp > 0:
+            try:
+                from quant.decision.timesfm_option_selector import simulate_contract_payoff
+                dir_str = "LONG" if bias == "BULLISH" else ("SHORT" if bias == "BEARISH" else "FLAT")
+                sim = simulate_contract_payoff(
+                    opt=opt,
+                    strike=strike,
+                    option_type=opt_type or "CE",
+                    underlying=underlying_upper,
+                    expiry_str="",
+                    forecast=timesfm_forecast,
+                    direction=dir_str,
+                )
+                if sim is not None:
+                    if not sim.is_theta_viable:
+                        score -= 25
+                    score += min(25.0, sim.timesfm_edge * 10.0)
+                    score += min(20.0, max(0.0, sim.expected_roc * 50.0))
+                    score += (sim.composite_score * 0.5)
+                    try:
+                        setattr(opt, "_timesfm_sim", sim)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug("TimesFM payoff simulation scoring error: %s", e)
+
         return score, atm_dist, delta_val
 
     @staticmethod
@@ -136,7 +190,7 @@ class OptionScannerService:
 
     def _process_contract(self, u, opt_type, strike, atm, interval, option_map,
                           bullish_only, bias, bias_reason, chain, is_mcx, median_vol=1000,
-                          big_move_mode=False):
+                          big_move_mode=False, timesfm_forecast=None):
         """Process a single option contract — applies filters, scores, returns ScanResult or None."""
         # Bullish-only filter: skip OTM
         if bullish_only:
@@ -187,6 +241,7 @@ class OptionScannerService:
             strike, atm, interval, oi, vol,
             opt, ltp, bid, ask, u.upper(), bias,
             opt_type=opt_type, median_vol=median_vol,
+            timesfm_forecast=timesfm_forecast,
         )
         logger.debug(
             "SCORED: %s %s %d: ltp=%.2f oi=%d vol=%d score=%.0f sym=%s",
@@ -206,6 +261,7 @@ class OptionScannerService:
             expiry_str = chain.expiry.isoformat()
         else:
             expiry_str = str(chain.expiry)
+        sim = getattr(opt, "_timesfm_sim", None)
         return ScanResult(
             symbol=opt.symbol, underlying=u, strike=strike,
             option_type=opt_type, expiry=expiry_str,
@@ -213,6 +269,9 @@ class OptionScannerService:
             spread=ask - bid if bid > 0 and ask > 0 else 0,
             score=score, bias=bias, bias_reason=bias_reason,
             delta=delta_val, iv=float(opt.iv or 0) if hasattr(opt, "iv") else 0,
+            expected_roc=float(getattr(sim, "expected_roc", 0.0) or 0.0),
+            timesfm_edge=float(getattr(sim, "timesfm_edge", 0.0) or 0.0),
+            theta_viable=bool(getattr(sim, "is_theta_viable", True)),
         )
 
     def _scan_underlying_for_contracts(
@@ -225,6 +284,7 @@ class OptionScannerService:
         preferred_option_type: str | None = None,
         big_move_mode: bool = False,
         chains_out: dict[str, Any] | None = None,
+        timesfm_forecast: Any | None = None,
     ) -> list[ScanResult]:
         """Fetch chain for one underlying and return scored contracts (CE+PE near ATM)."""
         out: list[ScanResult] = []
@@ -341,7 +401,98 @@ class OptionScannerService:
             near_atm[:10],
         )
 
-        bias, bias_strength, bias_reason = self._detect_momentum(chain, atm, interval)
+        effective_tfm_forecast = timesfm_forecast
+        if effective_tfm_forecast is None:
+            tfm_enabled = (
+                os.getenv("TIMESFM_CONTRACT_SELECTION", "true").strip().lower() in ("1", "true", "yes")
+                or os.getenv("TIMESFM_ADVISOR_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+            )
+            if tfm_enabled:
+                try:
+                    from quant.decision.timesfm_engine import get_timesfm_model
+                    from quant.decision.timesfm_agents import TimesFMForecast
+                    import numpy as np
+
+                    model = get_timesfm_model()
+                    if model is not None:
+                        prices: list[float] = []
+                        fut_sym = None
+                        if hasattr(self._broker, "get_nearest_futures"):
+                            try:
+                                fut_sym = self._broker.get_nearest_futures(u, exchange=_exchange)
+                            except Exception:
+                                fut_sym = None
+                        if not fut_sym:
+                            now = datetime.now(tz=IST)
+                            month_str = now.strftime("%b").upper()
+                            fut_sym = f"{u.upper()} {month_str} FUT"
+
+                        prices = self._fetch_historical_closes(fut_sym, limit=32)
+                        if len(prices) < 32:
+                            root_prices = self._fetch_historical_closes(u, limit=32)
+                            if len(root_prices) > len(prices):
+                                prices = root_prices
+
+                        if len(prices) < 32 and hasattr(self._broker, "get_broker"):
+                            try:
+                                raw_b = self._broker.get_broker()
+                                if hasattr(raw_b, "get_historical") and hasattr(self._broker, "_make_instrument"):
+                                    inst = self._broker._make_instrument(fut_sym or u)
+                                    end_dt = datetime.now(tz=IST)
+                                    start_dt = end_dt - timedelta(days=5)
+                                    df = raw_b.get_historical(instrument=inst, from_date=start_dt, to_date=end_dt, interval="5")
+                                    if df is not None and not df.empty and "close" in df.columns:
+                                        prices = [float(c) for c in df["close"].tail(32)]
+                            except Exception as e:
+                                logger.debug("%s: raw_broker.get_historical skipped: %s", u, e)
+                        if not prices and hasattr(self._broker, "get_quote"):
+                            try:
+                                q = self._broker.get_quote(u)
+                                p = float(getattr(q, "ltp", 0.0) or getattr(q, "price", 0.0) or 0.0)
+                                if p > 0:
+                                    prices = [p] * 32
+                            except Exception:
+                                pass
+                        if not prices and hasattr(chain, "spot_price") and chain.spot_price:
+                            prices = [float(chain.spot_price)] * 32
+
+                        if prices:
+                            if len(prices) < 32:
+                                prices = [prices[0]] * (32 - len(prices)) + prices
+                            np_prices = np.array(prices[-32:], dtype=np.float32)
+                            res = model.predict(context=np_prices, horizon=32, return_quantiles=True)
+                            quantiles = getattr(res, "quantiles", None)
+                            curr_price = float(np_prices[-1])
+                            if quantiles is not None and len(quantiles) > 0:
+                                p50 = quantiles[:, 4]
+                                p10 = quantiles[:, 0]
+                                p90 = quantiles[:, 8]
+                                q_spread = float(np.mean(p90 - p10))
+                            else:
+                                p50 = np.full(32, curr_price)
+                                p10 = np.full(32, curr_price * 0.998)
+                                p90 = np.full(32, curr_price * 1.002)
+                                q_spread = 0.0
+
+                            mean_forecast = float(p50[-1])
+                            pct_change = (mean_forecast - curr_price) / max(curr_price, 1e-4)
+                            effective_tfm_forecast = TimesFMForecast(
+                                horizon=32,
+                                p50_path=p50,
+                                p10_path=p10,
+                                p90_path=p90,
+                                q_spread=q_spread,
+                                mean_forecast=mean_forecast,
+                                pct_change=pct_change,
+                                forecast_steps=["LONG" if p > curr_price else "SHORT" for p in p50],
+                                curr_price=curr_price,
+                                lat_ms=5.0,
+                            )
+                            logger.info("%s: TimesFM auto-forecasted (drift=%.2f%%, spread=%.2f, candles=%d)", u, pct_change * 100, q_spread, len(prices))
+                except Exception as e:
+                    logger.debug("%s: TimesFM auto-forecast skipped: %s", u, e)
+
+        bias, bias_strength, bias_reason = self._detect_momentum(chain, atm, interval, timesfm_forecast=effective_tfm_forecast)
         logger.info(
             "MOMENTUM: %s — %s (strength=%d) [calls=%d puts=%d atm=%.0f]",
             u,
@@ -351,6 +502,7 @@ class OptionScannerService:
             len(chain.puts),
             atm,
         )
+
         strikes = [
             atm + i * interval
             for i in range(-strikes_around_atm, strikes_around_atm + 1)
@@ -389,6 +541,7 @@ class OptionScannerService:
                     is_mcx=is_mcx,
                     median_vol=median_vol,
                     big_move_mode=big_move_mode,
+                    timesfm_forecast=effective_tfm_forecast,
                 )
                 if result:
                     out.append(result)
@@ -407,6 +560,7 @@ class OptionScannerService:
         big_move_mode: bool | None = None,
         underlying_priority: list[str] | None = None,
         chains_out: dict[str, Any] | None = None,
+        timesfm_forecasts: dict[str, Any] | None = None,
     ) -> list[ScanResult]:
         """Select top N contracts based on momentum and liquidity.
 
@@ -463,6 +617,7 @@ class OptionScannerService:
                         preferred_option_type,
                         big_move_mode,
                         chains_out=cached_chains,
+                        timesfm_forecast=timesfm_forecasts.get(u) if timesfm_forecasts else None,
                     ): u
                     for u in underlyings
                 }
@@ -478,6 +633,7 @@ class OptionScannerService:
         else:
             for u in underlyings:
                 try:
+                    tfm_fc = timesfm_forecasts.get(u) if timesfm_forecasts else None
                     results.extend(
                         self._scan_underlying_for_contracts(
                             u,
@@ -488,6 +644,7 @@ class OptionScannerService:
                             preferred_option_type,
                             big_move_mode,
                             chains_out=cached_chains,
+                            timesfm_forecast=tfm_fc,
                         )
                     )
                 except Exception as e:
@@ -537,8 +694,19 @@ class OptionScannerService:
 
         return final
 
-    def _detect_momentum(self, chain, atm, interval):
-        """Momentum from near-ATM strikes only (the strikes that actually move)."""
+    def _detect_momentum(self, chain, atm, interval, timesfm_forecast=None):
+        """Momentum from TimesFM forecast when available, else near-ATM volume."""
+        if timesfm_forecast is not None:
+            pct = getattr(timesfm_forecast, "pct_change", 0.0)
+            steps = getattr(timesfm_forecast, "forecast_steps", [])
+            long_steps = sum(1 for s in steps if s == "LONG")
+            short_steps = sum(1 for s in steps if s == "SHORT")
+            total_steps = len(steps) or 1
+            if pct > 0.0005 or (pct > 0.0002 and (long_steps / total_steps) >= 0.60):
+                return "BULLISH", 4, f"TimesFM upward drift {pct * 100:.2f}%"
+            elif pct < -0.0005 or (pct < -0.0002 and (short_steps / total_steps) >= 0.60):
+                return "BEARISH", 4, f"TimesFM downward drift {pct * 100:.2f}%"
+
         interval = interval or 50
         near = {s for s in chain.calls if abs(s - atm) <= 2 * interval} | {
             s for s in chain.puts if abs(s - atm) <= 2 * interval

@@ -94,7 +94,7 @@ _SPECS: dict[str, InstrumentSpec] = {
         _spec("GOLD", exchange="MCX", dhan_exchange="MCX", segment="MCX_COMM",
               tick=1.0, lot=100, strike=100, freeze=10000, min_oi=0, session="MCX"),
         _spec("GOLDM", exchange="MCX", dhan_exchange="MCX", segment="MCX_COMM",
-              tick=1.0, lot=100, strike=100, freeze=10000, min_oi=50, session="MCX"),
+              tick=1.0, lot=10, strike=100, freeze=10000, min_oi=50, session="MCX"),
         _spec("GOLDPETAL", exchange="MCX", dhan_exchange="MCX", segment="MCX_COMM",
               tick=1.0, lot=1, strike=50, freeze=10000, min_oi=0, session="MCX"),
         _spec("SILVER", exchange="MCX", dhan_exchange="MCX", segment="MCX_COMM",

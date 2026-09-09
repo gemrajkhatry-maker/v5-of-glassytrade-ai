@@ -48,15 +48,15 @@ def test_crudeoil_mini_lot_agrees():
     assert MCX_LOT_SIZES["CRUDEOILM"] == 10
 
 
-def test_goldm_lot_size_is_100_everywhere():
-    """GOLDM (live-traded mini gold) was 10 in two static tables vs 100 in the
-    authoritative config — a 10x risk-sizing error. All sources must agree."""
+def test_goldm_lot_size_is_10_everywhere():
+    """GOLDM (live-traded mini gold) is a 100g contract quoted per 10g,
+    giving a multiplier/lot size of 10. All sources must agree."""
     from brokers.broker.market_info import get_lot_size
 
-    assert get_lot_size("GOLDM") == 100
-    assert MCX_LOT_SIZES["GOLDM"] == 100
+    assert get_lot_size("GOLDM") == 10
+    assert MCX_LOT_SIZES["GOLDM"] == 10
     cfg = ExchangeConfig.for_exchange("MCX")
-    assert cfg.get_lot_size("GOLDM") == 100
+    assert cfg.get_lot_size("GOLDM") == 10
 
 
 # ---------------------------------------------------------------------------

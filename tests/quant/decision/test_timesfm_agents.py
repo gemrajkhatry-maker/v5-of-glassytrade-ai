@@ -253,3 +253,154 @@ def test_timesfm_engine_dynamic_role_switching():
     assert res_pos["activePosition"] is not None
     assert res_pos["activePosition"]["side"] == "LONG"
     assert res_pos["action"] in ("HOLD", "TIGHTEN_SL", "TAKE_PROFIT", "EXIT")
+
+
+def test_scanning_agent_rationale_morning_session(base_forecast):
+    """At 09:39 IST (NSE_PRIMARY), rationale must reflect morning session, NOT midday."""
+    agent = TimesFMScanningAgent(target_horizon=32)
+    bar = Bar("2026-09-09T09:39:00+05:30", 56850.0, 56870.0, 56840.0, 56860.0, 1500, 10)
+    ctx = DecisionContext(
+        symbol="BANKNIFTY",
+        bar=bar,
+        poc=56850.0,
+        vah=56938.3,
+        val=56794.6,
+        session_phase="NSE_PRIMARY",
+        position_open=False,
+        session_open=True,
+    )
+    # Neutral forecast so NO_EDGE triggers
+    flat_forecast = TimesFMForecast(
+        horizon=32,
+        p50_path=np.full(32, 56860.0),
+        p10_path=np.full(32, 56850.0),
+        p90_path=np.full(32, 56870.0),
+        q_spread=20.0,
+        mean_forecast=56860.0,
+        pct_change=0.0,
+        forecast_steps=["FLAT"] * 32,
+        curr_price=56860.0,
+        lat_ms=10.0,
+    )
+    res = agent.evaluate(ctx, flat_forecast)
+    assert res["action"] == "FLAT"
+    assert res["setup"] == "NO_EDGE"
+    assert "Morning session compression inside value area [56794.6 - 56938.3]" in res["rationale"]
+    assert "Midday" not in res["rationale"]
+    assert res["gateResults"][0]["passed"] is True
+
+
+def test_scanning_agent_rationale_midday_session():
+    """During 11:30-14:00 (NSE_MIDDAY), rationale accurately identifies Midday compression."""
+    agent = TimesFMScanningAgent(target_horizon=32)
+    bar = Bar("2026-09-09T12:45:00+05:30", 56850.0, 56870.0, 56840.0, 56860.0, 1500, 10)
+    ctx = DecisionContext(
+        symbol="BANKNIFTY",
+        bar=bar,
+        poc=56850.0,
+        vah=56938.3,
+        val=56794.6,
+        session_phase="NSE_MIDDAY",
+        position_open=False,
+        session_open=True,
+    )
+    flat_forecast = TimesFMForecast(
+        horizon=32,
+        p50_path=np.full(32, 56860.0),
+        p10_path=np.full(32, 56850.0),
+        p90_path=np.full(32, 56870.0),
+        q_spread=20.0,
+        mean_forecast=56860.0,
+        pct_change=0.0,
+        forecast_steps=["FLAT"] * 32,
+        curr_price=56860.0,
+        lat_ms=10.0,
+    )
+    res = agent.evaluate(ctx, flat_forecast)
+    assert "Midday compression inside value area [56794.6 - 56938.3]" in res["rationale"]
+
+
+def test_scanning_agent_rationale_mcx_evening():
+    """During evening MCX session, rationale identifies Evening session compression."""
+    agent = TimesFMScanningAgent(target_horizon=32)
+    bar = Bar("2026-09-09T19:30:00+05:30", 6450.0, 6460.0, 6440.0, 6450.0, 1500, 10)
+    ctx = DecisionContext(
+        symbol="CRUDEOIL",
+        bar=bar,
+        poc=6450.0,
+        vah=6480.0,
+        val=6420.0,
+        session_phase="MCX_EVENING",
+        position_open=False,
+        session_open=True,
+    )
+    flat_forecast = TimesFMForecast(
+        horizon=32,
+        p50_path=np.full(32, 6450.0),
+        p10_path=np.full(32, 6440.0),
+        p90_path=np.full(32, 6460.0),
+        q_spread=20.0,
+        mean_forecast=6450.0,
+        pct_change=0.0,
+        forecast_steps=["FLAT"] * 32,
+        curr_price=6450.0,
+        lat_ms=10.0,
+    )
+    res = agent.evaluate(ctx, flat_forecast)
+    assert "Evening session compression inside value area [6420.0 - 6480.0]" in res["rationale"]
+
+
+def test_scanning_agent_midday_blocks_trend_continuation(base_forecast):
+    """In Midday (allow_trend=False), Triple-A trend setup must be suppressed per Fabio AMT rules."""
+    agent = TimesFMScanningAgent(target_horizon=32)
+    bar = Bar("2026-09-09T12:45:00+05:30", 8105.0, 8115.0, 8105.0, 8110.0, 2000, 400)
+    ctx_midday = DecisionContext(
+        symbol="CRUDEOIL",
+        bar=bar,
+        poc=8150.0,
+        vah=8190.0,
+        val=8109.0,
+        cvd_slope=4.5,
+        absorption_side="BUY",
+        session_phase="NSE_MIDDAY",
+        allow_trend=False,  # Trend continuation disabled in midday chop
+        allow_reversion=True,
+        position_open=False,
+        session_open=True,
+    )
+    res = agent.evaluate(ctx_midday, base_forecast)
+    # Trend setup must NOT trigger
+    assert res["action"] == "FLAT"
+    assert res["setup"] == "NO_EDGE"
+    assert "Midday compression" in res["rationale"]
+
+
+def test_scanning_agent_gate1_opening_noise_fails():
+    """Gate 1 fails during NSE_OPENING / opening noise."""
+    agent = TimesFMScanningAgent(target_horizon=32)
+    bar = Bar("2026-09-09T09:20:00+05:30", 56850.0, 56870.0, 56840.0, 56860.0, 1500, 10)
+    ctx = DecisionContext(
+        symbol="BANKNIFTY",
+        bar=bar,
+        session_phase="NSE_OPENING",
+        position_open=False,
+        session_open=True,
+    )
+    flat_forecast = TimesFMForecast(
+        horizon=32,
+        p50_path=np.full(32, 56860.0),
+        p10_path=np.full(32, 56850.0),
+        p90_path=np.full(32, 56870.0),
+        q_spread=20.0,
+        mean_forecast=56860.0,
+        pct_change=0.0,
+        forecast_steps=["FLAT"] * 32,
+        curr_price=56860.0,
+        lat_ms=10.0,
+    )
+    res = agent.evaluate(ctx, flat_forecast)
+    g1 = res["gateResults"][0]
+    assert g1["gate_name"] == "SESSION_PHASE"
+    assert g1["passed"] is False
+    assert "Opening noise" in g1["message"]
+

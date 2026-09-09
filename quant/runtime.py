@@ -173,6 +173,7 @@ class QuantEngine:
         max_consecutive_losses: int = 3,
         execution_enabled: bool = True,
         seed_scheduler=None,
+        max_lots: int | None = None,
     ) -> None:
         self._gateway = gateway
         # Independent mode is the production default. Legacy dual-feed
@@ -202,6 +203,7 @@ class QuantEngine:
         self._execution_enabled = execution_enabled  # ponytail: False for underlying observer feeds in options mode
         self.symbol = symbol
         self._tick_size = tick_size
+        self._max_lots = max_lots
         # Session market for the Fabio phase gates: NSE closes 15:30, MCX
         # trades until 23:30 — a hardcoded NSE table would block every MCX
         # entry after 15:15 ("Session closed").
@@ -322,15 +324,22 @@ class QuantEngine:
         # ponytail: mirror BE constant; tune from journal replay later
         self._exits = ExitEngine(time_stop_bars=time_stop_bars, cvd_kill_threshold=2.0)
         # Strategy — pluggable entry/exit logic. Defaults to the AMT scalping
-        # playbook (Fabio Valentini). Swap for momentum, mean-reversion, etc.
+        # playbook (Fabio Valentini) or TimesFM autonomous management.
         if strategy is not None:
             self._strategy = strategy
         else:
-            from quant.strategies.amt_scalping import AmtScalpingStrategy
-            self._strategy = AmtScalpingStrategy(
-                decision_service=self._decision_service,
-                exit_engine=self._exits,
-            )
+            use_timesfm_e2e = os.getenv("TIMESFM_END_TO_END", "").strip().lower() in ("1", "true", "yes")
+            if use_timesfm_e2e:
+                from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
+                logger.info("Initializing QuantEngine with TimesFMTradingStrategy (End-to-End Autonomous Management)")
+                tfm_native = getattr(advisor, "_native_engine", None) if advisor else None
+                self._strategy = TimesFMTradingStrategy(engine=tfm_native)
+            else:
+                from quant.strategies.amt_scalping import AmtScalpingStrategy
+                self._strategy = AmtScalpingStrategy(
+                    decision_service=self._decision_service,
+                    exit_engine=self._exits,
+                )
         # SessionLevelStore now exposes kv_get/kv_set (its JSON file), so the
         # daily-loss budget survives restart through the same port that already
         # persists prior-session POC/VAH/VAL.
@@ -1042,10 +1051,15 @@ class QuantEngine:
                 self._contract_expiry is not None
                 and _ist is not None and _ist.date() == self._contract_expiry
             )
+            # If strategy provides a TimesFM forecast, pass it for dynamic Kelly & VaR sizing
+            tfm_fc = getattr(self._strategy, "get_latest_forecast", lambda s: None)(self.symbol)
             quantity = clamp_quantity(
                 self._risk.position_size(
                     signal.entry, signal.sl, lot_size=self._oms.lot_size,
                     is_expiry=self._contract_is_expiry,
+                    max_lots=self._max_lots,
+                    forecast=tfm_fc,
+                    side=signal.type,
                 )
             )
             # Risk-budget guard: when the per-trade budget can't afford even
@@ -1275,6 +1289,16 @@ class QuantEngine:
             # Same-direction approvals (and NO_EDGE) do nothing.
             if signal.type == held_thesis:
                 return
+
+            # Fabio Structural Holding: do NOT flip an active trade on minor drift / micro momentum.
+            # A genuine thesis flip requires structural invalidation (BREAKOUT, TRIPLE_A, or confirmed VA_FADE).
+            if str(signal.reason).upper() == "MODEL_MOMENTUM":
+                logger.debug(
+                    "🔄 [THESIS FLIP SKIPPED] %s: opposing %s is minor drift (MODEL_MOMENTUM) — holding %s position",
+                    self.symbol, signal.type, held_thesis,
+                )
+                return
+
             logger.info(
                 "🔄 [THESIS FLIP] %s: fresh %s approval (%s @ %.2f RR=%.2f) opposes "
                 "held %s thesis (pos %s @ %.2f) — flattening (OPPOSING_SIGNAL)",
@@ -1400,6 +1424,7 @@ class QuantEngine:
             # a tiered TP partial fill per spec §13.3), or None once fully closed.
             current_pos = pm.current_position
             was_open = current_pos is not None
+            tfm_fc = getattr(self._strategy, "get_latest_forecast", lambda s: None)(self.symbol)
             try:
                 remaining = pm.manage_exit(
                     amt_dto=amt_dto,
@@ -1408,6 +1433,7 @@ class QuantEngine:
                     bar_index=self._bar_index,
                     entry_bar_index=self._entry_bar_index,
                     entry_time_epoch=getattr(self, '_entry_time_epoch', 0.0),
+                    timesfm_forecast=tfm_fc,
                 )
             except Exception:
                 # C3: a broker/OMS failure while exiting must not kill the engine

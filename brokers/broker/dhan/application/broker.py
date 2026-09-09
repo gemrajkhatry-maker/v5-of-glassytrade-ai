@@ -524,7 +524,26 @@ class DhanBroker(IBrokerPort):
         contract, which would size positions 65x too small for NIFTY. Lot size
         is exchange metadata; a failure to obtain it must be explicit.
         """
+        from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+
+        clean = (
+            str(symbol)
+            .upper()
+            .replace("NSE:", "")
+            .replace("NFO:", "")
+            .replace("MCX:", "")
+            .replace("BSE:", "")
+            .strip()
+        )
+        spec = DEFAULT_REGISTRY.try_resolve(clean)
+        if spec is not None and (spec.exchange == "MCX" or spec.lot_size > 1):
+            return spec.lot_size
+
         instrument = self._run_async(self.resolve_symbol(symbol, exchange))
+        if instrument.lot_size > 1:
+            return instrument.lot_size
+        if spec is not None and spec.lot_size > 0:
+            return spec.lot_size
         return instrument.lot_size
 
     def get_exchange_config(self) -> "DhanExchangeConfig":
@@ -921,17 +940,26 @@ class DhanExchangeConfig:
             extract_underlying(clean) or clean.split("-")[0].split(" ")[0]
         )
 
+        # 1) If spec is in DEFAULT_REGISTRY with canonical lot size, use it.
+        # This prevents Dhan's dummy SEM_LOT_UNITS = 1.0 on MCX from corrupting sizing.
+        if spec is not None and (spec.exchange == "MCX" or spec.lot_size > 1):
+            return spec.lot_size
+
         try:
-            # 1) If given a full symbol (futures or options), resolve it directly.
+            # 2) If given a full symbol (futures or options), resolve it directly.
             instrument = self._broker._run_async(
                 self._broker.resolve_symbol(clean)
             )
+            if instrument.lot_size > 1:
+                return instrument.lot_size
+            if spec is not None and spec.lot_size > 0:
+                return spec.lot_size
             if instrument.lot_size > 0:
                 return instrument.lot_size
         except Exception:
             pass
 
-        # 2) Underlying root: find any current NFO or MCX contract of it.
+        # 3) Underlying root: find any current NFO or MCX contract of it.
         mapper = self._broker._symbol_mapper
         if mapper is not None:
             from brokers.broker.dhan.infrastructure.symbol_mapper import (
@@ -957,6 +985,10 @@ class DhanExchangeConfig:
                         else 10**6,
                     )
                 )
+                if contracts[0].exchange_segment == ExchangeSegment.MCX:
+                    reg_spec = DEFAULT_REGISTRY.try_resolve(str(contracts[0].trading_symbol))
+                    if reg_spec is not None:
+                        return reg_spec.lot_size
                 return contracts[0].lot_size
 
         # 3) Fallback to authoritative ExchangeConfig metadata

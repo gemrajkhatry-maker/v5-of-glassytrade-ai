@@ -69,12 +69,15 @@ class ExitEngine:
         # close_partial() preserves position._id across partial fills, so this
         # survives the TP1 -> TP2 transition on the same underlying trade.
         self._tp_tier: dict[str, int] = {}
+        self._timesfm_risk = None
 
     def pop_trail(self, position: Position) -> None:
         """Drop trailing/tier state for a closed position."""
         self._trail.pop(position._id, None)
         self._breakeven.pop(position._id, None)
         self._tp_tier.pop(position._id, None)
+        if getattr(self, "_timesfm_risk", None) is not None:
+            self._timesfm_risk.clear_position(position._id)
 
     def stop_state(self, position: Position) -> tuple[float | None, float | None]:
         """Current (breakeven_floor, trail_stop) for a position.
@@ -115,6 +118,7 @@ class ExitEngine:
         now_epoch: float = 0.0,
         bar_close: float | None = None,
         session_vwap: float = 0.0,
+        timesfm_forecast: object | None = None,
     ) -> ExitDecision:
         from quant.execution.exit_checks import (
             check_spread_blowout, check_stop_loss, check_cvd_kill,
@@ -143,6 +147,43 @@ class ExitEngine:
         # Rule 1: Spread blowout
         r = check_spread_blowout(position, close, best_bid, best_ask, is_expiry, self.spread_max_pct)
         if r: return r
+
+        # TimesFM Dynamic Risk & Monotonic Quantile Trailing Stop Evaluation
+        if timesfm_forecast is not None:
+            try:
+                if self._timesfm_risk is None:
+                    from quant.decision.timesfm_risk import TimesFMRiskAuthority
+                    self._timesfm_risk = TimesFMRiskAuthority()
+
+                side = "LONG" if long else "SHORT"
+                tr = self._trail.get(position._id)
+                current_active_sl = tr.stop if (tr and tr.active and tr.stop is not None) else sl
+
+                eval_res = self._timesfm_risk.evaluate_exit(
+                    position_id=position._id,
+                    side=side,
+                    entry=entry,
+                    current_price=close,
+                    bars_held=bar_index,
+                    forecast=timesfm_forecast,
+                    active_sl=current_active_sl,
+                )
+
+                # Monotonic quantile ratchet
+                if eval_res.new_stop is not None:
+                    if tr is None:
+                        tr = _Trail()
+                        self._trail[position._id] = tr
+                    tr.active = True
+                    tr.stop = eval_res.new_stop
+                    if eval_res.is_risk_free:
+                        self._breakeven[position._id] = eval_res.new_stop
+
+                if eval_res.should_exit:
+                    return ExitDecision(True, eval_res.reason, close, trail_stop=eval_res.new_stop)
+            except Exception as exc:
+                # Graceful fallback to deterministic exit rules on error
+                pass
 
         # Rule 2: Stop-loss
         r = check_stop_loss(position, low, high)

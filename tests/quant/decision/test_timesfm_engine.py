@@ -28,8 +28,9 @@ def sample_context():
 
 def test_timesfm_engine_padding(sample_context):
     engine = TimesFMEngine(target_horizon=32)
-    prices = engine.add_context(sample_context)
+    prices, ctx_bars = engine.add_context(sample_context)
     assert len(prices) == 32
+    assert ctx_bars == 1
     assert all(p == 6460.0 for p in prices)
 
 
@@ -51,6 +52,30 @@ def test_timesfm_engine_opening_noise():
 
     assert res["action"] == "FLAT"
     assert res["direction"] == "FLAT"
+    assert "Opening noise" in res["rationale"]
+
+
+def test_timesfm_engine_nse_opening_phase():
+    """NSE_OPENING session phase must trigger opening noise guard in TimesFMEngine."""
+    ctx = DecisionContext(symbol="NIFTY", session_phase="NSE_OPENING")
+    engine = TimesFMEngine(target_horizon=32)
+    res = engine.analyze(ctx)
+
+    assert res["action"] == "FLAT"
+    assert res["direction"] == "FLAT"
+    assert res["reason"] == "OPENING_NOISE"
+    assert "Opening noise" in res["rationale"]
+
+
+def test_timesfm_engine_mcx_pre_open_phase():
+    """MCX_PRE_OPEN session phase must trigger opening noise guard in TimesFMEngine."""
+    ctx = DecisionContext(symbol="CRUDEOIL", session_phase="MCX_PRE_OPEN")
+    engine = TimesFMEngine(target_horizon=32)
+    res = engine.analyze(ctx)
+
+    assert res["action"] == "FLAT"
+    assert res["direction"] == "FLAT"
+    assert res["reason"] == "OPENING_NOISE"
     assert "Opening noise" in res["rationale"]
 
 

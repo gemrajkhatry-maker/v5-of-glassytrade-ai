@@ -20,7 +20,6 @@ import {
     DiagnosticsPanel,
     VaFreezeCard,
     ThreeAIndicator,
-    AIAdvisorCard,
     GammaExposureCard,
 } from './ai';
 
@@ -54,13 +53,17 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
     }, [orderBook, amtResult?.sessionVwap, data]);
 
     const openPnl = useMemo(() =>
-        portfolio.positions.reduce((acc, p) => {
-            if (p.pnl !== undefined) return acc + p.pnl;
-            const price = currentLtp > 0 ? currentLtp : p.entryPrice;
-            const size = p.size;
-            return acc + ((price - p.entryPrice) * size);
+        (portfolio?.positions || []).reduce((acc, p) => {
+            if (typeof p.pnl === 'number' && !isNaN(p.pnl)) return acc + p.pnl;
+            const price = (typeof p.currentPrice === 'number' && p.currentPrice > 0)
+                ? p.currentPrice
+                : (currentLtp > 0 ? currentLtp : p.entryPrice);
+            const size = p.size || 0;
+            const isShort = p.side === 'SHORT';
+            const priceDiff = isShort ? (p.entryPrice - price) : (price - p.entryPrice);
+            return acc + (priceDiff * size);
         }, 0),
-        [portfolio.positions, currentLtp]
+        [portfolio?.positions, currentLtp]
     );
 
     const aggScore = useMemo(() => {
@@ -126,7 +129,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
             {/* ── Scrollable body ── */}
             <div className="flex-1 overflow-y-auto overscroll-contain px-3 py-3 space-y-3">
                 <QuantDecisionCard quantDecision={quantDecision} />
-                <AIAdvisorCard agentDecision={agentDecision} quantDecision={quantDecision} portfolio={portfolio} />
                 
                 {/* Section 01–02: 5m Macro Context */}
                 <div className="flex items-center justify-between px-1 pt-1">
@@ -166,10 +168,10 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
                 <OverseerCard
                     overseerAction={overseerAction}
                     overseerReason={overseerReason}
-                    hasPositions={portfolio.positions.length > 0}
+                    hasPositions={Boolean(portfolio?.positions && portfolio.positions.length > 0)}
                 />
-                <TradePlanCard positions={portfolio.positions} />
-                <RecentExitsCard closedTrades={portfolio.closedTrades} />
+                <TradePlanCard positions={portfolio?.positions || []} />
+                <RecentExitsCard closedTrades={portfolio?.closedTrades || []} />
 
                 {/* Advanced Diagnostics (collapsed by default) */}
                 <details className="group">

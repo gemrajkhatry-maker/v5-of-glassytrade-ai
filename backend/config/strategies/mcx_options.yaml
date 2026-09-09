@@ -25,7 +25,7 @@ exchanges:
         exchange: "MCX"
         segment: "MCX_COMM"
         instrument_type: "OPT"
-        lot_size: 100
+        lot_size: 10
         tick_size: 1.0
         vp_bucket_size: 10.0
         strike_interval: 100
@@ -88,6 +88,8 @@ risk:
   max_consecutive_losses: 3
   max_trades_per_session: 6
   max_concurrent_positions: 5
+  max_lots: 2
+  capital_deployment_pct: 0.50
 
 gap_fill:
   enabled: true

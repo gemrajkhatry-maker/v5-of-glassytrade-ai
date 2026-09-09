@@ -180,6 +180,7 @@ function App() {
                                         amtAnalysis={activeInstrument.amtAnalysis}
                                         halfTrendSeries={activeInstrument.halfTrendSeries}
                                         mode={chartMode}
+                                        portfolio={activeInstrument.portfolio}
                                     />
                                 </div>
                                 {/* Right: 1m Micro View */}
@@ -201,6 +202,7 @@ function App() {
                                         amtAnalysis={activeInstrument.amtAnalysis}
                                         halfTrendSeries={activeInstrument.halfTrendSeries}
                                         mode={chartMode}
+                                        portfolio={activeInstrument.portfolio}
                                     />
                                 </div>
                             </div>
@@ -219,6 +221,7 @@ function App() {
                                 amtAnalysis={activeInstrument.amtAnalysis}
                                 halfTrendSeries={activeInstrument.halfTrendSeries}
                                 mode={chartMode}
+                                portfolio={activeInstrument.portfolio}
                             />
                         )}
                     </ErrorBoundary>

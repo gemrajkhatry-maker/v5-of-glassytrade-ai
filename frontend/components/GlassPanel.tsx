@@ -3,6 +3,7 @@ import React from 'react';
 interface GlassPanelProps {
   children: React.ReactNode;
   className?: string;
+  contentClassName?: string;
   variant?: 'default' | 'elevated' | 'active';
 }
 
@@ -20,6 +21,7 @@ interface GlassPanelProps {
 const GlassPanel: React.FC<GlassPanelProps> = ({ 
   children, 
   className = '',
+  contentClassName = '',
   variant = 'default' 
 }) => {
   
@@ -41,7 +43,7 @@ const GlassPanel: React.FC<GlassPanelProps> = ({
       ${className}
     `}>
       {/* Content */}
-      <div className="relative z-10">
+      <div className={`relative z-10 ${contentClassName}`}>
         {children}
       </div>
     </div>

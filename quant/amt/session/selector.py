@@ -170,6 +170,42 @@ class OptionSelector:
         # No chain — return ATM directly (not OTM)
         return atm
 
+    def select_strike_with_timesfm(
+        self,
+        underlying: str,
+        spot_price: float,
+        direction: str,
+        forecast,
+        chain=None,
+    ) -> int:
+        """Pick the strike optimizing TimesFM expected return, gamma sensitivity, and theta insulation.
+
+        If a live option chain and TimesFM forecast are supplied:
+        - Uses TimesFMOptionSelector to simulate Greeks payoff across strikes.
+        - If forecast has fast velocity (tau* <= 5), rewards high-gamma ATM.
+        - If forecast has slow velocity (tau* >= 15), shifts to slightly ITM (delta ~0.60)
+          to protect capital against theta decay.
+        - Falls back gracefully to standard select_strike if evaluation yields no candidates.
+        """
+        if chain is not None and forecast is not None:
+            try:
+                from quant.decision.timesfm_option_selector import TimesFMOptionSelector
+                tfm_selector = TimesFMOptionSelector()
+                ranked = tfm_selector.evaluate_chain(
+                    chain=chain,
+                    underlying=underlying,
+                    forecast=forecast,
+                    direction=direction,
+                    strikes_around_atm=2,
+                )
+                if ranked:
+                    return int(ranked[0].strike)
+            except Exception as e:
+                logger.debug("select_strike_with_timesfm fallback to select_strike: %s", e)
+
+        return self.select_strike(underlying, spot_price, direction, chain=chain)
+
+
     def build_symbol(
         self,
         underlying: str,

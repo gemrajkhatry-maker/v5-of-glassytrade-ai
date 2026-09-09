@@ -234,7 +234,8 @@ def _pos_default_monitor_build(c: DecisionContext) -> Dict[str, Any]:
 
 def _opening_noise_pred(c: DecisionContext) -> bool:
     # Guard 1: Opening noise — IB still forming
-    return c.session_phase == "OPENING_NOISE"
+    phase = str(c.session_phase or "").upper()
+    return any(p in phase for p in ("OPENING", "PRE_OPEN", "PRE_MARKET"))
 
 
 def _opening_noise_build(c: DecisionContext) -> Dict[str, Any]:

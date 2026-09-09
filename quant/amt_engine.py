@@ -143,6 +143,9 @@ class AMTEngine:
         self._get_depth = get_depth or (lambda: None)
         self._get_risk_pnl = get_risk_pnl or (lambda: 0.0)
         self._interval_seconds = interval_seconds
+        # Optional callback: timesfm_seed_fn(symbol, closes) is called after
+        # AMT candle seeding so the TimesFM price buffer is pre-warmed.
+        self._timesfm_seed_fn: Any = None
 
         # AMT state
         self._amt_analyzer = AMTAnalyzer()
@@ -381,6 +384,15 @@ class AMTEngine:
         logger.info(
             "AMT seeded %d session candles for %s (initial DTO: %s)", len(scoped), self.symbol, bool(self._last_amt_dto)
         )
+
+        # Push historical closes into TimesFM price buffer so model starts warm.
+        if self._timesfm_seed_fn is not None and ohlcs:
+            try:
+                closes = [float(c.close) for c in ohlcs if c.close and c.close > 0]
+                if closes:
+                    self._timesfm_seed_fn(self.symbol, closes)
+            except Exception as _e:
+                logger.debug("TimesFM history pre-seed skipped for %s: %s", self.symbol, _e)
 
     def _seed_interval_str(self) -> str:
         """Dhan history interval string matching the engine's bar aggregation."""

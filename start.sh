@@ -38,12 +38,16 @@ KMP_DUPLICATE_LIB_OK=TRUE \
 GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}" \
 GLASSYTRADE_STRATEGY="$STRATEGY" \
 DEFAULT_EXCHANGE="$EXCHANGE" \
+TIMESFM_END_TO_END="${TIMESFM_END_TO_END:-true}" \
+TIMESFM_ADVISOR_ENABLED="${TIMESFM_ADVISOR_ENABLED:-true}" \
+TIMESFM_CONTRACT_SELECTION="${TIMESFM_CONTRACT_SELECTION:-true}" \
 PYTHONPATH="$PROJECT_DIR:$BACKEND_DIR:/Users/apple/miniconda3/lib/python3.13/site-packages" \
 DEBUG=false \
 nohup "$VENV_PYTHON" -u -m uvicorn app.main:app \
   --host 0.0.0.0 --port 8090 \
-  > "$BACKEND_DIR/backend.log" 2>&1 &
+  < /dev/null > "$BACKEND_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!
+disown $BACKEND_PID 2>/dev/null || true
 echo "Backend PID: $BACKEND_PID"
 
 # Start frontend
@@ -52,8 +56,9 @@ cd "$FRONTEND_DIR"
 export PATH="/opt/homebrew/bin:$PATH"
 export VITE_BACKEND_PORT=8090
 nohup node node_modules/.bin/vite --host 0.0.0.0 --port 5191 \
-  > "$FRONTEND_DIR/frontend.log" 2>&1 &
+  < /dev/null > "$FRONTEND_DIR/frontend.log" 2>&1 &
 FRONTEND_PID=$!
+disown $FRONTEND_PID 2>/dev/null || true
 echo "Frontend PID: $FRONTEND_PID"
 
 # Wait and verify
