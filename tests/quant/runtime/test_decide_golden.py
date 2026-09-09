@@ -26,8 +26,14 @@ GOLDEN_DIR = Path(__file__).parent / "golden"
 def _capture_decide_trace(ticks, symbol="SYM"):
     """Run the engine and capture all DecisionProduced events."""
     from quant.execution.risk import SessionRisk
+    from quant.strategies.amt_scalping import AmtScalpingStrategy
     SessionRisk(storage=None, symbol=symbol).reset_session()
-    eng = QuantEngine(SyntheticGateway(ticks), symbol, interval_seconds=1)
+    eng = QuantEngine(
+        SyntheticGateway(ticks),
+        symbol,
+        interval_seconds=1,
+        strategy=AmtScalpingStrategy(),
+    )
     trace = eng.run()
     decisions = [e for e in trace if isinstance(e, DecisionProduced)]
     signals = [e for e in trace if isinstance(e, SignalApproved)]
