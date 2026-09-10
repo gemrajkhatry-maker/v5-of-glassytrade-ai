@@ -138,6 +138,44 @@ _DETERMINISTIC_CONVICTION = 0.7
 _WARMUP_BARS = 15
 
 
+def close_lingering_pyramids(pm, price: float, time_str: str, reason: str) -> int:
+    """Close pyramid add-ons whose base position is already gone.
+
+    Routes every add-on through ``PositionManager._execute_full_close`` — the
+    ONLY full-close release path — so the exit-source stamp, the
+    ``[POSITION CLOSED]`` log, the double-close guard and the portfolio-risk
+    release all happen exactly as they do for the base position. A previous
+    direct OMS close loop here skipped all four.
+
+    Returns the number of add-ons closed.
+    """
+    from quant.execution.exits import ExitDecision
+
+    # Detach the add-ons before closing them: _execute_full_close sweeps
+    # ``pm.pyramid_positions`` as part of its own pyramid handling, so leaving
+    # the list attached would close each add-on twice (once as the primary
+    # close, once in that sweep). The sweep does not register add-on ids in
+    # ``_closed_ids``, so the second close would slip past the double-close
+    # guard and double-count P&L/risk. Detaching keeps exactly one close per
+    # add-on, all through the single release path.
+    lingering = list(pm.pyramid_positions)
+    pm.pyramid_positions = []
+    pm.pyramid_count = 0
+    closed = 0
+    for pyr_pos in lingering:
+        pm._execute_full_close(
+            pyr_pos, ExitDecision(True, reason, float(price)), time_str
+        )
+        closed += 1
+        # Because we detached the add-on, _execute_full_close's own E11 sweep
+        # did not see it — release its reserved aggregate risk here so the
+        # portfolio ceiling is not leaked, exactly as the base close does.
+        risk_i = pm._pyramid_open_risk.pop(getattr(pyr_pos, "_id", None), 0.0)
+        portfolio_risk = getattr(pm, "_portfolio_risk", None)
+        if portfolio_risk is not None:
+            portfolio_risk.record_close(risk_i, float(pm.last_fill.pnl))
+    return closed
+
 
 class QuantEngine:
     # =========================================================================
@@ -1398,17 +1436,9 @@ class QuantEngine:
                 pm._execute_full_close(pos, ExitDecision(True, reason, price), ts)
             else:
                 # Base already gone but pyramid add-ons linger — close them
-                # at the same price and release their reserved risk.
-                for pyr_pos in list(pm.pyramid_positions):
-                    pyr_fill = pm._oms.close(pyr_pos, price, ts, reason + "_PYRAMID")
-                    pm._exits.pop_trail(pyr_pos)
-                    pm._risk.record_trade(pyr_fill.pnl, count_as_trade=False)
-                    self._emit(PositionClosed(symbol=self.symbol, time=ts, fill=pyr_fill))
-                    risk_i = pm._pyramid_open_risk.pop(pyr_pos._id, 0.0)
-                    if pm._portfolio_risk is not None:
-                        pm._portfolio_risk.record_close(risk_i, float(pyr_fill.pnl))
-                pm.pyramid_positions = []
-                pm.pyramid_count = 0
+                # through the single release path so the exit is stamped,
+                # logged and risk-released exactly like the base close.
+                close_lingering_pyramids(pm, price, ts, reason)
             # Post-close bookkeeping — one shared release path.
             self._book_full_close()
             logger.warning(
