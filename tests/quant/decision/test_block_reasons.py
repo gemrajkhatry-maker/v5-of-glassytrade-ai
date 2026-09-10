@@ -12,6 +12,28 @@ from quant.runtime import QuantEngine
 from tests.helpers.synthetic import SyntheticGateway
 
 
+def _force_allowlisted_quality(monkeypatch):
+    """Replay fixture carries footprint-grade provenance.
+
+    The data-quality gate is STRICT everywhere (incl. replay): synthetic
+    ticks aggregate into bars with no completed tick footprints, so the DTO
+    derives CANDLE_GAUSSIAN and DecisionService short-circuits with
+    DATA_QUALITY_BLOCKED before any gate runs. These tests target the
+    post-gate block-reason contract, so the fixture stands in for a
+    footprint-grade feed by stamping the allowlisted TICK_EXACT quality.
+    """
+    import quant.amt_engine as _amt_engine_mod
+
+    _real = _amt_engine_mod.amt_result_to_dto
+
+    def _wrapped(result):
+        dto = _real(result)
+        dto["dataQuality"] = "TICK_EXACT"
+        return dto
+
+    monkeypatch.setattr(_amt_engine_mod, "amt_result_to_dto", _wrapped)
+
+
 def _blocked_ticks():
     """Ticks that drive the engine to a decision with several failed gates.
 
@@ -22,7 +44,8 @@ def _blocked_ticks():
     return [Tick(f"t{i}", 100.0, 10, 6, 4) for i in range(6)]
 
 
-def test_block_reasons_listed_on_rejected_decision():
+def test_block_reasons_listed_on_rejected_decision(monkeypatch):
+    _force_allowlisted_quality(monkeypatch)
     eng = QuantEngine(SyntheticGateway(_blocked_ticks()), "SYM", interval_seconds=1)
     trace = eng.run()
 
@@ -36,7 +59,8 @@ def test_block_reasons_listed_on_rejected_decision():
         assert br == tuple(f"{g.name}: {g.reason}" for g in failed)
 
 
-def test_block_reasons_use_symbolic_gate_names():
+def test_block_reasons_use_symbolic_gate_names(monkeypatch):
+    _force_allowlisted_quality(monkeypatch)
     eng = QuantEngine(SyntheticGateway(_blocked_ticks()), "SYM", interval_seconds=1)
     trace = eng.run()
 
@@ -51,7 +75,8 @@ def test_block_reasons_use_symbolic_gate_names():
     )
 
 
-def test_block_reasons_reach_engine_quant_decision_view():
+def test_block_reasons_reach_engine_quant_decision_view(monkeypatch):
+    _force_allowlisted_quality(monkeypatch)
     eng = QuantEngine(SyntheticGateway(_blocked_ticks()), "SYM", interval_seconds=1)
     eng.run()
 

@@ -406,3 +406,16 @@ uses a stale forecast for its RiskAuthority exit decision.**
 - **Interactive graph**: [`quant/graphify-out/graph.html`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/graphify-out/graph.html) — open in browser
 - **Graph report**: [`quant/graphify-out/GRAPH_REPORT.md`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/graphify-out/GRAPH_REPORT.md)
 - **Raw graph JSON**: [`quant/graphify-out/graph.json`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/graphify-out/graph.json)
+
+---
+
+## Operator Note — data-quality gate is strict in all modes
+
+`CANDLE_GAUSSIAN` / `PRICE_DIRECTION_PROXY` / missing quality blocks entries
+**everywhere, including replay/paper**: `DecisionService.evaluate()` short-circuits
+with `DATA_QUALITY_BLOCKED` (empty `gate_results`) whenever conviction data is
+inferred or unavailable at the deterministic-conviction threshold — no mode flag
+bypasses it. Consequence: replay runs without footprints will show
+`DATA_QUALITY_BLOCKED` on every bar. That silence is intended — do not trade on
+invented data. A replay that must exercise the post-gate path needs
+footprint-grade input (allowlisted `TICK_EXACT` / `CANDLE_DISTRIBUTED`).

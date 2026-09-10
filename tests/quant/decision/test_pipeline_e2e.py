@@ -43,6 +43,14 @@ def test_kernel_to_signal_flow():
     decisions = []
     for i, b in enumerate(_session()):
         amt_dto = engine.analyze(b)
+        # Strict data-quality gate: synthetic candle bars carry no tick
+        # footprints, so the DTO derives CANDLE_GAUSSIAN and DecisionService
+        # short-circuits with DATA_QUALITY_BLOCKED (empty gate_results)
+        # before any gate runs. This test targets the kernel->context->gate
+        # wiring, so the fixture stands in for a distributed-volume feed by
+        # stamping the allowlisted CANDLE_DISTRIBUTED quality (copy — the
+        # engine keeps the original DTO object as its last_amt_dto).
+        amt_dto = {**amt_dto, "dataQuality": "CANDLE_DISTRIBUTED"}
         ctx = builder.build(
             bar=b,
             symbol="SYM",
