@@ -4,6 +4,8 @@ Pure and deterministic. No imports from backend/ or app/.
 """
 
 from __future__ import annotations
+import logging
+
 from quant.contracts.enums import MarketState
 
 from dataclasses import dataclass
@@ -11,6 +13,13 @@ from dataclasses import dataclass
 
 from quant.execution.exit_rules import get_session_time_stop
 from quant.execution.order import Position
+
+logger = logging.getLogger(__name__)
+
+# Model-risk failures observed since process start. The TimesFM exit authority
+# is allowed to degrade to deterministic rules, but it must never do so
+# silently: a degraded session has to be distinguishable from a healthy one.
+MODEL_RISK_FAILURES = 0
 
 
 @dataclass(frozen=True)
@@ -105,6 +114,11 @@ class ExitEngine:
             return 1.0
         return self._timesfm_risk.get_session_budget_multiplier()
 
+    @property
+    def model_risk_failures(self) -> int:
+        """Count of model-risk-authority failures seen this process."""
+        return MODEL_RISK_FAILURES
+
     def evaluate(
         self,
         position: Position,
@@ -126,6 +140,7 @@ class ExitEngine:
         session_vwap: float = 0.0,
         timesfm_forecast: object | None = None,
     ) -> ExitDecision:
+        global MODEL_RISK_FAILURES
         from quant.execution.exit_checks import (
             check_spread_blowout, check_stop_loss, check_cvd_kill,
             check_take_profit_tiers, check_trailing_stop, check_time_stop,
@@ -193,8 +208,17 @@ class ExitEngine:
                     self.last_exit_source = f"TIMESFM_RISK_AUTHORITY:{eval_res.reason or eval_res.action}"
                     return ExitDecision(True, eval_res.reason, close, trail_stop=eval_res.new_stop)
             except Exception as exc:
-                # Graceful fallback to deterministic exit rules on error
-                pass
+                # Degrade to deterministic rules — but LOUDLY. Silently
+                # swallowing this disables the dynamic VaR stop, the trajectory
+                # take-profit, the velocity-decay exit and the quantile stop
+                # ratchet for the whole bar with no signal to ops.
+                logger.warning(
+                    "TimesFM risk authority failed for %s (%s) — falling back to "
+                    "deterministic exits for this bar (total failures: %d)",
+                    position._id, exc, MODEL_RISK_FAILURES + 1,
+                    exc_info=True,
+                )
+                MODEL_RISK_FAILURES += 1
 
         # Rule 2: Stop-loss
         r = check_stop_loss(position, low, high)
