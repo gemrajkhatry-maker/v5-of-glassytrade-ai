@@ -98,7 +98,9 @@ sizer all read it. Any field change must be re-checked here.
 - [ ] Momentum entries (`MODEL_MOMENTUM`) enter on the model's decision without
       requiring a canonical AMT setup. *(automated: PASS)*
 - [ ] `DATA_QUALITY_BLOCKED` fires for inferred/proxy provenance at conviction
-      threshold `0.65`; `TICK_EXACT`/`CANDLE_DISTRIBUTED` pass. *(automated: PASS)*
+      threshold `0.65` on the **deterministic `DecisionService` path**;
+      `TICK_EXACT`/`CANDLE_DISTRIBUTED` pass. The E2E model path is NOT gated on
+      provenance (model is authoritative). *(automated: PASS)*
 
 ### 2.2 Exit
 

@@ -418,16 +418,19 @@ uses a stale forecast for its RiskAuthority exit decision.**
 
 ---
 
-## Operator Note — data-quality gate is strict in all modes
+## Operator Note — data-quality gate (deterministic path only)
 
-`CANDLE_GAUSSIAN` / `PRICE_DIRECTION_PROXY` / missing quality blocks entries
-**everywhere, including replay/paper**: `DecisionService.evaluate()` short-circuits
-with `DATA_QUALITY_BLOCKED` (empty `gate_results`) whenever conviction data is
-inferred or unavailable at the deterministic-conviction threshold — no mode flag
-bypasses it. Consequence: replay runs without footprints will show
-`DATA_QUALITY_BLOCKED` on every bar. That silence is intended — do not trade on
-invented data. A replay that must exercise the post-gate path needs
-footprint-grade input (allowlisted `TICK_EXACT` / `CANDLE_DISTRIBUTED`).
+`CANDLE_GAUSSIAN` / `PRICE_DIRECTION_PROXY` / missing quality blocks entries on the
+**deterministic `DecisionService.evaluate()` path** (including replay/paper): it
+short-circuits with `DATA_QUALITY_BLOCKED` (empty `gate_results`) whenever conviction
+data is inferred or unavailable at the deterministic-conviction threshold. Consequence:
+replay runs without footprints will show `DATA_QUALITY_BLOCKED` on every bar — that
+silence is intended for the deterministic path.
+
+**E2E exception (model-authoritative):** `TIMESFM_END_TO_END` entries are NOT gated on
+data provenance. The TimesFM model is the central intelligence and its decision is
+followed through (operator directive, 2026-09-10). See
+`docs/PRE_RELEASE_DECISION_INTEGRITY_CHECKLIST.md` §2.1.
 
 ## Operator Note — advisory vs real exits
 

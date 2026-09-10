@@ -329,3 +329,34 @@ def test_shared_engine_advisor_plus_strategy_records_bar_once():
         strategy.should_enter(ctx)
 
     assert len(engine._price_buffers["NIFTY"]) == 1
+
+
+def test_native_advisor_scanner_call_uses_model_gates():
+    """The advisor's UI gate payload is the scanner's own model gates — the same
+    source that drives the E2E entry decision (model is authoritative). The
+    advisor must not inject a separate canonical pipeline."""
+    import numpy as np
+
+    ctx = DecisionContext(
+        symbol="NIFTY",
+        bar=Bar("2026-09-10T10:00:00", 100, 101, 99, 100.5, 1000, 100),
+        bar_index=7,
+        session_open=True,
+        warmup_complete=True,
+        session_phase="PRIMARY",
+        cvd_slope=0.0,
+    )
+    engine = TimesFMEngine(target_horizon=8)
+    p50 = np.linspace(99.0, 100.5, 8, dtype=np.float32)
+    fake = Mock()
+    fake.predict.return_value = Mock(
+        quantiles=np.stack([p50 - 1, p50 - .5, p50, p50, p50, p50, p50, p50 + .5, p50 + 1], axis=1)
+    )
+    with patch("quant.decision.timesfm_engine.get_timesfm_model", return_value=fake):
+        with patch.object(engine.scanning_agent, "evaluate", return_value={
+            "gateResults": [], "action": "FLAT", "direction": "FLAT",
+            "setup": "NO_EDGE", "rationale": "test",
+        }) as evaluate:
+            engine.analyze(ctx)
+
+    assert "canonical_gates" not in evaluate.call_args.kwargs

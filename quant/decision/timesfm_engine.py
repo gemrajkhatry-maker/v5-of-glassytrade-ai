@@ -394,6 +394,9 @@ class TimesFMEngine:
         )
 
         # 3. Dynamic Role Switch: Route to Proper Specialized Agent
+        # The advisor is UI-only. In E2E mode the TimesFM model is the entry
+        # authority, so the advisor's gate display shows the scanner's own
+        # model gates — the same source that drives the real decision.
         if ctx.position_open:
             result = self.position_agent.evaluate(ctx, forecast)
         else:

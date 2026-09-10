@@ -20,7 +20,6 @@ from typing import Any, Optional
 import numpy as np
 
 from quant.decision.context import DecisionContext
-from quant.decision.data_quality import conviction_allowed
 from quant.decision.decision_service import QuantDecision
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import Signal
@@ -105,23 +104,7 @@ class TimesFMTradingStrategy:
                 model_label="",
             )
 
-        # 1. Data-quality gate (mirrors DecisionService.evaluate): inferred or
-        # unavailable provenance must never back a high-conviction entry.
-        # allow_positioned=True (thesis-flip exit check) bypasses this — the
-        # gate blocks ENTRIES, never the opposing-signal EXIT.
-        if (
-            not allow_positioned
-            and ctx.data_quality is not None
-            and ctx.agent_probability >= 0.65
-            and not conviction_allowed(ctx.data_quality)
-        ):
-            return QuantDecision(
-                approved=False, signal=None, reason="DATA_QUALITY_BLOCKED", phase="",
-                gate_results=(), block_reasons=("Data quality is unavailable or inferred",),
-                model_label="",
-            )
-
-        # 2. Hard risk halt safety backstop (never bypassed for new entries)
+        # 1. Hard risk halt safety backstop (never bypassed for new entries)
         if ctx.risk_halted and not allow_positioned:
             return QuantDecision(
                 approved=False,

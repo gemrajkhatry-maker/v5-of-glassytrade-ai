@@ -514,12 +514,12 @@ def test_e2e_model_decision_followed_through_despite_canonical_gate():
     assert d.signal.type == "LONG"
 
 
-def test_e2e_entry_blocked_on_inferred_data_quality():
-    """E2E entries must enforce the data-quality gate like DecisionService.
+def test_e2e_inferred_data_quality_does_not_block_model_entry():
+    """The model is the central intelligence: inferred provenance does not veto it.
 
-    Scanner-green + canonical-green ctx with inferred data_quality
-    (CANDLE_GAUSSIAN) and agent_probability 0.7 must return approved=False
-    with reason DATA_QUALITY_BLOCKED — mirroring DecisionService.evaluate.
+    A scanner-green ctx with inferred data_quality (CANDLE_GAUSSIAN) must still
+    be followed through — the E2E entry path does not gate on provenance
+    (the deterministic DecisionService path keeps its strict quality gate).
     """
     import numpy as np
 
@@ -563,5 +563,6 @@ def test_e2e_entry_blocked_on_inferred_data_quality():
     )
 
     d = TimesFMTradingStrategy().should_enter(ctx, forecast=fc)
-    assert d.approved is False, "E2E must block entries on inferred data quality"
-    assert d.reason == "DATA_QUALITY_BLOCKED"
+    assert d.approved is True, "model decision must not be vetoed by data provenance"
+    assert d.reason != "DATA_QUALITY_BLOCKED"
+    assert d.signal is not None
