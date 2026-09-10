@@ -509,3 +509,64 @@ def test_e2e_entry_requires_canonical_gate_approval():
     d = TimesFMTradingStrategy().should_enter(ctx, forecast=fc)
     assert d.approved is False, "E2E must not approve when a canonical gate blocks"
     assert d.signal is None
+
+
+def test_e2e_allow_positioned_still_requires_gate_3():
+    """allow_positioned bypasses ONLY gate 2; gate 3 still blocks.
+
+    Same scanner-green + gate-3-red ctx (opposing stacked imbalance) but with
+    an OPEN position (gate 2's open-position blocker would trip). With
+    allow_positioned=True gate 2 passes (thesis-flip check) while canonical
+    gate 3 (TRIPLE_A_EDGE) still blocks, so should_enter stays rejected.
+    """
+    import numpy as np
+
+    from quant.decision.timesfm_agents import TimesFMForecast
+    from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
+
+    px = 100.0
+    ctx = make_context(
+        close=px,
+        poc=99.0,
+        vah=101.0,
+        val=99.0,
+        agent_direction="LONG",
+        cvd_slope=1.5,
+        absorption_side="SELL_ABSORBED",
+        stacked_imbalance_direction="SELL",  # opposes LONG -> canonical gate 3 blocks
+        stacked_imbalance_magnitude=3,
+        stacked_imbalance_price_low=99.5,
+        stacked_imbalance_price_high=100.5,
+        session_phase="NSE_PRIMARY",
+        session_open=True,
+        warmup_complete=True,
+        position_open=True,  # gate 2's open-position blocker would trip
+        cooldown_remaining_sec=0,
+        risk_halted=False,
+        market_state=MarketState.BALANCED,
+    )
+    fc = TimesFMForecast(
+        horizon=32,
+        p50_path=np.full(32, 101.0, dtype=np.float32),
+        p10_path=np.full(32, 100.0, dtype=np.float32),
+        p90_path=np.full(32, 102.0, dtype=np.float32),
+        q_spread=2.0,
+        mean_forecast=101.0,
+        pct_change=0.01,
+        forecast_steps=["LONG"] * 32,
+        curr_price=px,
+        lat_ms=5.0,
+    )
+
+    d = TimesFMTradingStrategy().should_enter(ctx, forecast=fc, allow_positioned=True)
+    assert d.approved is False, "allow_positioned must not bypass gate 3"
+    assert d.signal is None
+    assert any("TRIPLE_A_EDGE" in r or "3" in r for r in d.block_reasons), (
+        f"blocking reason must come from gate 3, got: {d.block_reasons}"
+    )
+    assert any(g.gate == 3 and not g.passed for g in d.gate_results), (
+        f"canonical gate 3 must fail, got: {d.gate_results}"
+    )
+    assert any(g.gate == 2 and g.passed for g in d.gate_results), (
+        f"gate 2 must be bypassed by allow_positioned, got: {d.gate_results}"
+    )
