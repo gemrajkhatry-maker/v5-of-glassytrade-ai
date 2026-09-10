@@ -80,7 +80,8 @@ def test_healthy_quantity_unclamped():
     # SignalBuilder).
     from quant.execution.risk import SessionRisk
 
-    risk = SessionRisk(starting_equity=100_000.0, base_risk_pct=0.01)
+    # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
+    risk = SessionRisk(starting_equity=100_000.0, base_risk_pct=0.01, day_of_week=1)
     qty = risk.position_size(entry=100.0, sl=97.0)
     risk_amount = 100_000.0 * risk._risk_per_trade_pct()
     assert qty == pytest.approx(risk_amount / 3.0)

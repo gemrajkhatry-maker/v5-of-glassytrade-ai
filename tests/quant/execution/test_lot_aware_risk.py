@@ -15,7 +15,8 @@ from tests.helpers.synthetic import SyntheticGateway
 
 def test_position_size_rounds_to_whole_lots():
     # Standard mode (0.5% risk): CONSERVATIVE tier uses 0.25% risk = ₹2,500
-    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005)
+    # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
+    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, day_of_week=1)
     qty = risk.position_size(
         entry=100.0,
         sl=93.0,       # loss per unit = 7.0
@@ -26,7 +27,8 @@ def test_position_size_rounds_to_whole_lots():
 
 
 def test_lot_rounding_never_exceeds_rupee_risk_cap():
-    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005)
+    # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
+    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, day_of_week=1)
     qty = risk.position_size(
         entry=100.0,
         sl=93.0,
@@ -40,7 +42,8 @@ def test_lot_rounding_never_exceeds_rupee_risk_cap():
 
 
 def test_expiry_day_uses_reduced_risk():
-    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005)
+    # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
+    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, day_of_week=1)
     normal_qty = risk.position_size(entry=100.0, sl=90.0, lot_size=25, is_expiry=False)
     expiry_qty = risk.position_size(entry=100.0, sl=90.0, lot_size=25, is_expiry=True)
     assert expiry_qty < normal_qty
@@ -85,7 +88,8 @@ def test_position_size_honors_is_expiry_at_call_site():
 
 
 def test_max_lots_cap_enforced():
-    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005)
+    # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
+    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, day_of_week=1)
     # Without cap: lots = 23
     uncapped = risk.position_size(entry=100.0, sl=93.0, lot_size=15)
     assert uncapped == 23 * 15

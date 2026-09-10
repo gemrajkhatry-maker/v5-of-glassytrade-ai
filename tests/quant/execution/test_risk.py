@@ -35,7 +35,8 @@ def test_max_streak_halts():
     assert s.halted is True and "loss" in s.halt_reason
 
 def test_position_size_risk_based():
-    r = SessionRisk(starting_equity=100000.0, base_risk_pct=0.01)
+    # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
+    r = SessionRisk(starting_equity=100000.0, base_risk_pct=0.01, day_of_week=1)
     # Conservative tier (base_risk_pct < 5%): first trades are CONSERVATIVE = 0.25%
     # quantity = 100000 * 0.0025 / 1.0 = 250
     qty = r.position_size(entry=100.0, sl=99.0)
@@ -44,10 +45,12 @@ def test_position_size_risk_based():
 
 def test_paper_capital_deployment_is_a_notional_ceiling():
     """Deployment policy caps notional without replacing stop-loss risk sizing."""
+    # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
     r = SessionRisk(
         starting_equity=100_000.0,
         base_risk_pct=0.005,
         capital_deployment_pct=0.95,
+        day_of_week=1,
     )
 
     qty = r.position_size(entry=100.0, sl=99.0, lot_size=100.0)

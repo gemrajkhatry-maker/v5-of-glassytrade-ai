@@ -130,7 +130,8 @@ def test_zero_risk_on_invalid_inputs(bullish_forecast):
 
 
 def test_session_risk_delegation_to_timesfm(bullish_forecast):
-    risk = SessionRisk(starting_equity=100000.0)
+    # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
+    risk = SessionRisk(starting_equity=100000.0, day_of_week=1)
     # Standard rule sizing without forecast
     qty_rule = risk.position_size(entry=8000.0, sl=7980.0, lot_size=10.0)
     assert qty_rule >= 0
