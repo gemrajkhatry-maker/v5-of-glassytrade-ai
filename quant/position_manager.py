@@ -141,8 +141,6 @@ class PositionManager:
         # If position is None, nothing to evaluate
         if position is None:
             return None
-        # Double-close guard: position _ids that have already been fully closed.
-        self._closed_ids: set[str] = set()
         # Consume-and-clear any ratcheted base from the previous bar's pyramid fill.
         self.base_override = None
         held_bars = bar_index - entry_bar_index

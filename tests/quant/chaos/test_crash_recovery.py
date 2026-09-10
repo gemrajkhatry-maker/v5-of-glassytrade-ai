@@ -553,13 +553,12 @@ class TestDiskFull:
 # ---------------------------------------------------------------------------
 
 class TestDoubleCloseGuardReset:
-    """manage_exit() resets _closed_ids on every call, making the
-    double-close guard non-functional across calls."""
+    """FIXED (D-15): _closed_ids lives for the manager's lifetime, so
+    manage_exit() no longer resets the double-close guard across calls."""
 
-    def test_manage_exit_resets_closed_ids(self):
-        """CRITICAL: manage_exit() line 144 resets _closed_ids = set() on
-        every call. This means a position closed in a previous manage_exit
-        call can be closed again in the next call."""
+    def test_manage_exit_does_not_reset_closed_ids(self):
+        """FIXED (D-15): _closed_ids survives across manage_exit calls, so a
+        position closed in a previous call cannot be closed again."""
         from quant.position_manager import PositionManager
         from quant.execution.oms import PaperOMS
         from quant.execution.exits import ExitDecision, ExitEngine
@@ -590,8 +589,7 @@ class TestDoubleCloseGuardReset:
         assert result1 is not None and result1.reason == "SL"
         assert len([e for e in emitted if isinstance(e, PositionClosed)]) == 1
 
-        # Now call manage_exit — this RESETS _closed_ids
-        # After manage_exit, the same position can be closed again
+        # manage_exit must NOT clear the guard.
         bar = Bar(time="t10", open=100.0, high=101.0, low=99.0, close=100.0, volume=100.0)
         pm.manage_exit(
             amt_dto={},
@@ -602,25 +600,27 @@ class TestDoubleCloseGuardReset:
             entry_time_epoch=0.0,
         )
 
-        # BUG: _closed_ids was reset by manage_exit
-        assert len(pm._closed_ids) == 0, (
-            "If this fails, the fix works. If it passes, _closed_ids was "
-            "reset and the guard is non-functional."
+        # FIXED: the guard survives manage_exit.
+        assert pos._id in pm._closed_ids, (
+            "_closed_ids was reset by manage_exit — the guard must live for the "
+            "manager's lifetime, not be rebuilt per call."
         )
 
-        # Second close of the SAME position — should be blocked but isn't
+        # Second close of the SAME position must be refused (None = guarded skip).
         result2 = pm._execute_full_close(pos, ExitDecision(True, "SL", 90.0), "t2")
-        assert result2 is not None, "guard was reset by manage_exit, so re-close ran"
+        assert result2 is None, (
+            "guard did not block the re-close; second full close must return None"
+        )
 
         closed_count = len([e for e in emitted if isinstance(e, PositionClosed)])
-        assert closed_count == 2, (
+        assert closed_count == 1, (
             f"CRITICAL: Double-close guard failed — position was closed "
-            f"{closed_count} times. _closed_ids reset allowed re-close."
+            f"{closed_count} times. _closed_ids must survive manage_exit."
         )
 
-    def test_manage_exit_reset_clears_across_bars(self):
-        """Each bar calls manage_exit, which resets _closed_ids.
-        A pyramid position closed on bar N can be re-closed on bar N+1."""
+    def test_manage_exit_guard_survives_across_bars(self):
+        """FIXED (D-15): _closed_ids is not reset per bar, so a pyramid
+        position closed on bar N cannot be re-closed on bar N+1."""
         from quant.position_manager import PositionManager
         from quant.execution.oms import PaperOMS
         from quant.execution.exits import ExitDecision, ExitEngine
@@ -673,7 +673,7 @@ class TestDoubleCloseGuardReset:
         closed = [e for e in emitted if isinstance(e, PositionClosed)]
         assert len(closed) >= 2, "Base + pyramid should both be closed"
 
-        # Now manage_exit is called again (e.g., next bar) — _closed_ids reset
+        # manage_exit on a later bar must NOT clear the guard.
         bar = Bar(time="t11", open=100.0, high=101.0, low=99.0, close=100.0, volume=100.0)
         pm.manage_exit(
             amt_dto={},
@@ -683,14 +683,18 @@ class TestDoubleCloseGuardReset:
             entry_bar_index=0,
             entry_time_epoch=0.0,
         )
+        assert base_pos._id in pm._closed_ids, (
+            "_closed_ids was reset by manage_exit on a later bar"
+        )
 
-        # BUG: After manage_exit reset, closing base_pos again succeeds
+        # FIXED: after manage_exit, the guard still blocks the re-close.
         emitted.clear()
-        pm._execute_full_close(base_pos, ExitDecision(True, "SL", 90.0), "t2")
+        refused = pm._execute_full_close(base_pos, ExitDecision(True, "SL", 90.0), "t2")
+        assert refused is None, "guard did not block the re-close after manage_exit"
         double_closed = [e for e in emitted if isinstance(e, PositionClosed)]
-        assert len(double_closed) == 1, (
+        assert len(double_closed) == 0, (
             f"CRITICAL: Double-close guard is non-functional — "
-            f"base_pos was closed again after manage_exit reset"
+            f"base_pos was closed again after manage_exit"
         )
 
 
