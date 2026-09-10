@@ -119,3 +119,55 @@ def test_reset_session_restores_clean_state():
     assert state.halted is False
     assert state.equity == 500_000.0
 
+
+
+def test_model_sizing_failure_refuses_instead_of_deploying_50pct(monkeypatch):
+    """D-12: a raising model-sizing call used to fall through to the flat
+    50%-of-equity deployment branch — a structurally different, non-risk-
+    equivalent policy — with only a warning."""
+    from quant.execution.risk import SessionRisk
+
+    risk = SessionRisk(storage=None, symbol="SYM", base_risk_pct=0.05)
+
+    import quant.decision.timesfm_sizing as sz
+
+    class _Boom:
+        def compute_size(self, **_k):
+            raise RuntimeError("empty p10_path")
+
+    monkeypatch.setattr(sz, "TimesFMPositionSizer", lambda *a, **k: _Boom())
+
+    class _Fc:
+        forecast_steps = ["LONG"] * 32
+
+    qty = risk.position_size(100.0, 99.0, lot_size=1.0, forecast=_Fc(), side="LONG")
+    assert qty == 0.0
+
+
+def test_forecast_path_applies_expiry_and_day_of_week_cuts():
+    """D-12: the expiry halving and the Mon/Fri multiplier were applied only
+    on the static branches, so they never applied on the E2E (forecast) path."""
+    import numpy as np
+
+    from quant.decision.timesfm_agents import TimesFMForecast
+    from quant.execution.risk import SessionRisk
+
+    p50 = np.linspace(100.0, 104.0, 32)
+    fc = TimesFMForecast(
+        horizon=32, p50_path=p50, p10_path=p50 - 1.0, p90_path=p50 + 1.0,
+        q_spread=2.0, mean_forecast=float(p50[-1]), pct_change=0.04,
+        forecast_steps=["LONG"] * 32, curr_price=100.0, lat_ms=1.0,
+    )
+
+    normal = SessionRisk(storage=None, symbol="SYM", day_of_week=2)   # Wednesday
+    qty_normal = normal.position_size(100.0, 99.0, lot_size=1.0, forecast=fc, side="LONG")
+
+    expiry = SessionRisk(storage=None, symbol="SYM", day_of_week=2)
+    qty_expiry = expiry.position_size(100.0, 99.0, lot_size=1.0, forecast=fc,
+                                      side="LONG", is_expiry=True)
+
+    assert qty_expiry == pytest.approx(qty_normal * 0.5)
+
+    monday = SessionRisk(storage=None, symbol="SYM", day_of_week=0)
+    qty_monday = monday.position_size(100.0, 99.0, lot_size=1.0, forecast=fc, side="LONG")
+    assert qty_monday == pytest.approx(qty_normal * 0.5)

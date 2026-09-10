@@ -362,9 +362,28 @@ class SessionRisk:
                         max_lots=max_lots,
                         max_rupee_risk_cap=max_rupee_risk_cap,
                     )
-                    return float(res.quantity)
+                    qty = float(res.quantity)
+                    # The forecast path must honour the same protective cuts as
+                    # the static branches: expiry halving and the Mon/Fri
+                    # defensive multiplier. Applying them only below meant they
+                    # silently did not apply on the E2E path.
+                    if is_expiry:
+                        qty *= 0.5
+                    qty *= DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
+                    if lot_size and lot_size > 1.0:
+                        qty = float(int(qty // lot_size) * lot_size)
+                    return qty
                 except Exception as exc:
-                    logger.warning("TimesFM dynamic sizing error (%s) — falling back to deterministic risk", exc)
+                    # Do NOT fall through to the static deployment policy: it is
+                    # a structurally different, non-risk-equivalent size (it
+                    # ignores max_rupee_risk_cap and sizes on notional). If the
+                    # model path is unavailable, REFUSE the trade.
+                    logger.error(
+                        "TimesFM dynamic sizing failed (%s) — refusing entry "
+                        "rather than switching to the deployment policy", exc,
+                        exc_info=True,
+                    )
+                    return 0.0
 
             # Aggressive mode (>= 5% risk): deploy 50% of available equity as
             # position capital. This is a 10:1 deployment-to-risk ratio —
