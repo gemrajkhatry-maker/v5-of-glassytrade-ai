@@ -29,6 +29,7 @@ from quant.decision.timesfm_agents import (
     TimesFMScanningAgent,
 )
 from quant.decision.timesfm_engine import TimesFMEngine, _TIMESFM_INFER_LOCK
+from quant.decision.timesfm_forecast_factory import build_forecast
 from quant.execution.exits import ExitEngine
 from quant.modeling.contracts import ForecastStatus
 from quant.modeling.forecast_provider import ForecastProvider
@@ -331,34 +332,8 @@ class TimesFMTradingStrategy:
             lat_ms = (time.perf_counter() - t0) * 1000.0
 
             quantiles = getattr(res, "quantiles", None)
-            if quantiles is None or len(quantiles) == 0:
-                p50 = np.full(self.target_horizon, curr_price, dtype=np.float32)
-                p10 = p50 - (curr_price * 0.002)
-                p90 = p50 + (curr_price * 0.002)
-                q_spread = float(np.mean(p90 - p10))
-            else:
-                p50 = quantiles[:, 4].astype(np.float32)
-                p10 = quantiles[:, 0].astype(np.float32)
-                p90 = quantiles[:, 8].astype(np.float32)
-                q_spread = float(np.mean(p90 - p10))
-
-            mean_fc = float(p50[-1])
-            pct_chg = (mean_fc - curr_price) / max(curr_price, 1e-4)
-            steps = ["LONG" if p > curr_price else ("SHORT" if p < curr_price else "FLAT") for p in p50]
-
-            fc = TimesFMForecast(
-                horizon=self.target_horizon,
-                p50_path=p50,
-                p10_path=p10,
-                p90_path=p90,
-                q_spread=q_spread,
-                mean_forecast=mean_fc,
-                pct_change=pct_chg,
-                forecast_steps=steps,
-                curr_price=curr_price,
-                lat_ms=lat_ms,
-                asof_bar=int(getattr(ctx, "bar_index", -1)),
-            )
+            fc = build_forecast(quantiles, curr_price, self.target_horizon, lat_ms)
+            fc.asof_bar = int(getattr(ctx, "bar_index", -1))
             # D-11 reverse direction: on the entry path runtime._decide calls
             # should_enter (this method) BEFORE the advisor's analyze, so the
             # strategy owns the bar's inference here. Record it on the shared

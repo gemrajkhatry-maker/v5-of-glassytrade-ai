@@ -413,7 +413,7 @@ class OptionScannerService:
                         _TIMESFM_INFER_LOCK,
                         get_timesfm_model,
                     )
-                    from quant.decision.timesfm_agents import TimesFMForecast
+                    from quant.decision.timesfm_forecast_factory import build_forecast
                     import numpy as np
 
                     model = get_timesfm_model()
@@ -467,32 +467,8 @@ class OptionScannerService:
                                 res = model.predict(context=np_prices, horizon=32, return_quantiles=True)
                             quantiles = getattr(res, "quantiles", None)
                             curr_price = float(np_prices[-1])
-                            if quantiles is not None and len(quantiles) > 0:
-                                p50 = quantiles[:, 4]
-                                p10 = quantiles[:, 0]
-                                p90 = quantiles[:, 8]
-                                q_spread = float(np.mean(p90 - p10))
-                            else:
-                                p50 = np.full(32, curr_price)
-                                p10 = np.full(32, curr_price * 0.998)
-                                p90 = np.full(32, curr_price * 1.002)
-                                q_spread = 0.0
-
-                            mean_forecast = float(p50[-1])
-                            pct_change = (mean_forecast - curr_price) / max(curr_price, 1e-4)
-                            effective_tfm_forecast = TimesFMForecast(
-                                horizon=32,
-                                p50_path=p50,
-                                p10_path=p10,
-                                p90_path=p90,
-                                q_spread=q_spread,
-                                mean_forecast=mean_forecast,
-                                pct_change=pct_change,
-                                forecast_steps=["LONG" if p > curr_price else "SHORT" for p in p50],
-                                curr_price=curr_price,
-                                lat_ms=5.0,
-                            )
-                            logger.info("%s: TimesFM auto-forecasted (drift=%.2f%%, spread=%.2f, candles=%d)", u, pct_change * 100, q_spread, len(prices))
+                            effective_tfm_forecast = build_forecast(quantiles, curr_price, 32, 5.0)
+                            logger.info("%s: TimesFM auto-forecasted (drift=%.2f%%, spread=%.2f, candles=%d)", u, effective_tfm_forecast.pct_change * 100, effective_tfm_forecast.q_spread, len(prices))
                 except Exception as e:
                     logger.debug("%s: TimesFM auto-forecast skipped: %s", u, e)
 

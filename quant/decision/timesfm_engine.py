@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from quant.decision.context import DecisionContext
+from quant.decision.timesfm_forecast_factory import build_forecast
 from quant.session_gates import session_allow_entry
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,6 @@ class TimesFMEngine:
         # after a newer one (out-of-order window).
         self._buffer_lock = threading.RLock()
         from quant.decision.timesfm_agents import (
-            TimesFMForecast,
             TimesFMPositionAgent,
             TimesFMScanningAgent,
         )
@@ -528,44 +528,13 @@ class TimesFMEngine:
 
             # Quantile shape: (32, 9) where index 4 is p50, 0 is p10, 8 is p90
             quantiles = res.quantiles if hasattr(res, "quantiles") else None
-            if quantiles is None or len(quantiles) == 0:
-                p50_path = np.full(self.target_horizon, curr_price)
-                p10_path = np.full(self.target_horizon, curr_price * 0.998)
-                p90_path = np.full(self.target_horizon, curr_price * 1.002)
-                q_spread = 0.0
-            else:
-                p50_path = quantiles[:, 4]
-                p10_path = quantiles[:, 0]
-                p90_path = quantiles[:, 8]
-                q_spread = float(np.mean(p90_path - p10_path))
-
-            mean_forecast = float(p50_path[-1])
-            pct_change = (mean_forecast - curr_price) / max(curr_price, 1e-4)
 
             # Build step-by-step horizon trajectory
             vah = float(ctx.vah or (ctx.state.vah if ctx.state else curr_price))
             val = float(ctx.val or (ctx.state.val if ctx.state else curr_price))
-            forecast_steps = []
-            for p in p50_path:
-                if p > vah:
-                    forecast_steps.append("LONG")
-                elif p < val:
-                    forecast_steps.append("SHORT")
-                else:
-                    forecast_steps.append("FLAT")
 
-            from quant.decision.timesfm_agents import TimesFMForecast
-            forecast = TimesFMForecast(
-                horizon=self.target_horizon,
-                p50_path=p50_path,
-                p10_path=p10_path,
-                p90_path=p90_path,
-                q_spread=q_spread,
-                mean_forecast=mean_forecast,
-                pct_change=pct_change,
-                forecast_steps=forecast_steps,
-                curr_price=curr_price,
-                lat_ms=lat_ms,
+            forecast = build_forecast(
+                quantiles, curr_price, self.target_horizon, lat_ms, vah=vah, val=val
             )
 
         # Stamp the bar this forecast was computed for and cache it per symbol.
