@@ -208,14 +208,34 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
         # EngineState carried the ORIGINAL full size after every partial, so
         # the event-fold authority disagreed with PositionManager (execution
         # truth) and periodic_reconcile could not observe the drift.
+        #
+        # STOP MERGE (review finding, CRITICAL): the surviving execution
+        # Position object carries only its SUBMITTED stop (derived from
+        # ``sig.sl`` by ``_position_to_state``), while the ratcheted stop lives
+        # in this event-fold authority (folded from StopMoved). Blindly
+        # replacing the position with the re-derived one erased every ratchet
+        # on the first partial. Merge monotonically so a partial can never
+        # widen a tightened stop.
         remaining = event.remaining
         rem_id = getattr(remaining, "_id", None) or getattr(remaining, "id", None)
+
+        def _merge_stop(new_state: PositionState, existing: PositionState) -> PositionState:
+            if existing is None or float(existing.sl) <= 0:
+                return new_state
+            if str(existing.side).upper() == "LONG":
+                sl = max(float(existing.sl), float(new_state.sl))
+            else:
+                sl = min(float(existing.sl), float(new_state.sl))
+            return replace(new_state, sl=sl)
+
         if state.position is not None and rem_id == state.position.id:
-            return state.with_position(_position_to_state(remaining))
+            return state.with_position(
+                _merge_stop(_position_to_state(remaining), state.position)
+            )
         pyramid_ids = {p.id for p in state.pyramids}
         if rem_id in pyramid_ids:
             new_pyramids = tuple(
-                _position_to_state(remaining) if p.id == rem_id else p
+                _merge_stop(_position_to_state(remaining), p) if p.id == rem_id else p
                 for p in state.pyramids
             )
             return replace(state, pyramids=new_pyramids, sequence=state.sequence + 1)
@@ -264,32 +284,32 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
         # authority, so the portfolio row and the operator's displayed Trail SL
         # kept the SUBMITTED stop while ExitEngine enforced the tighter
         # ratcheted one — three different stops for one trade.
-        def _tighten(pos):
-            if pos is None:
-                return None, False
-            new_sl = float(event.new_sl)
-            if new_sl <= 0:
-                return pos, False
-            long = str(pos.side).upper() == "LONG"
-            # Monotonic: a move may only tighten, never loosen, so a replayed
-            # or stale move cannot widen an already-ratcheted stop.
-            if (long and new_sl <= float(pos.sl)) or (not long and new_sl >= float(pos.sl)):
-                return pos, False
-            return replace(pos, sl=new_sl), True
-
-        new_pos, base_changed = _tighten(state.position)
-        new_pyramids = []
-        pyramid_changed = False
-        for p in state.pyramids:
-            tightened, did = _tighten(p)
-            new_pyramids.append(tightened)
-            pyramid_changed = pyramid_changed or did
-        if not base_changed and not pyramid_changed:
+        #
+        # SCOPE (review finding 2, IMPORTANT): StopMoved carries NO position
+        # id, and all three emitters describe the BASE position's stop —
+        # ``_emit_stop_moves`` reads ``position.order.signal.sl`` of the base
+        # (position_manager.py:98-118) and the pyramid ratchet emits the new
+        # BASE stop (position_manager.py:657, with base_override set at
+        # :649-656). ExitEngine only ever evaluates the base position
+        # (position_manager.py:183); pyramid legs carry their add-time stop and
+        # are closed with the base, never stop-enforced per leg. Applying the
+        # move to every open leg was therefore an over-reach that silently
+        # tightened legs the event never mentioned. Scoped to the base only;
+        # a per-leg Move would need a leg id the event does not yet carry.
+        pos = state.position
+        if pos is None:
+            return state
+        new_sl = float(event.new_sl)
+        if new_sl <= 0:
+            return state
+        long = str(pos.side).upper() == "LONG"
+        # Monotonic: a move may only tighten, never loosen, so a replayed
+        # or stale move cannot widen an already-ratcheted stop.
+        if (long and new_sl <= float(pos.sl)) or (not long and new_sl >= float(pos.sl)):
             return state
         return replace(
             state,
-            position=new_pos if base_changed else state.position,
-            pyramids=tuple(new_pyramids) if pyramid_changed else state.pyramids,
+            position=replace(pos, sl=new_sl),
             sequence=state.sequence + 1,
         )
 

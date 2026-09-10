@@ -14,6 +14,8 @@ Covers the three Phase-1 fixes end to end:
    with an empty event-store fold (the JSONL journal is not replayed into
    the in-memory EventStore on restart).
 """
+from dataclasses import replace
+
 import pytest
 
 from quant.brokers.gateway import Tick
@@ -255,3 +257,88 @@ class TestStartupReconcileRestore:
         eng = _make_engine()
         eng.startup_reconcile()
         assert eng.state.position is None
+
+# ---------------------------------------------------------------------------
+# 4. Review findings: a partial must not revert a ratcheted stop
+# ---------------------------------------------------------------------------
+
+
+class TestPartialPreservesRatchetedStop:
+    """A tiered-TP partial re-derives the surviving Position's stop from the
+    SUBMITTED signal (99.0), while the event fold holds the ratcheted stop
+    (100.5). The fold must merge monotonically so the partial cannot widen a
+    tightened stop — otherwise the displayed stop silently reverts."""
+
+    def _ratcheted(self, side: str, submitted: float, ratchet: float, size: float):
+        from quant.events import PositionOpened, StopMoved
+        from dataclasses import replace as dc_replace
+
+        sig = _make_signal(side=side, entry=100.0, sl=submitted, tp=103.0)
+        pos = _opened_position(size=size)
+        pos = dc_replace(
+            pos,
+            order=dc_replace(pos.order, signal=sig),
+        )
+        state = EngineState(symbol="TEST")
+        state = apply_event(state, PositionOpened(symbol="TEST", time="t0", position=pos))
+        state = apply_event(state, StopMoved(symbol="TEST", time="t1",
+                                             old_sl=submitted, new_sl=ratchet,
+                                             reason="TRAIL_RATCHET"))
+        assert state.position.sl == ratchet
+        return state, pos
+
+    def test_long_partial_preserves_ratchet(self):
+        from quant.state import project_state
+
+        state, pos = self._ratcheted("LONG", submitted=99.0, ratchet=100.5, size=10.0)
+        fill, remaining = _partial_reduce(pos, fraction=0.5)
+        state = apply_event(state, PositionReduced(symbol="TEST", time="t2",
+                                                   fill=fill, remaining=remaining))
+        assert state.position.size == pytest.approx(5.0)
+        assert state.position.sl == pytest.approx(100.5), (
+            "partial reverted the ratcheted LONG stop to the submitted stop"
+        )
+        displayed = project_state(state).portfolio["positions"][0]["stopLoss"]
+        assert displayed == pytest.approx(100.5)
+
+    def test_short_partial_preserves_ratchet(self):
+        from quant.state import project_state
+
+        state, pos = self._ratcheted("SHORT", submitted=101.0, ratchet=100.0, size=-10.0)
+        fill, remaining = _partial_reduce(pos, fraction=0.5)
+        state = apply_event(state, PositionReduced(symbol="TEST", time="t2",
+                                                   fill=fill, remaining=remaining))
+        assert state.position.sl == pytest.approx(100.0), (
+            "partial reverted the ratcheted SHORT stop"
+        )
+        displayed = project_state(state).portfolio["positions"][0]["stopLoss"]
+        assert displayed == pytest.approx(100.0)
+
+    def test_pyramid_partial_preserves_tightened_leg_stop(self):
+        """The pyramid branch merges monotonically too: a leg tightened by an
+        earlier fold is not widened when that leg takes its own partial."""
+        from dataclasses import replace as dc_replace
+
+        base = _opened_position(size=4.0)
+        sig = _make_signal(entry=101.0, sl=98.0, tp=103.0)
+        pyr = dc_replace(
+            _opened_position(size=2.0),
+            order=dc_replace(_opened_position(size=2.0).order, signal=sig),
+            is_pyramid=True,
+            pyramid_level=1,
+        )
+        state = EngineState(symbol="TEST")
+        state = apply_event(state, PositionOpened(symbol="TEST", time="t0", position=base))
+        state = apply_event(state, PositionOpened(symbol="TEST", time="t1", position=pyr))
+        # Simulate an earlier StopMoved having tightened this leg to 99.5.
+        state = replace(
+            state,
+            pyramids=(replace(state.pyramids[0], sl=99.5),),
+        )
+        fill, remaining = _partial_reduce(pyr, fraction=0.5)
+        state = apply_event(state, PositionReduced(symbol="TEST", time="t2",
+                                                   fill=fill, remaining=remaining))
+        assert state.pyramids[0].size == pytest.approx(1.0)
+        assert state.pyramids[0].sl == pytest.approx(99.5), (
+            "pyramid partial widened the tightened leg stop back to 98.0"
+        )
