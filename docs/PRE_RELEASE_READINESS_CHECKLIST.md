@@ -169,7 +169,7 @@ Automated checks (all must pass):
 | ID | Residual | Impact | Disposition |
 |---|---|---|---|
 | R1 | Native advisor / AMT panel can show a different view than the TimesFM model decision, since the model is the entry authority in E2E | Operator may read the AMT/Quant panel as a veto when it is informational | By design. The `DecisionProduced` card and `[SIGNAL EXECUTED]` / `[POSITION CLOSED]` logs are the truth. |
-| R2 | Two forecast inferences per bar (advisor engine + strategy) | latency/cost, and the two payloads can differ (D-11) | Accepted for paper; revisit if the bar latency budget is exceeded. |
+| R2 | Two forecast inferences per bar (advisor engine + strategy) | latency/cost, and the two payloads can differ (D-11) | Resolved by Task 12b — one inference per bar; the advisor and the strategy share the engine's forecast for the current `bar_index`. |
 | R3 | The deterministic-only `DecisionContext` fields (`contested_bubble_zone`, `squeeze_*`, `pullback_confirmed`, `drive_*`, `vars_result`, `absorption_cluster_*`, `break_*`) are computed on every bar but read only by the `GatePipeline`, which E2E does not run | wasted per-bar computation; misleading to readers | Accepted for now; strip when the deterministic strategy is retired. |
 | R4 | `ctx.state` is always `None`, so `ctx.state.poc` fallbacks are unreachable | the effective fallback is `curr_price` (D-4 root cause) | Being fixed under D-4. |
 

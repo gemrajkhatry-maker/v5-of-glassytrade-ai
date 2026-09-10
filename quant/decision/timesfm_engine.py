@@ -109,6 +109,11 @@ class TimesFMEngine:
         self.scanning_agent = TimesFMScanningAgent(target_horizon=self.target_horizon)
         self.position_agent = TimesFMPositionAgent(target_horizon=self.target_horizon)
         self._model_loaded = False
+        # Forecast computed for a bar, keyed by symbol. The advisor and the E2E
+        # strategy both need a forecast for the same bar; without this they each
+        # ran model.predict, doubling latency and allowing the two payloads to
+        # disagree on the very input the decision was made from.
+        self._forecast_cache: Dict[str, Tuple[int, Any]] = {}
 
     def warmup(self) -> bool:
         """Load the model on startup. Returns True if model loaded successfully.
@@ -131,6 +136,17 @@ class TimesFMEngine:
     def is_healthy(self) -> bool:
         """Return True if model is loaded and ready for inference."""
         return self._model_loaded
+
+    def last_forecast_for(self, symbol: str) -> Optional[Any]:
+        """Forecast computed for the current bar, or None.
+
+        The advisor's ``analyze`` records the forecast it inferred here so the
+        E2E strategy can reuse it for the same bar instead of paying a second
+        inference. A forecast stamped with a different ``bar_index`` than the
+        caller's must NOT be reused (strict monotonic bar semantics).
+        """
+        entry = self._forecast_cache.get(str(symbol))
+        return entry[1] if entry is not None else None
 
     @staticmethod
     def health_check() -> Dict[str, Any]:
@@ -425,6 +441,15 @@ class TimesFMEngine:
             curr_price=curr_price,
             lat_ms=lat_ms,
         )
+
+        # Stamp the bar this forecast was computed for and cache it per symbol.
+        # The advisor and the E2E strategy share one engine and both need the
+        # forecast for the same bar; the strategy reuses this instead of running
+        # a second inference that could disagree on the very input the decision
+        # was made from. The stamp also keeps runtime._fresh_forecast working.
+        bar_index = int(getattr(ctx, "bar_index", -1) or -1)
+        forecast.asof_bar = bar_index
+        self._forecast_cache[symbol] = (bar_index, forecast)
 
         # 3. Dynamic Role Switch: Route to Proper Specialized Agent
         # The advisor is UI-only. In E2E mode the TimesFM model is the entry

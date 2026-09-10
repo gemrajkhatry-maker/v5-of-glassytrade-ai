@@ -138,3 +138,44 @@ def test_timesfm_strategy_defaults_to_its_own_exit_engine():
     assert exit_engine.time_stop_bars == 32
     # Second access returns the same cached default, not a new object.
     assert strategy.exit_engine is exit_engine
+
+
+def test_strategy_and_advisor_share_one_inference_per_bar(monkeypatch):
+    """D-11: the advisor engine and the strategy each ran model.predict for the
+    same bar, doubling latency and allowing the two payloads to disagree."""
+    import numpy as np
+    from unittest.mock import Mock
+
+    import quant.decision.timesfm_engine as eng_mod
+    from quant.bars import Bar
+    from quant.decision.context import DecisionContext
+    from quant.decision.timesfm_engine import TimesFMEngine
+    from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
+
+    horizon = 8
+    p50 = np.linspace(100.0, 103.0, horizon, dtype=np.float32)
+    q = np.zeros((horizon, 9), dtype=np.float32)
+    q[:, 0] = p50 - 0.5
+    q[:, 4] = p50
+    q[:, 8] = p50 + 0.5
+    fake = Mock()
+    fake.predict.return_value = Mock(quantiles=q)
+
+    engine = TimesFMEngine(target_horizon=horizon)
+    original = eng_mod.get_timesfm_model
+    eng_mod.get_timesfm_model = lambda *a, **k: fake
+    try:
+        strategy = TimesFMTradingStrategy(target_horizon=horizon, engine=engine)
+        bar = Bar("2026-09-10T10:00:00+05:30", 100.0, 101.0, 99.0, 100.0, 100, 100)
+        ctx = DecisionContext(symbol="NIFTY", bar=bar, bar_index=7,
+                              session_open=True, warmup_complete=True,
+                              session_phase="PRIMARY", poc=101.0, vah=101.5,
+                              val=99.0, cvd_slope=1.0)
+        engine.analyze(ctx)            # advisor consumer
+        strategy.should_enter(ctx)     # decision consumer, same bar
+    finally:
+        eng_mod.get_timesfm_model = original
+
+    assert fake.predict.call_count == 1, (
+        f"expected one inference per bar, got {fake.predict.call_count}"
+    )

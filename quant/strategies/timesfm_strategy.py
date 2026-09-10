@@ -276,6 +276,21 @@ class TimesFMTradingStrategy:
 
     def _compute_forecast(self, ctx: DecisionContext) -> Optional[TimesFMForecast]:
         """Generate a forecast through the shared provider when configured."""
+        bar_index = int(getattr(ctx, "bar_index", -1) or -1)
+
+        # D-11: the advisor engine already inferred this bar on the shared
+        # engine. Reuse that forecast instead of paying a second inference and
+        # risking a divergent payload. An explicit forecast_provider still wins
+        # (its own factory is authoritative), and a forecast from a different
+        # bar_index is never served — Task 4 established strict monotonic bar
+        # semantics, so a cached bar must match exactly.
+        if self._forecast_provider is None:
+            cached = self._engine.last_forecast_for(str(ctx.symbol or "UNKNOWN"))
+            if cached is not None:
+                cached_bar = int(getattr(cached, "asof_bar", -1))
+                if cached_bar >= 0 and cached_bar == bar_index:
+                    return cached
+
         if self._forecast_provider is not None:
             context_prices, _ = self._engine.add_context(ctx)
             snapshot = self._forecast_provider.forecast(

@@ -245,6 +245,10 @@ checklist; combined with D-10 it is the mechanism by which the two consumers
 diverge. Correctness-neutral only while the strategy's forecast is the sole
 decision input.
 
+**Status: FIXED** (Task 12b). The engine caches the bar's forecast
+(`TimesFMEngine.last_forecast_for`) and the strategy reuses it for the same
+`bar_index` unless an explicit `forecast_provider` is configured.
+
 ### D-12 · MEDIUM · Sizing policy silently switches on a forecasting exception
 `quant/execution/risk.py:333-392`
 
