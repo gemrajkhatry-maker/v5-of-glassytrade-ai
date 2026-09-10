@@ -645,3 +645,53 @@ def test_scanner_option_short_blocked_for_option_symbol():
     assert res["direction"] != "SHORT"
 
 
+
+
+def test_absent_volume_profile_never_fabricates_a_setup():
+    """D-4: poc/vah/val == 0 means 'no profile yet'. The scanner must stay FLAT
+    instead of collapsing the VA to curr_price and trivially satisfying the
+    fade conditions."""
+    import numpy as np
+
+    horizon = 32
+    curr = 100.0
+    p50 = np.linspace(curr, curr + 1.5, horizon)
+    fc = TimesFMForecast(
+        horizon=horizon, p50_path=p50, p10_path=p50 - 0.5, p90_path=p50 + 0.5,
+        q_spread=1.0, mean_forecast=float(p50[-1]),
+        pct_change=0.015, forecast_steps=["LONG"] * horizon,
+        curr_price=curr, lat_ms=1.0,
+    )
+    bar = Bar("2026-09-10T10:00:00", 100.0, 101.0, 99.0, 100.0, 100, 100)
+    ctx = DecisionContext(
+        symbol="NIFTY", bar=bar, bar_index=20, session_open=True,
+        warmup_complete=True, session_phase="PRIMARY",
+        poc=0.0, vah=0.0, val=0.0, cvd_slope=1.0, allow_reversion=True,
+    )
+    res = TimesFMScanningAgent(target_horizon=horizon).evaluate(ctx, fc)
+    assert res["action"] == "FLAT", res
+    assert res["setup"] == "NO_EDGE", res
+    assert res["reason"] == "NO_PROFILE", res
+
+
+def test_valid_profile_still_trades():
+    """Guard against over-correcting: a real profile must still fire."""
+    import numpy as np
+
+    horizon = 32
+    curr = 100.0
+    p50 = np.linspace(curr, curr + 1.2, horizon)
+    fc = TimesFMForecast(
+        horizon=horizon, p50_path=p50, p10_path=p50 - 0.5, p90_path=p50 + 0.5,
+        q_spread=1.0, mean_forecast=float(p50[-1]),
+        pct_change=0.012, forecast_steps=["LONG"] * horizon,
+        curr_price=curr, lat_ms=1.0,
+    )
+    bar = Bar("2026-09-10T10:00:00", 100.0, 101.0, 99.0, 100.0, 100, 100)
+    ctx = DecisionContext(
+        symbol="NIFTY", bar=bar, bar_index=20, session_open=True,
+        warmup_complete=True, session_phase="PRIMARY",
+        poc=101.0, vah=101.5, val=99.0, cvd_slope=1.0, allow_reversion=True,
+    )
+    res = TimesFMScanningAgent(target_horizon=horizon).evaluate(ctx, fc)
+    assert res["action"] != "FLAT", res

@@ -106,9 +106,68 @@ class TimesFMScanningAgent:
         allow_trend = getattr(ctx, "allow_trend", True)
         allow_reversion = getattr(ctx, "allow_reversion", True)
 
-        poc = float(ctx.poc or (ctx.state.poc if ctx.state else curr_price))
-        vah = float(ctx.vah or (ctx.state.vah if ctx.state else curr_price))
-        val = float(ctx.val or (ctx.state.val if ctx.state else curr_price))
+        # Gate 1 (session phase) is evaluated before the profile guard so that a
+        # missing profile still reports the true session-phase gate result.
+        is_opening = any(p in session_phase for p in ("OPENING", "PRE_OPEN", "PRE_MARKET"))
+        is_closing = any(p in session_phase for p in ("CLOSE", "POST_MARKET", "EOD"))
+        g1 = bool(ctx.session_open and ctx.warmup_complete and not is_opening and not is_closing)
+        g1_msg = ""
+        if not g1:
+            if not ctx.session_open:
+                g1_msg = "Session closed"
+            elif not ctx.warmup_complete:
+                g1_msg = "Warming up — insufficient bars"
+            elif is_opening:
+                g1_msg = f"Opening noise ({session_phase})"
+            elif is_closing:
+                g1_msg = f"Close protection ({session_phase})"
+            else:
+                g1_msg = session_phase or "Phase restricted"
+
+        # A zero/absent volume profile is NOT a value area at curr_price — it
+        # means the AMT profile has not populated yet (empty seed, cold start).
+        # Collapsing vah/val to curr_price makes every location test trivially
+        # true and fabricates a fade with no auction structure behind it.
+        poc = float(ctx.poc or 0.0)
+        vah = float(ctx.vah or 0.0)
+        val = float(ctx.val or 0.0)
+        has_profile = vah > 0.0 and val > 0.0 and vah > val
+        if not has_profile:
+            return {
+                "role": "SCANNING",
+                "action": "FLAT",
+                "direction": "FLAT",
+                "setup": "NO_EDGE",
+                "reason": "NO_PROFILE",
+                "confidence": "Low",
+                "confidenceScore": 0.0,
+                "rationale": (
+                    f"No volume profile on {symbol} yet (poc={poc:.2f}, "
+                    f"vah={vah:.2f}, val={val:.2f}) — standing down until the "
+                    f"AMT profile populates."
+                ),
+                "forecastSteps": list(forecast.forecast_steps),
+                "quantileSpread": round(float(forecast.q_spread), 4),
+                "meanForecast": round(float(forecast.mean_forecast), 2),
+                "gateResults": [
+                    {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": g1, "message": g1_msg},
+                    {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": True, "message": ""},
+                    {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": False, "message": "No volume profile"},
+                    {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": False, "message": "No setup"},
+                ],
+                "activePosition": None,
+                "dynamicTrailStop": None,
+                "dynamicSizing": None,
+                "recommendedOption": None,
+                "source": "TIMESFM_3.0_NATIVE",
+                "latencyMs": round(float(forecast.lat_ms), 1),
+                "modelLabel": "TimesFM-NoProfile",
+                "modelVersions": {"timesfm": "3.0", "agent_role": "SCANNING", "engine": "native_direct"},
+                "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
+                "timing": str(ctx.session_phase or "REGULAR"),
+                "sizeFraction": 0.0,
+                "latencyUs": int(float(forecast.lat_ms) * 1000),
+            }
         cvd_slope = float(ctx.cvd_slope or 0.0)
         absorption = str(ctx.absorption_side or "").upper()
         stacked_imb = str(getattr(ctx, "stacked_imbalance_direction", "") or "").upper()
@@ -250,22 +309,7 @@ class TimesFMScanningAgent:
                     f"drift ({short_steps}/{total_steps} bearish steps, q_spread={forecast.q_spread:.1f}) with CVD concordance ({cvd_slope:.1f})."
                 )
 
-        # 4-Gate Evaluations
-        is_opening = any(p in session_phase for p in ("OPENING", "PRE_OPEN", "PRE_MARKET"))
-        is_closing = any(p in session_phase for p in ("CLOSE", "POST_MARKET", "EOD"))
-        g1 = bool(ctx.session_open and ctx.warmup_complete and not is_opening and not is_closing)
-        g1_msg = ""
-        if not g1:
-            if not ctx.session_open:
-                g1_msg = "Session closed"
-            elif not ctx.warmup_complete:
-                g1_msg = "Warming up — insufficient bars"
-            elif is_opening:
-                g1_msg = f"Opening noise ({session_phase})"
-            elif is_closing:
-                g1_msg = f"Close protection ({session_phase})"
-            else:
-                g1_msg = session_phase or "Phase restricted"
+        # 4-Gate Evaluations (gate 1 already computed above the profile guard)
 
         # Fabio AMT Structural Target Identification
         def _valid_target(t: float) -> bool:
