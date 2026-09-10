@@ -419,3 +419,13 @@ bypasses it. Consequence: replay runs without footprints will show
 `DATA_QUALITY_BLOCKED` on every bar. That silence is intended — do not trade on
 invented data. A replay that must exercise the post-gate path needs
 footprint-grade input (allowlisted `TICK_EXACT` / `CANDLE_DISTRIBUTED`).
+
+## Operator Note — advisory vs real exits
+
+`TimesFMPositionAgent` EXIT signals are advisory/UI-only — they never reach the OMS.
+Real exits come from `ExitEngine → TimesFMRiskAuthority` (full analysis in STRUCT-2
+above). On every close, the `[POSITION CLOSED]` log line carries
+`exit_source=<ExitEngine.last_exit_source>`: `TIMESFM_RISK_AUTHORITY:<reason>` means a
+model-driven real exit, `DETERMINISTIC:<reason>` means a rule-based real exit. An EXIT
+on the dashboard with no matching `exit_source` close in the log means the position is
+still live — do not act on the UI signal alone.

@@ -70,6 +70,7 @@ class ExitEngine:
         # survives the TP1 -> TP2 transition on the same underlying trade.
         self._tp_tier: dict[str, int] = {}
         self._timesfm_risk = None
+        self.last_exit_source: str = ""
 
     def pop_trail(self, position: Position) -> None:
         """Drop trailing/tier state for a closed position."""
@@ -125,6 +126,7 @@ class ExitEngine:
             check_take_profit_tiers, check_trailing_stop, check_time_stop,
         )
 
+        self.last_exit_source = ""
         if bar_close is not None:
             close = float(bar_close)
         elif isinstance(state, (int, float)):
@@ -135,6 +137,7 @@ class ExitEngine:
 
         dto = amt_dto or (state if isinstance(state, dict) else {})
         if market_state == MarketState.DEAD:
+            self.last_exit_source = "DETERMINISTIC:DEAD_MARKET"
             return ExitDecision(True, "DEAD_MARKET", close)
 
         long = position.size > 0
@@ -146,7 +149,9 @@ class ExitEngine:
 
         # Rule 1: Spread blowout
         r = check_spread_blowout(position, close, best_bid, best_ask, is_expiry, self.spread_max_pct)
-        if r: return r
+        if r:
+            self.last_exit_source = f"DETERMINISTIC:{r.reason}"
+            return r
 
         # TimesFM Dynamic Risk & Monotonic Quantile Trailing Stop Evaluation
         if timesfm_forecast is not None:
@@ -180,6 +185,7 @@ class ExitEngine:
                         self._breakeven[position._id] = eval_res.new_stop
 
                 if eval_res.should_exit:
+                    self.last_exit_source = f"TIMESFM_RISK_AUTHORITY:{eval_res.reason or eval_res.action}"
                     return ExitDecision(True, eval_res.reason, close, trail_stop=eval_res.new_stop)
             except Exception as exc:
                 # Graceful fallback to deterministic exit rules on error
@@ -187,11 +193,15 @@ class ExitEngine:
 
         # Rule 2: Stop-loss
         r = check_stop_loss(position, low, high)
-        if r: return r
+        if r:
+            self.last_exit_source = f"DETERMINISTIC:{r.reason}"
+            return r
 
         # Rule 3: CVD kill
         r = check_cvd_kill(position, dto, self.cvd_kill_threshold)
-        if r: return ExitDecision(True, r.reason, close)
+        if r:
+            self.last_exit_source = f"DETERMINISTIC:{r.reason}"
+            return ExitDecision(True, r.reason, close)
 
         # Rule 4: Take-profit tiers
         tier = self._tp_tier.get(position._id, 0)
@@ -200,6 +210,7 @@ class ExitEngine:
             self._tp_tier[position._id] = new_tier
             if r.reason == "TP1":
                 self._breakeven[position._id] = entry
+            self.last_exit_source = f"DETERMINISTIC:{r.reason}"
             return r
         self._tp_tier[position._id] = new_tier
 
@@ -221,13 +232,17 @@ class ExitEngine:
                     self._trail[position._id] = tr
                 tr.active = True
                 tr.stop = trail_stop
-            if r: return r
+            if r:
+                self.last_exit_source = f"DETERMINISTIC:{r.reason}"
+                return r
 
         # Rule 5: Time stop
         r = check_time_stop(
             bar_index, self.time_stop_bars, session_phase, time_to_close,
             now_epoch, entry_time_epoch, market_state, is_expiry,
         )
-        if r: return ExitDecision(True, r.reason, close)
+        if r:
+            self.last_exit_source = f"DETERMINISTIC:{r.reason}"
+            return ExitDecision(True, r.reason, close)
 
         return ExitDecision(False, "", close)

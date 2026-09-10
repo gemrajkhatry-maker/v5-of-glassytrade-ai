@@ -298,11 +298,12 @@ class PositionManager:
         risk = self._risk.record_trade(fill.pnl)
         logger.info(
             "🔒 [POSITION CLOSED] %s reason=%s pnl=₹%.2f daily_pnl=₹%.2f "
-            "trades=%d/%d equity=₹%.0f halted=%s",
+            "trades=%d/%d equity=₹%.0f halted=%s exit_source=%s",
             self.symbol, exit_dec.reason, fill.pnl,
             risk.daily_pnl, risk.trades_today,
             6,  # max_trades_per_session
             risk.equity, risk.halted,
+            self._exits.last_exit_source,
         )
         self._emit(RiskUpdated(symbol=self.symbol, time=time_str, risk=risk))
         return None
