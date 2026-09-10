@@ -152,10 +152,13 @@ class TimesFMTradingStrategy:
         # than 1 bar (TimesFMForecast is mutable — direct assignment).
         forecast.asof_bar = int(getattr(ctx, "bar_index", -1))
 
-        # 3. Canonical gates computed once: approval authority + scanner payload
-        from quant.decision.pipeline import GatePipeline
-        canonical = GatePipeline().evaluate(ctx, allow_positioned=allow_positioned)
-        scan_res = self.scanning_agent.evaluate(ctx, forecast, canonical_gates=tuple(canonical))
+        # 3. Evaluate via TimesFMScanningAgent. In E2E mode the model is the
+        # central intelligence: its directional decision is followed through.
+        # The scanner's own gates (session, cooldown, direction, momentum) are
+        # the model layer's filters; the runtime still enforces cooldown and
+        # risk-halt before calling here. Canonical AMT gates do NOT override
+        # the model's decision.
+        scan_res = self.scanning_agent.evaluate(ctx, forecast)
         action = scan_res.get("action", "FLAT")
         direction = scan_res.get("direction", "FLAT")
         setup = scan_res.get("setup", "NO_EDGE")
@@ -175,16 +178,6 @@ class TimesFMTradingStrategy:
         is_entry = action in ("ENTER_LONG", "ENTER_SHORT") and direction in ("LONG", "SHORT")
 
         if is_entry and (all_gates_passed or allow_positioned):
-            failed = [g for g in canonical if not g.passed]
-            if failed:
-                failed_reasons = tuple(f"{g.name}: {g.reason}" for g in failed)
-                return QuantDecision(
-                    approved=False, signal=None, reason=setup,
-                    phase=str(ctx.session_phase or ""),
-                    gate_results=tuple(canonical),
-                    block_reasons=failed_reasons,
-                    model_label=f"TimesFM-{setup}",
-                )
             curr_price = float(ctx.bar.close)
             sizing = scan_res.get("dynamicSizing")
             if sizing and sizing.get("varStop") and sizing.get("targetPrice"):

@@ -72,33 +72,21 @@ def check_entry_authority():
     )
 
 
-def check_canonical_gates_at_scanner_calls():
-    offenders = []
-    for path in QUANT.rglob("*.py"):
-        src = path.read_text(encoding="utf-8")
-        for m in re.finditer(r"scanning_agent\.evaluate\(", src):
-            window = src[m.end(): m.end() + 300]
-            if "canonical_gates" not in window:
-                line = src[: m.start()].count("\n") + 1
-                offenders.append(f"{_rel(path)}:{line}")
-    advisory_only = {"quant/decision/timesfm_engine.py"}
-    hard = [o for o in offenders if o.split(":")[0] not in advisory_only]
-    advisory = [o for o in offenders if o.split(":")[0] in advisory_only]
+def check_model_entry_authority():
+    """E2E mode: the TimesFM model is the central intelligence. Its entry
+    decision is followed through — the canonical AMT GatePipeline must not be
+    able to override it. The strategy calls the scanner directly and never
+    constructs a GatePipeline for approval.
+    """
+    src = _read("quant/strategies/timesfm_strategy.py")
+    calls_scanner_directly = "self.scanning_agent.evaluate(ctx, forecast)" in src
+    overrides_with_pipeline = "GatePipeline" in src or "canonical = " in src
     _add(
-        "A. Flow authority", "every scanner call passes canonical gates",
-        not hard,
-        f"non-advisory without canonical_gates: {hard or 'none'}; "
-        f"advisory-only (allowed): {advisory or 'none'}",
+        "A. Flow authority", "model entry decision is authoritative (no canonical override)",
+        calls_scanner_directly and not overrides_with_pipeline,
+        f"strategy calls scanner directly={calls_scanner_directly}, "
+        f"canonical override present={overrides_with_pipeline}",
     )
-    if advisory:
-        _add(
-            "A. Flow authority", "advisor scanner path uses shadow gates",
-            False,
-            "advisory/UI only (never reaches OMS): "
-            + ", ".join(advisory)
-            + " — dashboard gate lights may disagree with the real decision",
-            warn=True,
-        )
 
 
 def check_no_bare_absorption():
@@ -337,7 +325,7 @@ def main() -> int:
 
     for fn in (
         check_entry_authority,
-        check_canonical_gates_at_scanner_calls,
+        check_model_entry_authority,
         check_no_bare_absorption,
         check_forecast_cache_safety,
         check_exit_source_stamp,

@@ -90,10 +90,13 @@ sizer all read it. Any field change must be re-checked here.
 
 - [ ] Exactly one entry seam: `strategy.should_enter(ctx)`; the runtime never
       calls `DecisionService.evaluate()` directly. *(automated: PASS)*
-- [ ] In `TIMESFM_END_TO_END`, approval requires **both** the scanner candidate
-      and the canonical `GatePipeline` (all 4 gates). *(automated: PASS)*
-- [ ] Gates 1–2 are hard rejects — a failure there can never fall through to VA-fade.
-- [ ] Momentum entries require the canonical edge like every other E2E setup.
+- [ ] In `TIMESFM_END_TO_END`, the TimesFM model is the **central intelligence**:
+      its scanner decision is followed through. The canonical AMT `GatePipeline`
+      is **not** consulted for E2E approval and cannot override the model.
+      *(automated: PASS — `model entry decision is authoritative`)*
+- [ ] Gates 1–2 are hard rejects for the deterministic `DecisionService` path.
+- [ ] Momentum entries (`MODEL_MOMENTUM`) enter on the model's decision without
+      requiring a canonical AMT setup. *(automated: PASS)*
 - [ ] `DATA_QUALITY_BLOCKED` fires for inferred/proxy provenance at conviction
       threshold `0.65`; `TICK_EXACT`/`CANDLE_DISTRIBUTED` pass. *(automated: PASS)*
 
@@ -126,8 +129,9 @@ sizer all read it. Any field change must be re-checked here.
 
 | Decision | Sole authority | Must NOT also run |
 |---|---|---|
-| Entry approve/reject | `strategy.should_enter` → `GatePipeline` | shadow gate booleans, second decision service |
-| Gate truth shown in UI | canonical `GateResult`s from the entry path | scanner-internal `g1..g4` |
+| Entry approve/reject (E2E) | `strategy.should_enter` (TimesFM scanner decision) | canonical `GatePipeline` override |
+| Entry approve/reject (deterministic) | `DecisionService` → `GatePipeline` | shadow gate booleans, second decision service |
+| Gate truth shown in UI | scanner model gate results | a second, competing decision service |
 | Real exit | `ExitEngine` → `TimesFMRiskAuthority` | advisory `PositionAgent` (UI) |
 | Sizing | `SessionRisk` + `clamp_quantity` | strategy-local quantity math |
 | Market state | `MarketState` enum | raw `"DEAD"` string |
@@ -136,7 +140,7 @@ sizer all read it. Any field change must be re-checked here.
 Automated checks (all must pass):
 
 - [ ] `[PASS] single entry seam`
-- [ ] `[PASS] every scanner call passes canonical gates` (non-advisory)
+- [ ] `[PASS] model entry decision is authoritative (no canonical override)`
 - [ ] `[PASS] no bare absorption string compares`
 - [ ] `[PASS] forecast cached only after success + freshness stamped`
 - [ ] `[PASS] closes bypassing ExitEngine stamp an exit source`
@@ -160,7 +164,7 @@ Automated checks (all must pass):
 
 | ID | Residual | Impact | Disposition |
 |---|---|---|---|
-| R1 | Native advisor's `TimesFMEngine.analyze()` builds its own forecast and calls `scanning_agent.evaluate()` **without** canonical gates, so the model panel's gate lights can disagree with the real decision | UI can show SETUP/ENTER while the canonical pipeline blocks. **Advisory only — never reaches the OMS.** | Operator: trust the `DecisionProduced` card and the `[POSITION CLOSED]` log, not the model panel's gate lights. Follow-up: feed canonical gates + the quality pre-check into the engine payload. |
+| R1 | Native advisor / AMT panel can show a different view ("Quant FLAT") than the TimesFM model decision ("AI LONG") because the model is the entry authority in E2E mode | Operator may read the AMT/Quant panel as a veto when it is informational only | By design: the model is the central intelligence. The `DecisionProduced` card and `[SIGNAL EXECUTED]` / `[POSITION CLOSED]` logs are the truth. |
 | R2 | Two forecast inferences per bar (advisor engine + strategy) in E2E mode | latency/cost, and the two payloads can differ | Accepted for paper; revisit if bar latency budget is exceeded. |
 
 ---

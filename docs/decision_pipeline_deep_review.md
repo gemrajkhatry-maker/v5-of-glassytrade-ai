@@ -227,10 +227,15 @@ Canonical `GatePipeline` additionally enforces:
 - OBI aggression threshold (0.20)
 - Contested bubble zone veto
 
-**Impact**: Dashboard shows 4 green gate lights while actual trade is blocked by canonical gates.
-`TimesFMTradingStrategy.should_enter()` uses ScanningAgent's shadow gates for its approval
-decision — it does NOT call `DecisionService.evaluate()` or `GatePipeline`. This means
-the trading strategy and the decision service operate on different gate logic simultaneously.
+**Impact (historical)**: Dashboard showed 4 green gate lights while the canonical pipeline
+would have blocked. `TimesFMTradingStrategy.should_enter()` used ScanningAgent's shadow gates —
+it did not call `DecisionService.evaluate()` or `GatePipeline`.
+
+**RESOLVED (2026-09-10, by design decision — model is central intelligence)**: E2E mode is
+model-authoritative. `should_enter` follows the TimesFM scanner decision and does not consult
+the canonical `GatePipeline`; the scanner's gate lights are the model layer's own gates, so the
+dashboard now agrees with the decision. The deterministic `DecisionService` path keeps the full
+canonical gate set unchanged. See `docs/PRE_RELEASE_DECISION_INTEGRITY_CHECKLIST.md` §2.1.
 
 ---
 
@@ -239,17 +244,21 @@ the trading strategy and the decision service operate on different gate logic si
 **Confirmed by code**:
 ```python
 # timesfm_strategy.py — should_enter()
-scan_res = self.scanning_agent.evaluate(ctx, forecast)   # only ScanningAgent
-# ...does NOT call DecisionService.evaluate() or GatePipeline
+scan_res = self.scanning_agent.evaluate(ctx, forecast)   # model decision, authoritative
+elsewhere: DecisionService.evaluate()                    # deterministic mode only
 ```
 
-**Two entry decision systems**:
+**Two entry decision systems (intentional separation)**:
 | System | What decides entry? | Used by |
 |---|---|---|
-| `TimesFMTradingStrategy.should_enter()` | ScanningAgent shadow gates | `TIMESFM_END_TO_END` mode |
+| `TimesFMTradingStrategy.should_enter()` | TimesFM model / ScanningAgent decision | `TIMESFM_END_TO_END` mode |
 | `DecisionService.evaluate()` | Full canonical GatePipeline | All other runtime modes |
 
-In `TIMESFM_END_TO_END` mode, the Fabio AMT guard rails (stacked imbalance, drive exhaustion, anti-climax) are BYPASSED for entry decisions.
+**RESOLVED (2026-09-10, by design decision — model is central intelligence)**: In
+`TIMESFM_END_TO_END` mode the model decision is followed through; the Fabio AMT canonical gates
+do not override it. (An intermediate implementation enforced canonical gates here and blocked
+all `MODEL_MOMENTUM` entries — reverted per operator directive.) Runtime-level cooldown and
+risk-halt still gate before `should_enter`.
 
 ---
 
@@ -367,8 +376,8 @@ uses a stale forecast for its RiskAuthority exit decision.**
 | 🔴 P1 | BUG-1 | `timesfm_agents.py:125,143` | `"BUY" in absorption` | Absorption arm dead in scanner |
 | 🔴 P1 | STRUCT-3 | `context_builder.py:414` | Raise `_DETERMINISTIC_CONVICTION=0.95` | Data quality never gates trades |
 | 🔴 P1 | STRUCT-2 | Architecture | Document advisory-vs-real exit gap in operator runbook | Operator acts on stale UI signal |
-| 🟠 P2 | STRUCT-5 | `timesfm_strategy.py` | Add `GatePipeline` call in `should_enter` or document intentional bypass | Fabio guard rails skipped in E2E mode |
-| 🟠 P2 | STRUCT-4 | `timesfm_agents.py` | Use real `GatePipeline` gate results in scanning agent output | UI gate lights mislead operator |
+| 🟠 P2 | STRUCT-5 | `timesfm_strategy.py` | ✅ Resolved by design: E2E is model-authoritative; canonical gates do not override the model | (was: Fabio guard rails skipped — now intentional) |
+| 🟠 P2 | STRUCT-4 | `timesfm_agents.py` | ✅ Resolved: scanner model gates are the UI truth in E2E | (was: UI gate lights misled operator) |
 | 🟠 P2 | STRUCT-8 | `timesfm_strategy.py:333` | Return `None` (or tag synthetic) on inference failure | Model outage → "hold forever" exits |
 | 🟡 P3 | STRUCT-7 | `timesfm_risk.py:214` | Wire `record_forecast_outcome` + budget multiplier, or delete | Degrading model keeps full risk |
 | 🟡 P3 | BUG-3 | `timesfm_agents.py:315` | `equity=ctx.equity` | Wrong sizing display |

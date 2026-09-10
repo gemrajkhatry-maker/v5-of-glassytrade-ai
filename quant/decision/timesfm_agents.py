@@ -95,7 +95,6 @@ class TimesFMScanningAgent:
         ctx: DecisionContext,
         forecast: TimesFMForecast,
         chain: Optional[Any] = None,
-        canonical_gates: Optional[tuple] = None,
     ) -> Dict[str, Any]:
         symbol = str(ctx.symbol or "UNKNOWN")
         # Retail scalpers are option buyers (long calls / long puts) with defined risk.
@@ -352,19 +351,12 @@ class TimesFMScanningAgent:
             or (dynamic_sizing and float(dynamic_sizing.get("payoffRatio", 0.0)) >= 1.4)
         )
 
-        if canonical_gates is not None:
-            gate_results = [
-                {"gate_no": g.gate, "gate_name": g.name, "passed": g.passed,
-                 "message": g.reason if not g.passed else ""}
-                for g in canonical_gates
-            ]
-        else:
-            gate_results = [
-                {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": g1, "message": g1_msg},
-                {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": g2, "message": "" if g2 else "Cooldown"},
-                {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": g3, "message": "" if g3 else "No direction"},
-                {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": g4, "message": "" if g4 else "RR fail"},
-            ]
+        gate_results = [
+            {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": g1, "message": g1_msg},
+            {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": g2, "message": "" if g2 else "Cooldown"},
+            {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": g3, "message": "" if g3 else "No direction"},
+            {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": g4, "message": "" if g4 else "RR fail"},
+        ]
 
         rec_opt = None
         if chain is not None and direction != "FLAT":
