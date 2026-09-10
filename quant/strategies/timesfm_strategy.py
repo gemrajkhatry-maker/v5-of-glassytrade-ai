@@ -332,16 +332,4 @@ class TimesFMTradingStrategy:
             )
         except Exception as exc:
             logger.debug("TimesFMTradingStrategy forecast error: %s", exc)
-            curr = float(ctx.bar.close if ctx.bar else 100.0)
-            return TimesFMForecast(
-                horizon=self.target_horizon,
-                p50_path=np.full(self.target_horizon, curr, dtype=np.float32),
-                p10_path=np.full(self.target_horizon, curr * 0.998, dtype=np.float32),
-                p90_path=np.full(self.target_horizon, curr * 1.002, dtype=np.float32),
-                q_spread=curr * 0.004,
-                mean_forecast=curr,
-                pct_change=0.0,
-                forecast_steps=["FLAT"] * self.target_horizon,
-                curr_price=curr,
-                lat_ms=0.5,
-            )
+            return None
