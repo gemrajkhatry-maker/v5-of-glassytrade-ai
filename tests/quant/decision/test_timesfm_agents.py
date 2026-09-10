@@ -695,3 +695,47 @@ def test_valid_profile_still_trades():
     )
     res = TimesFMScanningAgent(target_horizon=horizon).evaluate(ctx, fc)
     assert res["action"] != "FLAT", res
+
+
+def test_valid_profile_va_fade_short_is_pinned():
+    """A real profile whose only matching setup is VA_FADE must emit the fade."""
+    horizon = 32
+    curr = 100.0
+    p50 = np.linspace(curr, curr - 0.5, horizon)
+    fc = TimesFMForecast(
+        horizon=horizon, p50_path=p50, p10_path=p50 - 0.5, p90_path=p50 + 0.5,
+        q_spread=1.0, mean_forecast=float(p50[-1]),
+        pct_change=-0.0005, forecast_steps=["SHORT"] * horizon,
+        curr_price=curr, lat_ms=1.0,
+    )
+    bar = Bar("2026-09-10T10:00:00", 100.0, 101.0, 99.0, 100.0, 100, 100)
+    ctx = DecisionContext(
+        symbol="NIFTY", bar=bar, bar_index=20, session_open=True,
+        warmup_complete=True, session_phase="PRIMARY",
+        poc=99.0, vah=100.0, val=99.0, cvd_slope=0.0, allow_reversion=True,
+    )
+    res = TimesFMScanningAgent(target_horizon=horizon).evaluate(ctx, fc)
+    assert res["setup"] == "VA_FADE", res
+    assert res["action"] == "ENTER_SHORT", res
+
+
+def test_vah_equals_val_is_not_a_profile():
+    """vah == val is a degenerate value area, not a real profile."""
+    horizon = 32
+    curr = 100.0
+    p50 = np.linspace(curr, curr - 0.5, horizon)
+    fc = TimesFMForecast(
+        horizon=horizon, p50_path=p50, p10_path=p50 - 0.5, p90_path=p50 + 0.5,
+        q_spread=1.0, mean_forecast=float(p50[-1]),
+        pct_change=-0.0005, forecast_steps=["SHORT"] * horizon,
+        curr_price=curr, lat_ms=1.0,
+    )
+    bar = Bar("2026-09-10T10:00:00", 100.0, 101.0, 99.0, 100.0, 100, 100)
+    ctx = DecisionContext(
+        symbol="NIFTY", bar=bar, bar_index=20, session_open=True,
+        warmup_complete=True, session_phase="PRIMARY",
+        poc=100.0, vah=100.0, val=100.0, cvd_slope=0.0, allow_reversion=True,
+    )
+    res = TimesFMScanningAgent(target_horizon=horizon).evaluate(ctx, fc)
+    assert res["action"] == "FLAT", res
+    assert res["reason"] == "NO_PROFILE", res

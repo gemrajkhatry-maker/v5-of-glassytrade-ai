@@ -132,6 +132,8 @@ class TimesFMScanningAgent:
         vah = float(ctx.vah or 0.0)
         val = float(ctx.val or 0.0)
         has_profile = vah > 0.0 and val > 0.0 and vah > val
+        g2 = bool(not ctx.risk_halted and ctx.cooldown_remaining_sec == 0)
+        g2_msg = "" if g2 else ("Risk halted" if ctx.risk_halted else "Cooldown")
         if not has_profile:
             return {
                 "role": "SCANNING",
@@ -151,7 +153,7 @@ class TimesFMScanningAgent:
                 "meanForecast": round(float(forecast.mean_forecast), 2),
                 "gateResults": [
                     {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": g1, "message": g1_msg},
-                    {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": True, "message": ""},
+                    {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": g2, "message": g2_msg},
                     {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": False, "message": "No volume profile"},
                     {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": False, "message": "No setup"},
                 ],
@@ -388,7 +390,6 @@ class TimesFMScanningAgent:
             except Exception as e:
                 logger.debug("Failed computing dynamic sizing in TimesFMScanningAgent: %s", e)
 
-        g2 = bool(not ctx.risk_halted and ctx.cooldown_remaining_sec == 0)
         g3 = bool(direction != "FLAT")
         g4 = bool(
             abs(forecast.mean_forecast - curr_price) >= (curr_price * 0.001)
