@@ -226,7 +226,11 @@ class PositionManager:
                                       *self._exits.stop_state(position))
                 return remaining
 
-            return self._execute_full_close(position, exit_dec, bar.time)
+            # _execute_full_close now returns the closing Fill (or None on a
+            # guarded skip); manage_exit's contract is the SURVIVING position,
+            # so a full close must still report None to the caller.
+            self._execute_full_close(position, exit_dec, bar.time)
+            return None
         else:
             # Position survived this bar. Check if we can add a pyramid.
             if position is not None and self._exits.is_risk_free(position):
@@ -236,10 +240,21 @@ class PositionManager:
             self.base_override = None
             return survived
 
-    def _execute_full_close(self, position, exit_dec: ExitDecision, time_str: str):
+    def _execute_full_close(
+        self, position, exit_dec: ExitDecision, time_str: str,
+        *, count_as_trade: bool = True,
+    ):
         """Execute full position close and release risk/pyramid state.
 
         Double-close is prevented by the _closed_ids guard.
+
+        Returns the closing ``Fill`` on success, or ``None`` when the
+        double-close guard skipped the close (nothing was executed, so
+        callers must not read ``last_fill`` or release risk against it).
+
+        ``count_as_trade=False`` books the P&L but does NOT increment
+        ``trades_today`` or move the win/loss streaks — used by the EOD
+        pyramid-only flatten, which is bookkeeping, not a new round-trip.
         """
         # Double-close guard: skip if this position was already closed.
         pos_id = getattr(position, '_id', None) or getattr(position, 'id', None)
@@ -304,7 +319,7 @@ class PositionManager:
         self.current_position = None
         self._closed_ids.add(pos_id)  # Mark as closed
         self._emit(PositionClosed(symbol=self.symbol, time=time_str, fill=fill))
-        risk = self._risk.record_trade(fill.pnl)
+        risk = self._risk.record_trade(fill.pnl, count_as_trade=count_as_trade)
         try:
             budget_mult = float(self._exits.session_budget_multiplier())
         except Exception:
@@ -320,7 +335,7 @@ class PositionManager:
             budget_mult,
         )
         self._emit(RiskUpdated(symbol=self.symbol, time=time_str, risk=risk))
-        return None
+        return fill
 
     def manage_tick_exit(self, position, tick_price: float, tick_time: str):
         """Tick-level fast stop-loss and take-profit breach check."""
@@ -363,10 +378,11 @@ class PositionManager:
                 if terminal_tp:
                     # VA_FADE regime: first TP touch = terminal full close
                     # (no tier arming, no partials) — replaces _tick_tp_touch.
-                    return self._execute_full_close(
+                    self._execute_full_close(
                         position, ExitDecision(True, "TP", float(tick_price)),
                         tick_time,
                     )
+                    return None
                 tier = self._exits._tp_tier.get(position._id, 0)
                 if tier >= 1:
                     # Strict bar parity with Rule 4: tiers stop at 2. The
@@ -389,10 +405,11 @@ class PositionManager:
             elif sig_tp > 0 and tick_price <= sig_tp:
                 if terminal_tp:
                     # Short mirror: fade terminal full close at first TP tag.
-                    return self._execute_full_close(
+                    self._execute_full_close(
                         position, ExitDecision(True, "TP", float(tick_price)),
                         tick_time,
                     )
+                    return None
                 tier = self._exits._tp_tier.get(position._id, 0)
                 if tier >= 1:
                     # Short mirror of the long-side TP2/tier>=2 handling above.
@@ -405,7 +422,8 @@ class PositionManager:
 
         if reason is not None:
             exit_dec = ExitDecision(True, reason, float(tick_price))
-            return self._execute_full_close(position, exit_dec, tick_time)
+            self._execute_full_close(position, exit_dec, tick_time)
+            return None
         return position
 
     def _tick_tp_touch(self, position, px: float, ts: str):
@@ -441,7 +459,8 @@ class PositionManager:
             self._exits._tp_tier[position._id] = 1
             self._exits._breakeven[position._id] = entry   # same effect as exits.py:160-161
             return remaining
-        return self._execute_full_close(position, ExitDecision(True, "TP", px), ts)
+        self._execute_full_close(position, ExitDecision(True, "TP", px), ts)
+        return None
 
     def _book_tick_tp2_partial(self, position, px: float, ts: str):
         """Final tick-path tier, strict bar parity with Rule 4 (tiers stop at

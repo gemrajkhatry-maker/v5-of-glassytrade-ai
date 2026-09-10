@@ -585,9 +585,9 @@ class TestDoubleCloseGuardReset:
 
         pos = _make_position()
 
-        # First close
+        # First close returns the closing Fill; None now means "guarded skip".
         result1 = pm._execute_full_close(pos, ExitDecision(True, "SL", 90.0), "t1")
-        assert result1 is None
+        assert result1 is not None and result1.reason == "SL"
         assert len([e for e in emitted if isinstance(e, PositionClosed)]) == 1
 
         # Now call manage_exit — this RESETS _closed_ids
@@ -610,7 +610,8 @@ class TestDoubleCloseGuardReset:
 
         # Second close of the SAME position — should be blocked but isn't
         result2 = pm._execute_full_close(pos, ExitDecision(True, "SL", 90.0), "t2")
-        assert result2 is None
+        assert result2 is not None, "guard was reset by manage_exit, so re-close ran"
+
         closed_count = len([e for e in emitted if isinstance(e, PositionClosed)])
         assert closed_count == 2, (
             f"CRITICAL: Double-close guard failed — position was closed "

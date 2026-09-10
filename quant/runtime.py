@@ -147,7 +147,16 @@ def close_lingering_pyramids(pm, price: float, time_str: str, reason: str) -> in
     release all happen exactly as they do for the base position. A previous
     direct OMS close loop here skipped all four.
 
-    Returns the number of add-ons closed.
+    Add-ons are closed with ``count_as_trade=False``: a pyramid-only flatten
+    is bookkeeping on an already-realized round-trip, so it must not consume
+    the session's trade budget (``trades_today``) nor move the win/loss
+    streaks the consecutive-loss halt is built on — the same intent the old
+    direct-OMS loop encoded. Each add-on is closed inside its own try/except
+    so one failure cannot orphan the rest, and risk is released only for
+    add-ons that actually produced a fill (the double-close guard returns
+    ``None`` and must not be read as a close).
+
+    Returns the number of add-ons actually closed.
     """
     from quant.execution.exits import ExitDecision
 
@@ -158,22 +167,65 @@ def close_lingering_pyramids(pm, price: float, time_str: str, reason: str) -> in
     # ``_closed_ids``, so the second close would slip past the double-close
     # guard and double-count P&L/risk. Detaching keeps exactly one close per
     # add-on, all through the single release path.
+    #
+    # Detached order is kept so a failed add-on can be restored to the book
+    # (see the except branch) — dropping it would silently lose an open
+    # position the broker still holds. ``pyramid_count`` is intentionally not
+    # zeroed here: the authoritative value is re-derived from the surviving
+    # book at the end of the loop, and _execute_full_close already zeroes it
+    # per successful close.
     lingering = list(pm.pyramid_positions)
     pm.pyramid_positions = []
-    pm.pyramid_count = 0
     closed = 0
+    failed: list[object] = []
     for pyr_pos in lingering:
-        pm._execute_full_close(
-            pyr_pos, ExitDecision(True, reason, float(price)), time_str
-        )
+        # Same id accessor the release path uses (position_manager.py:260) so
+        # the two agree on what "id-less" means; an id-less add-on would raise
+        # ValueError out of _execute_full_close, which must not escape
+        # force_close_position. Skip it loudly instead.
+        pos_id = getattr(pyr_pos, "_id", None) or getattr(pyr_pos, "id", None)
+        if pos_id is None:
+            logger.error(
+                "❌ [EOD PYRAMID CLOSE] %s: add-on without an id cannot be closed "
+                "through the release path — skipped (type=%s)",
+                pm.symbol, type(pyr_pos).__name__,
+            )
+            failed.append(pyr_pos)
+            continue
+        try:
+            fill = pm._execute_full_close(
+                pyr_pos, ExitDecision(True, reason, float(price)), time_str,
+                count_as_trade=False,
+            )
+        except Exception:
+            # One bad add-on must not orphan the rest: log and continue.
+            logger.error(
+                "❌ [EOD PYRAMID CLOSE] %s: add-on %s failed to close — continuing",
+                pm.symbol, str(pos_id)[:8], exc_info=True,
+            )
+            failed.append(pyr_pos)
+            continue
+        if fill is None:
+            # Double-close guard skipped this add-on: nothing executed, so
+            # there is no fill pnl and no risk to release.
+            logger.warning(
+                "⚠️ [EOD PYRAMID CLOSE] %s: add-on %s already closed — skipped",
+                pm.symbol, str(pos_id)[:8],
+            )
+            continue
         closed += 1
         # Because we detached the add-on, _execute_full_close's own E11 sweep
         # did not see it — release its reserved aggregate risk here so the
         # portfolio ceiling is not leaked, exactly as the base close does.
-        risk_i = pm._pyramid_open_risk.pop(getattr(pyr_pos, "_id", None), 0.0)
+        risk_i = pm._pyramid_open_risk.pop(pos_id, 0.0)
         portfolio_risk = getattr(pm, "_portfolio_risk", None)
         if portfolio_risk is not None:
-            portfolio_risk.record_close(risk_i, float(pm.last_fill.pnl))
+            portfolio_risk.record_close(risk_i, float(fill.pnl))
+    # Leave the bookkeeping consistent: only add-ons that genuinely closed are
+    # gone. A failed one stays in the book so the next force-close/EOD pass
+    # retries it rather than silently dropping a live position.
+    pm.pyramid_positions = failed
+    pm.pyramid_count = len(failed)
     return closed
 
 
@@ -1434,16 +1486,20 @@ class QuantEngine:
             ts = datetime.now(tz=_IST).isoformat()
             if pos is not None:
                 pm._execute_full_close(pos, ExitDecision(True, reason, price), ts)
+                pyramid_closed = 0
             else:
                 # Base already gone but pyramid add-ons linger — close them
                 # through the single release path so the exit is stamped,
                 # logged and risk-released exactly like the base close.
-                close_lingering_pyramids(pm, price, ts, reason)
+                # The count is surfaced below: a lingering-add-on EOD flatten
+                # that closes nothing (all guarded/already gone) is otherwise
+                # indistinguishable in the log from one that closed three.
+                pyramid_closed = close_lingering_pyramids(pm, price, ts, reason)
             # Post-close bookkeeping — one shared release path.
             self._book_full_close()
             logger.warning(
-                "🔒 [EOD FORCE CLOSE] %s reason=%s price=%.2f",
-                self.symbol, reason, price,
+                "🔒 [EOD FORCE CLOSE] %s reason=%s price=%.2f pyramids_closed=%d",
+                self.symbol, reason, price, pyramid_closed,
             )
             return True
 

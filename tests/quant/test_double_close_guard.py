@@ -58,9 +58,10 @@ def test_double_close_guard():
 
     pos = _make_position()
 
-    # First close should succeed
+    # First close should succeed and return the closing Fill (money-path
+    # consumers key the risk release off it; None means "guarded skip").
     result1 = pm._execute_full_close(pos, ExitDecision(True, "SL", 90.0), "t1")
-    assert result1 is None
+    assert result1 is not None and result1.reason == "SL"
     assert len([e for e in emitted if isinstance(e, PositionClosed)]) == 1
 
     # Second close must be skipped (double-close guard)
