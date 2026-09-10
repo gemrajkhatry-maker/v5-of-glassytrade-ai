@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from quant.contracts.constants import FALLBACK_EQUITY
 from quant.contracts.instrument_registry import is_option_contract
 from quant.contracts.vocabulary import (
     absorption_direction,
@@ -76,9 +77,9 @@ def _format_scanning_rationale(
     else:
         phase_label = "Session"
 
-    if any(p in phase for p in ("OPENING", "PRE_OPEN")):
+    if is_opening_phase(phase):
         return f"Opening 15m session warmup on {symbol}; accumulating initial balance."
-    if any(p in phase for p in ("CLOSE", "POST_MARKET")):
+    if is_closing_phase(phase):
         return f"Market close protection active on {symbol}; standing down."
 
     if curr_price > vah:
@@ -371,7 +372,7 @@ class TimesFMScanningAgent:
                 from quant.decision.timesfm_sizing import TimesFMPositionSizer
                 sizer = TimesFMPositionSizer()
                 sizing_res = sizer.compute_size(
-                    equity=float(getattr(ctx, "equity", None) or 100000.0),
+                    equity=float(getattr(ctx, "equity", None) or FALLBACK_EQUITY),
                     entry=curr_price,
                     side=direction,
                     forecast=forecast,

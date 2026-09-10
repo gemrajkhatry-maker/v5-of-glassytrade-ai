@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from quant.contracts.constants import FALLBACK_EQUITY
 from quant.decision.context import DecisionContext
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,7 @@ def context_to_snapshot(ctx: DecisionContext) -> dict:
         "position_tp": float(ctx.position_tp or 0.0),
         "position_bars_held": int(ctx.position_bars_held or 0),
         "cooldown_remaining_sec": int(ctx.cooldown_remaining_sec or 0),
-        "equity": float(ctx.equity or 200000.0),
+        "equity": float(ctx.equity or FALLBACK_EQUITY),
         "risk_per_trade_pct": float(ctx.risk_per_trade_pct or 0.01),
         "tick_size": float(ctx.tick_size or 0.05),
         "data_quality": data_quality_str,
