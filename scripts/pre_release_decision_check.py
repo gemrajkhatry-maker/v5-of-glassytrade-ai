@@ -287,6 +287,151 @@ def check_shared_engine_end_to_end():
     )
 
 
+def check_pyramid_close_routes_through_release_path():
+    """No close may bypass PositionManager._execute_full_close.
+
+    D-3 (2026-09-10 audit): runtime.force_close_position closed lingering
+    pyramid add-ons with a direct ``pm._oms.close(...)`` loop, skipping the
+    central exit_source stamp, the [POSITION CLOSED] log, the double-close
+    guard and the id-validity check. The module documents
+    _execute_full_close as the ONLY full-close release path.
+    """
+    src = _read("quant/runtime.py")
+    # A direct OMS close outside position_manager is the bypass signature:
+    # it skips the exit_source stamp, the [POSITION CLOSED] log, the
+    # double-close guard and the id-validity check.
+    direct = re.findall(r"\._oms\.close\(", src)
+    _add(
+        "A. Flow authority", "every full close routes through the single release path",
+        not direct,
+        f"direct _oms.close( ) call sites in runtime.py = {len(direct)} (must be 0)",
+    )
+
+
+def check_model_risk_failure_observable():
+    """A raising TimesFMRiskAuthority must not silently disable all model exits.
+
+    D-2 (2026-09-10 audit): the ~35-line model-exit block in
+    ExitEngine.evaluate sits inside ``except Exception as exc: pass``. Any
+    exception disables the dynamic VaR stop, the trajectory take-profit, the
+    velocity-decay exit AND the quantile stop ratchet for that bar, with no
+    log and an unused ``exc``.
+    """
+    src = _read("quant/execution/exits.py")
+    # Locate the swallow that wraps the model-exit call.
+    idx = src.find("self._timesfm_risk.evaluate_exit(")
+    ok = False
+    detail = "evaluate_exit call site not found"
+    if idx > 0:
+        tail = src[idx:idx + 2500]
+        m = re.search(r"except Exception as exc:\s*\n\s*(#.*\n\s*)?pass", tail)
+        if m:
+            detail = "model-exit block swallowed with bare 'except Exception: pass'"
+        else:
+            # Acceptable: the handler logs (logger.*) or re-raises.
+            if re.search(r"except Exception[^\n]*:\s*\n\s*(#.*\n\s*)*(logger\.|raise)", tail):
+                ok = True
+                detail = "model-risk failure is logged or re-raised"
+            else:
+                detail = "model-exit handler not recognised — inspect exits.py manually"
+    _add(
+        "A. Flow authority", "model-risk failure is observable, not swallowed",
+        ok, detail,
+    )
+
+
+def check_engine_dedup_thread_safe():
+    """Shared-engine per-bar dedup must survive concurrent consumers.
+
+    D-10 (2026-09-10 audit): add_context() dedups with check-then-act and no
+    lock. The advisor worker thread and the strategy engine thread share ONE
+    TimesFMEngine in TIMESFM_END_TO_END, so both can pass the check and append
+    -> the model window contains the bar twice (reproduced, twice).
+    """
+    import threading
+
+    from quant.bars import Bar
+    from quant.decision.context import DecisionContext
+    from quant.decision.timesfm_engine import TimesFMEngine
+
+    engine = TimesFMEngine(target_horizon=8)
+    symbol = "NIFTY"
+    bar = Bar("2026-09-10T10:00:00", 100, 101, 99, 100.5, 1000, 100)
+    ctx = DecisionContext(symbol=symbol, bar=bar, bar_index=42)
+
+    # Adversarial scheduler: both consumers clear the dedup check together.
+    class _Rendezvous(dict):
+        def __init__(self):
+            super().__init__()
+            self._barrier = threading.Barrier(2, timeout=5)
+
+        def get(self, key, default=None):
+            value = super().get(key, default)
+            try:
+                self._barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+            return value
+
+    engine._last_context_bar = _Rendezvous()
+
+    def consumer():
+        try:
+            engine.add_context(ctx)
+        except Exception:
+            pass
+
+    ts = [threading.Thread(target=consumer) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(timeout=10)
+
+    depth = len(engine._price_buffers[symbol])
+    _add(
+        "B. Information flow", "shared engine dedup survives concurrent consumers",
+        depth == 1,
+        f"buffer depth after one bar / two concurrent consumers = {depth}",
+    )
+
+
+def check_no_va_fabrication_on_empty_profile():
+    """An absent volume profile must not fabricate a tradeable setup.
+
+    D-4 (2026-09-10 audit): with poc/vah/val all zero the scanner fell back to
+    curr_price for vah and val, so the VA-fade conditions became trivially true
+    and it emitted ENTER_LONG (reproduced end-to-end: approved, entry=100.0
+    sl=99.45 tp=101.5). The deterministic path correctly returns NO_EDGE on the
+    same context. A profile-less bar must never produce a directional action.
+    """
+    import numpy as np
+
+    from quant.bars import Bar
+    from quant.decision.context import DecisionContext
+    from quant.decision.timesfm_agents import TimesFMForecast, TimesFMScanningAgent
+
+    bar = Bar("2026-09-10T10:00:00", 100.0, 101.0, 99.0, 100.0, 100, 100)
+    ctx = DecisionContext(
+        symbol="NIFTY", bar=bar, bar_index=20, session_open=True,
+        warmup_complete=True, session_phase="PRIMARY",
+        poc=0.0, vah=0.0, val=0.0, cvd_slope=1.0, allow_reversion=True,
+    )
+    # Bullish model projection: the strongest case for a fabricated fade.
+    p50 = np.linspace(100.0, 101.5, 32, dtype=np.float32)
+    fc = TimesFMForecast(
+        horizon=32, p50_path=p50, p10_path=p50 - 0.5, p90_path=p50 + 0.5,
+        q_spread=1.0, mean_forecast=float(p50[-1]), pct_change=0.015,
+        forecast_steps=["LONG"] * 32, curr_price=100.0, lat_ms=1.0,
+    )
+    res = TimesFMScanningAgent(target_horizon=32).evaluate(ctx, fc)
+    action = res.get("action", "FLAT")
+    _add(
+        "C. Decision behaviour", "empty volume profile cannot fabricate an entry",
+        action == "FLAT",
+        f"action={action}, setup={res.get('setup')} (must be FLAT when vah/val are 0)",
+    )
+
+
 # ---------------------------------------------------------------------------
 # D. Test suites
 # ---------------------------------------------------------------------------
@@ -336,6 +481,11 @@ def main() -> int:
         check_data_quality_gate_reachable,
         check_scanner_absorption_direction,
         check_shared_engine_end_to_end,
+        # 2026-09-10 audit additions — the blocking defects D-2, D-3, D-4, D-10.
+        check_pyramid_close_routes_through_release_path,
+        check_model_risk_failure_observable,
+        check_engine_dedup_thread_safe,
+        check_no_va_fabrication_on_empty_profile,
     ):
         try:
             fn()
