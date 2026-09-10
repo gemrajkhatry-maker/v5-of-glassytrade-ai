@@ -23,15 +23,6 @@ def check_spread_blowout(
     return None
 
 
-def check_stop_loss(position: Position, low: float, high: float) -> ExitDecision | None:
-    """Rule 2: hard stop-loss."""
-    sl = float(position.order.signal.sl)
-    long = position.size > 0
-    if (long and low <= sl) or (not long and high >= sl):
-        return ExitDecision(True, "SL", sl)
-    return None
-
-
 def check_cvd_kill(position: Position, dto: dict, cvd_kill_threshold: float) -> ExitDecision | None:
     """Rule 3: CVD kill — thesis invalidated by order flow."""
     slope = float(dto.get("cvdSlope") or 0.0)

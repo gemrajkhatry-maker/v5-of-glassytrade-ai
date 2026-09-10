@@ -112,3 +112,56 @@ def test_tick_and_bar_paths_agree_on_the_breached_stop():
 
     assert d_bar.reason == "TRAIL"
     assert tick_reason == "DETERMINISTIC:TRAIL"
+
+
+def test_protective_stop_wins_when_one_bar_satisfies_both():
+    """D-13 follow-up: the Rule-2 reorder made the tightest protective stop
+    outrank the Rule-4 TP tiers inside a SINGLE bar. Pin that intent (it
+    matches the tick path, which checks the merged stop first): a bar that
+    satisfies both books the PROTECTIVE reason, at the protective price."""
+    from quant.decision.signal_builder import Signal
+    from quant.execution.exits import ExitEngine, _Trail
+    from quant.execution.order import Order, Position
+
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=95.0, tp=110.0,
+                 rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
+    pos = Position(order=Order(sig, 10.0), open_price=100.0, open_time="t0", size=10.0)
+    eng = ExitEngine()
+    eng._trail[pos._id] = _Trail(active=True, stop=100.8)
+
+    # One bar: high 111 reaches TP1 (110) AND low 99.9 breaches the trail.
+    d = eng.evaluate(pos, bar_close=100.0, bar_high=111.0, bar_low=99.9, bar_index=5)
+    assert d.should_exit and d.reason == "TRAIL"
+    assert d.close_price == 100.8
+    assert d.partial_fraction is None       # full close, not a TP1 partial
+    assert d.trail_stop == 100.8
+
+    # Same shape with a pre-armed breakeven floor and no trail.
+    pos2 = Position(order=Order(sig, 10.0), open_price=100.0, open_time="t0", size=10.0)
+    eng2 = ExitEngine()
+    eng2._breakeven[pos2._id] = 100.0
+    d2 = eng2.evaluate(pos2, bar_close=100.0, bar_high=121.0, bar_low=99.0, bar_index=5)
+    assert d2.should_exit and d2.reason == "BREAKEVEN"
+    assert d2.close_price == 100.0
+    assert d2.partial_fraction is None
+    # A breakeven floor is not a trailing stop: the label stays clean.
+    assert d2.trail_stop is None
+
+
+def test_tp_still_books_when_bar_does_not_breach_the_protective_stop():
+    """Regression pin: reaching TP without breaching the protective stop must
+    still book the tier (the Rule-2 reorder did not suppress Rule 4)."""
+    from quant.decision.signal_builder import Signal
+    from quant.execution.exits import ExitEngine
+    from quant.execution.order import Order, Position
+
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=95.0, tp=110.0,
+                 rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
+    pos = Position(order=Order(sig, 10.0), open_price=100.0, open_time="t0", size=10.0)
+    eng = ExitEngine()
+    eng._breakeven[pos._id] = 100.0          # armed floor, low stays above it
+
+    d = eng.evaluate(pos, bar_close=110.0, bar_high=111.0, bar_low=103.0, bar_index=5)
+    assert d.should_exit and d.reason == "TP1"
+    assert d.close_price == 110.0
+    assert d.partial_fraction == 0.5

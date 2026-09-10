@@ -142,7 +142,7 @@ class ExitEngine:
     ) -> ExitDecision:
         global MODEL_RISK_FAILURES
         from quant.execution.exit_checks import (
-            check_spread_blowout, check_stop_loss, check_cvd_kill,
+            check_spread_blowout, check_cvd_kill,
             check_take_profit_tiers, check_trailing_stop, check_time_stop,
         )
 
@@ -225,11 +225,24 @@ class ExitEngine:
         # so a bar sweeping both the SL and the trail booked SL at the worse
         # price while the identical tick breach booked TRAIL. One resolver, one
         # price, one exit_source for the same economic event.
+        #
+        # PRECEDENCE (pinned by tests/quant/execution/test_exits_trailing.py:
+        # test_protective_stop_wins_when_one_bar_satisfies_both):
+        # when a single bar's range satisfies BOTH this protective stop and a TP
+        # tier (Rule 4), the PROTECTIVE STOP wins. This matches the tick path
+        # (PositionManager.manage_tick_exit checks the merged stop before the
+        # tier targets). A bar that reaches TP without breaching the protective
+        # stop still books the TP tier — the reorder does not suppress TPs.
         be_floor = self._breakeven.get(position._id)
         tr = self._trail.get(position._id)
         trail_stop = tr.stop if (tr and tr.active) else None
         protective = float(sl)
         protective_reason = "SL"
+        # Tie-break is deterministic: strict `> <` keeps the EARLIER candidate,
+        # so trail beats an exactly-equal breakeven. The tick counterpart
+        # (quant/position_manager.py, manage_tick_exit: `if trail_stop is not
+        # None: ... elif be_floor is not None`) resolves the same tie the same
+        # way — trail first — so both paths label a tie TRAIL.
         if trail_stop is not None:
             if (long and trail_stop > protective) or (not long and trail_stop < protective):
                 protective, protective_reason = float(trail_stop), "TRAIL"
@@ -240,7 +253,12 @@ class ExitEngine:
         breached = (long and low <= protective) or (not long and high >= protective)
         if breached and protective_reason != "SL":
             self.last_exit_source = f"DETERMINISTIC:{protective_reason}"
-            return ExitDecision(True, protective_reason, protective, trail_stop=protective)
+            # trail_stop labels the ACTIVE trailing stop only. A breakeven floor
+            # is not a trail, and an SL is the raw frozen stop, so both pass
+            # None here (no production consumer reads it for those reasons —
+            # the reason string carries the label).
+            label = protective if protective_reason == "TRAIL" else None
+            return ExitDecision(True, protective_reason, protective, trail_stop=label)
         if breached:
             self.last_exit_source = "DETERMINISTIC:SL"
             return ExitDecision(True, "SL", float(sl))
