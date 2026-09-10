@@ -285,7 +285,10 @@ class TimesFMTradingStrategy:
         # bar_index is never served — Task 4 established strict monotonic bar
         # semantics, so a cached bar must match exactly.
         if self._forecast_provider is None:
-            cached = self._engine.last_forecast_for(str(ctx.symbol or "UNKNOWN"))
+            cached = self._engine.last_forecast_for(
+                str(ctx.symbol or "UNKNOWN"),
+                identity=self._engine._observation_identity(ctx),
+            )
             if cached is not None:
                 cached_bar = int(getattr(cached, "asof_bar", -1))
                 if cached_bar >= 0 and cached_bar == bar_index:
@@ -364,6 +367,7 @@ class TimesFMTradingStrategy:
                 str(ctx.symbol or "UNKNOWN"),
                 int(getattr(ctx, "bar_index", -1) or -1),
                 fc,
+                identity=self._engine._observation_identity(ctx),
             )
             return fc
         except Exception as exc:

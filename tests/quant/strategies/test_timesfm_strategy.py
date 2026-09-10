@@ -265,3 +265,71 @@ def test_new_bar_after_entry_order_infers_again():
     assert fake.predict.call_count == 2, (
         f"new bar should infer exactly once more, got {fake.predict.call_count}"
     )
+
+
+def test_two_micro_bars_sharing_bar_index_do_not_share_a_forecast():
+    """Finding A (round 2): runtime._bar_index is only bumped in _on_bar_closed,
+    so the micro-trigger path (live with CANDLE_TIMEFRAME_MINUTES=5) evaluates
+    several DISTINCT micro-bars under one bar_index. bar_index alone is not a
+    sufficient identity: the cache must not serve the first micro-bar's
+    forecast (built from 100.0) for the second micro-bar (110.0), because that
+    stale forecast feeds SessionRisk.position_size and the model sizing path.
+    """
+    import quant.decision.timesfm_engine as eng_mod
+    from quant.decision.timesfm_engine import TimesFMEngine
+
+    horizon = 8
+    fake = _fake_model(horizon)
+    engine = TimesFMEngine(target_horizon=horizon)
+    original = eng_mod.get_timesfm_model
+    eng_mod.get_timesfm_model = lambda *a, **k: fake
+    try:
+        strategy = TimesFMTradingStrategy(target_horizon=horizon, engine=engine)
+        # Same 5-minute window => same bar_index=7; consecutive micro-bars.
+        first = _micro_ctx("2026-09-10T10:00:00+05:30", 100.0)
+        second = _micro_ctx("2026-09-10T10:01:00+05:30", 110.0)
+        f1 = strategy._compute_forecast(first)
+        f2 = strategy._compute_forecast(second)
+    finally:
+        eng_mod.get_timesfm_model = original
+
+    assert fake.predict.call_count == 2, (
+        f"two distinct micro-bars must each infer, got {fake.predict.call_count}"
+    )
+    assert f1.curr_price == 100.0
+    assert f2.curr_price == 110.0, (
+        f"second micro-bar was served a stale forecast at {f2.curr_price}"
+    )
+
+
+def test_same_micro_bar_within_one_bar_index_still_shares_one_forecast():
+    """The identity fix must not break the D-11 win: SAME observation (same bar
+    time and close) at the same bar_index still reuses the one inference."""
+    import quant.decision.timesfm_engine as eng_mod
+    from quant.decision.timesfm_engine import TimesFMEngine
+
+    horizon = 8
+    fake = _fake_model(horizon)
+    engine = TimesFMEngine(target_horizon=horizon)
+    original = eng_mod.get_timesfm_model
+    eng_mod.get_timesfm_model = lambda *a, **k: fake
+    try:
+        strategy = TimesFMTradingStrategy(target_horizon=horizon, engine=engine)
+        first = _micro_ctx("2026-09-10T10:00:00+05:30", 100.0)
+        again = _micro_ctx("2026-09-10T10:00:00+05:30", 100.0)
+        strategy._compute_forecast(first)
+        strategy._compute_forecast(again)
+    finally:
+        eng_mod.get_timesfm_model = original
+
+    assert fake.predict.call_count == 1
+
+
+def _micro_ctx(bar_time: str, price: float, bar_index: int = 7):
+    from quant.bars import Bar
+
+    bar = Bar(bar_time, price, price + 1, price - 1, price, 100, 100)
+    return DecisionContext(symbol="NIFTY", bar=bar, bar_index=bar_index,
+                           session_open=True, warmup_complete=True,
+                           session_phase="PRIMARY", poc=price + 1, vah=price + 1.5,
+                           val=price - 1, cvd_slope=1.0, time_str=bar_time)

@@ -113,7 +113,13 @@ class TimesFMEngine:
         # strategy both need a forecast for the same bar; without this they each
         # ran model.predict, doubling latency and allowing the two payloads to
         # disagree on the very input the decision was made from.
-        self._forecast_cache: Dict[str, Tuple[int, Any]] = {}
+        # Tuple shape: (bar_index, forecast, identity). ``bar_index`` alone is
+        # NOT a sufficient identity: runtime._bar_index only advances in
+        # _on_bar_closed, so every micro-bar inside one 5-minute window shares
+        # a bar_index. ``identity`` (bar time + observed close) distinguishes
+        # distinct market observations within one bar index, so a forecast
+        # built from bar A's price is never served for bar B.
+        self._forecast_cache: Dict[str, Tuple[int, Any, Optional[str]]] = {}
         # The advisor worker and the strategy engine threads share this cache;
         # read-modify-write of a per-bar forecast must be atomic.
         self._forecast_lock = threading.Lock()
@@ -140,18 +146,64 @@ class TimesFMEngine:
         """Return True if model is loaded and ready for inference."""
         return self._model_loaded
 
-    def last_forecast_for(self, symbol: str) -> Optional[Any]:
+    @staticmethod
+    def _observation_identity(ctx: Any) -> Optional[str]:
+        """Cheap identity of the market observation a forecast was built from.
+
+        ``bar_index`` alone is not a sufficient cache identity:
+        ``runtime._bar_index`` only advances in ``_on_bar_closed``, so every
+        micro-bar inside one 5-minute window is evaluated under the SAME
+        bar_index while carrying a DIFFERENT close. Reusing on bar_index alone
+        would serve a forecast built at 100.0 for an observation at 110.0, and
+        that stale forecast feeds SessionRisk.position_size / the model sizing
+        path — a risk decision on a price the market has left.
+
+        The bar time is the natural discriminator (BarAggregator stamps each
+        micro-bar); the observed close is always folded in so a forecast built
+        from a different price can never be served even when the bar time is
+        empty. Returns None only when neither is available.
+        """
+        bar = getattr(ctx, "bar", None)
+        bar_time = str(getattr(ctx, "time_str", "") or "")
+        if not bar_time:
+            bar_time = str(getattr(bar, "time", "") or "")
+        close = getattr(bar, "close", None)
+        if close is None:
+            return bar_time or None
+        try:
+            close_repr = repr(float(close))
+        except (TypeError, ValueError):
+            return bar_time or None
+        if not bar_time:
+            return f"close:{close_repr}"
+        return f"{bar_time}|{close_repr}"
+
+    def last_forecast_for(
+        self, symbol: str, identity: Optional[str] = None
+    ) -> Optional[Any]:
         """Forecast computed for the current bar, or None.
 
         The advisor's ``analyze`` records the forecast it inferred here so the
         E2E strategy can reuse it for the same bar instead of paying a second
-        inference. A forecast stamped with a different ``bar_index`` than the
-        caller's must NOT be reused (strict monotonic bar semantics).
+        inference. A forecast stamped with a different ``bar_index`` — or, when
+        ``identity`` is supplied, a different market observation within the same
+        bar_index (micro-bars) — must NOT be reused (strict monotonic bar
+        semantics).
         """
         entry = self._forecast_cache.get(str(symbol))
-        return entry[1] if entry is not None else None
+        if entry is None:
+            return None
+        if identity is not None and entry[2] != identity:
+            return None
+        return entry[1]
 
-    def record_forecast(self, symbol: str, bar_index: int, forecast: Any) -> None:
+    def record_forecast(
+        self,
+        symbol: str,
+        bar_index: int,
+        forecast: Any,
+        identity: Optional[str] = None,
+    ) -> None:
         """Record the forecast computed for ``bar_index`` so the other consumer
         on the shared engine reuses it instead of re-inferring.
 
@@ -160,9 +212,11 @@ class TimesFMEngine:
         records what it inferred so a later ``analyze`` reuses it. Whichever
         consumer runs first owns the bar's one inference.
 
-        A forecast stamped with a different ``bar_index`` is never served —
-        Task 4 established strict monotonic bar semantics. Recording a new bar
-        always wins; a lagging writer must not overwrite a newer bar's forecast.
+        A forecast stamped with an OLDER ``bar_index`` is never allowed to
+        overwrite a newer bar's forecast. Within the same bar_index a different
+        ``identity`` is a newer micro-bar observation and legitimately replaces
+        the previous one. When ``identity`` is omitted the caller accepts
+        bar_index-level identity only (legacy/ad-hoc callers).
         """
         key = str(symbol)
         try:
@@ -175,7 +229,7 @@ class TimesFMEngine:
             existing = self._forecast_cache.get(key)
             if existing is not None and int(existing[0]) > new_bar:
                 return
-            self._forecast_cache[key] = (new_bar, forecast)
+            self._forecast_cache[key] = (new_bar, forecast, identity)
 
     @staticmethod
     def health_check() -> Dict[str, Any]:
@@ -258,6 +312,7 @@ class TimesFMEngine:
         symbol = str(ctx.symbol or "DEFAULT")
         price = float(ctx.bar.close if ctx.bar else (ctx.state.poc if ctx.state else 100.0))
         bar_index = int(getattr(ctx, "bar_index", -1) or -1)
+        identity = self._observation_identity(ctx)
 
         with self._buffer_lock:
             buf = self._price_buffers[symbol]
@@ -267,13 +322,23 @@ class TimesFMEngine:
             # lesser means a lagging consumer (advisor queue) is replaying a bar
             # the engine thread has already passed. Both must be dropped, or
             # the model window sees duplicate/out-of-order prices.
+            # EXCEPTION (Finding A): the micro-trigger path evaluates several
+            # DISTINCT micro-bars under one bar_index. Those carry a different
+            # observation identity (bar time/close), so they are a genuinely
+            # newer observation and must be appended — otherwise the model
+            # keeps inferring on a price the market has already left.
             # bar_index < 0 means the caller did not stamp one (unit tests,
             # ad-hoc probes) — append unchanged so those keep working.
             if bar_index >= 0:
                 last = self._last_context_bar.get(symbol)
-                if last is not None and bar_index <= last:
-                    return self._context_window(buf)
-                self._last_context_bar[symbol] = bar_index
+                if last is not None:
+                    last_bar = int(last[0])
+                    last_identity = last[1]
+                    if bar_index < last_bar:
+                        return self._context_window(buf)
+                    if bar_index == last_bar and identity == last_identity:
+                        return self._context_window(buf)
+                self._last_context_bar[symbol] = (bar_index, identity)
 
             buf.append(price)
             self._live_bar_counts[symbol] += 1
@@ -300,6 +365,18 @@ class TimesFMEngine:
         # and live event counts stay continuous even during opening/cooldown phases.
         context_prices, context_bars_used = self.add_context(ctx)
         curr_price = context_prices[-1]
+
+        # Cache-key decision (Finding B, round 2): on the option+underlying path
+        # runtime._build_context stamps the STRATEGY context with the underlying
+        # symbol, while the advisor context is built with the OPTION symbol. The
+        # two are therefore distinct contexts for one bar and the keys legitimately
+        # differ. We do NOT try to bridge them: the cache stays keyed by symbol
+        # (+ bar_index + observation identity), so each consumer gets a forecast
+        # for ITS OWN context and neither is ever served the other's prices. That
+        # keeps keying CONSISTENT and safe if the branch is ever enabled.
+        # In the current coordinator `_underlying_gateway` is hard-coded None
+        # (multi_engine: every instrument trades independently), so only the
+        # direct/futures path runs and this branch is inert.
         events_processed = self._live_bar_counts.get(symbol, 0)
 
         # Session Gate: check if new entries are allowed at this time/market
@@ -425,9 +502,14 @@ class TimesFMEngine:
         # instead of a second predict. Guarded on exact bar_index equality —
         # strict monotonic bar semantics forbid serving another bar's forecast.
         bar_index_for_reuse = int(getattr(ctx, "bar_index", -1) or -1)
+        # Identity of THIS observation. bar_index alone is not enough: the
+        # micro-trigger path evaluates several distinct micro-bars under one
+        # bar_index, so both the reuse lookup and the record must be keyed by
+        # the bar time / observed close too, or a stale forecast is served.
+        observation_identity = self._observation_identity(ctx)
         reused: Optional[Any] = None
         if bar_index_for_reuse >= 0:
-            candidate = self.last_forecast_for(symbol)
+            candidate = self.last_forecast_for(symbol, observation_identity)
             if candidate is not None and int(getattr(candidate, "asof_bar", -1)) == bar_index_for_reuse:
                 reused = candidate
 
@@ -493,7 +575,9 @@ class TimesFMEngine:
         # the very input the decision was made from. The stamp also keeps
         # runtime._fresh_forecast working.
         forecast.asof_bar = bar_index_for_reuse
-        self.record_forecast(symbol, bar_index_for_reuse, forecast)
+        self.record_forecast(
+            symbol, bar_index_for_reuse, forecast, identity=observation_identity
+        )
 
         # 3. Dynamic Role Switch: Route to Proper Specialized Agent
         # The advisor is UI-only. In E2E mode the TimesFM model is the entry
