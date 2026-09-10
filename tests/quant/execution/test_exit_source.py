@@ -103,3 +103,26 @@ def test_model_risk_failure_is_logged_and_counted(caplog):
     # ...but the failure is now counted and logged, not swallowed.
     assert exits_mod.MODEL_RISK_FAILURES == before + 1
     assert any("TimesFM risk authority failed" in r.message for r in caplog.records)
+
+
+def test_displayed_stop_is_the_enforced_stop_after_a_ratchet():
+    """D-7(c): the portfolio row must show the stop ExitEngine will enforce,
+    not the stop originally submitted. Folding a StopMoved ratchet through
+    project_state must move the displayed stopLoss."""
+    from quant.events import StopMoved
+    from quant.state import project_state
+    from quant.state_machine import EngineState, PositionState
+    from quant.transitions import apply_event
+
+    # Long entered at 100 with submitted SL 99.0.
+    state = EngineState(symbol="SYM").with_position(
+        PositionState(id="p1", entry=100.0, size=10.0, sl=99.0, tp=103.0, side="LONG")
+    )
+    displayed_before = project_state(state).portfolio["positions"][0]["stopLoss"]
+    assert displayed_before == 99.0
+
+    # The engine ratchets the enforced stop to breakeven; the row must follow.
+    state = apply_event(state, StopMoved(symbol="SYM", time="t1", old_sl=99.0,
+                                         new_sl=100.5, reason="TRAIL_RATCHET"))
+    displayed_after = project_state(state).portfolio["positions"][0]["stopLoss"]
+    assert displayed_after == 100.5

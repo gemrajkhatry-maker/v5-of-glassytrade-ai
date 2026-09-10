@@ -362,3 +362,77 @@ class TestStateTransitions:
         
         assert new_state.position == pos  # Position preserved
         assert new_state.risk.daily_pnl == -500.0  # Risk updated
+
+
+def test_stop_moved_folds_into_the_projected_stop():
+    """D-7: StopMoved was journaled but never folded, so the UI showed the
+    submitted stop while ExitEngine enforced the ratcheted one."""
+    from quant.state_machine import EngineState, PositionState
+    from quant.events import StopMoved
+    from quant.transitions import apply_event
+
+    state = EngineState(symbol="SYM")
+    state = state.with_position(
+        PositionState(id="p1", entry=100.0, size=10.0, sl=99.0, tp=103.0, side="LONG")
+    )
+    assert state.position.sl == 99.0
+
+    state = apply_event(state, StopMoved(symbol="SYM", time="t1", old_sl=99.0,
+                                         new_sl=100.5, reason="TRAIL_RATCHET"))
+    assert state.position.sl == 100.5
+
+    # Stale/replayed moves must not loosen an already-ratcheted stop.
+    state = apply_event(state, StopMoved(symbol="SYM", time="t2", old_sl=100.5,
+                                         new_sl=98.0, reason="TRAIL_RATCHET"))
+    assert state.position.sl == 100.5
+
+
+def test_stop_moved_folds_into_pyramids_and_only_tightens():
+    """D-7(b): the fold also covers pyramid legs, is monotonic per leg, and a
+    short's stop only tightens downward."""
+    from quant.state_machine import EngineState, PositionState
+    from quant.events import PositionOpened, StopMoved
+    from quant.transitions import apply_event
+
+    base = PositionState(id="p1", entry=100.0, size=10.0, sl=100.0, tp=103.0, side="LONG")
+    pyr = PositionState(id="p2", entry=101.0, size=5.0, sl=98.0, tp=103.0,
+                        side="LONG", is_pyramid=True, pyramid_level=1)
+    state = EngineState(symbol="SYM").with_position(base)
+    state = apply_event(state, PositionOpened(symbol="SYM", time="t0", position=pyr))
+
+    # A move that does not tighten the base still tightens the loose pyramid.
+    state = apply_event(state, StopMoved(symbol="SYM", time="t1", old_sl=98.0,
+                                         new_sl=99.5, reason="PYRAMID_RATCHET"))
+    assert state.position.sl == 100.0
+    assert state.pyramids[0].sl == 99.5
+
+    # Monotonic: a stale loosening move is ignored on the pyramid too.
+    state = apply_event(state, StopMoved(symbol="SYM", time="t2", old_sl=99.5,
+                                         new_sl=98.0, reason="TRAIL_RATCHET"))
+    assert state.pyramids[0].sl == 99.5
+
+    # SHORT: only a *lower* stop is a tightening move.
+    short = PositionState(id="s1", entry=100.0, size=-10.0, sl=101.0, tp=97.0, side="SHORT")
+    sstate = EngineState(symbol="SYM").with_position(short)
+    sstate = apply_event(sstate, StopMoved(symbol="SYM", time="t3", old_sl=101.0,
+                                           new_sl=102.0, reason="TRAIL_RATCHET"))
+    assert sstate.position.sl == 101.0
+    sstate = apply_event(sstate, StopMoved(symbol="SYM", time="t4", old_sl=101.0,
+                                           new_sl=100.0, reason="TRAIL_RATCHET"))
+    assert sstate.position.sl == 100.0
+
+
+def test_stop_moved_does_not_resurrect_a_closed_position():
+    """A stale StopMoved after the position closed must be a no-op, not an
+    invented position."""
+    from quant.state_machine import EngineState
+    from quant.events import StopMoved
+    from quant.transitions import apply_event
+
+    state = apply_event(
+        EngineState(symbol="SYM"),
+        StopMoved(symbol="SYM", time="t1", old_sl=99.0, new_sl=100.5,
+                  reason="TRAIL_RATCHET"),
+    )
+    assert state.position is None
+    assert state == EngineState(symbol="SYM")

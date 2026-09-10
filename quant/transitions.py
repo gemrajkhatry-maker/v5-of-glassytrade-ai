@@ -32,6 +32,7 @@ from quant.events import (
     PositionClosed,
     PositionReduced,
     RiskUpdated,
+    StopMoved,
 )
 
 
@@ -254,6 +255,42 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
             state.without_position(),
             realized_pnl=realized,
             closed_trades=new_closed,
+        )
+
+    elif isinstance(event, StopMoved):
+        # Fold the protective-stop move into the position it belongs to.
+        # StopMoved is emitted on every ratchet (breakeven arm, trail ratchet,
+        # pyramid base-SL ratchet) but was never applied to the event-fold
+        # authority, so the portfolio row and the operator's displayed Trail SL
+        # kept the SUBMITTED stop while ExitEngine enforced the tighter
+        # ratcheted one — three different stops for one trade.
+        def _tighten(pos):
+            if pos is None:
+                return None, False
+            new_sl = float(event.new_sl)
+            if new_sl <= 0:
+                return pos, False
+            long = str(pos.side).upper() == "LONG"
+            # Monotonic: a move may only tighten, never loosen, so a replayed
+            # or stale move cannot widen an already-ratcheted stop.
+            if (long and new_sl <= float(pos.sl)) or (not long and new_sl >= float(pos.sl)):
+                return pos, False
+            return replace(pos, sl=new_sl), True
+
+        new_pos, base_changed = _tighten(state.position)
+        new_pyramids = []
+        pyramid_changed = False
+        for p in state.pyramids:
+            tightened, did = _tighten(p)
+            new_pyramids.append(tightened)
+            pyramid_changed = pyramid_changed or did
+        if not base_changed and not pyramid_changed:
+            return state
+        return replace(
+            state,
+            position=new_pos if base_changed else state.position,
+            pyramids=tuple(new_pyramids) if pyramid_changed else state.pyramids,
+            sequence=state.sequence + 1,
         )
 
     elif isinstance(event, RiskUpdated):
