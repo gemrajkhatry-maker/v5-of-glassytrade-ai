@@ -1052,7 +1052,7 @@ class QuantEngine:
                 and _ist is not None and _ist.date() == self._contract_expiry
             )
             # If strategy provides a TimesFM forecast, pass it for dynamic Kelly & VaR sizing
-            tfm_fc = getattr(self._strategy, "get_latest_forecast", lambda s: None)(self.symbol)
+            tfm_fc = self._fresh_forecast()
             quantity = clamp_quantity(
                 self._risk.position_size(
                     signal.entry, signal.sl, lot_size=self._oms.lot_size,
@@ -1417,6 +1417,24 @@ class QuantEngine:
             )
             return True
 
+    def _fresh_forecast(self):
+        """Return the cached TimesFM forecast unless it is stale (>1 bar old).
+
+        Forecasts stamped with ``asof_bar < 0`` predate freshness tracking
+        and pass through unchanged. Stale forecasts never reach exits or
+        sizing — callers get None and fall back to deterministic behavior.
+        """
+        tfm_fc = getattr(self._strategy, "get_latest_forecast", lambda s: None)(self.symbol)
+        if tfm_fc is not None and getattr(tfm_fc, "asof_bar", -1) >= 0:
+            age = self._bar_index - int(tfm_fc.asof_bar)
+            if age > 1:
+                logger.warning(
+                    "⚠️ [STALE FORECAST] %s: cached forecast %d bars old — deterministic exits",
+                    self.symbol, age,
+                )
+                return None
+        return tfm_fc
+
     def _manage_exit(self, amt_dto: dict, bar) -> None:
         with self._close_lock:
             pm = self._get_position_manager()
@@ -1424,7 +1442,7 @@ class QuantEngine:
             # a tiered TP partial fill per spec §13.3), or None once fully closed.
             current_pos = pm.current_position
             was_open = current_pos is not None
-            tfm_fc = getattr(self._strategy, "get_latest_forecast", lambda s: None)(self.symbol)
+            tfm_fc = self._fresh_forecast()
             try:
                 remaining = pm.manage_exit(
                     amt_dto=amt_dto,

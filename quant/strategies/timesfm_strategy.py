@@ -131,6 +131,9 @@ class TimesFMTradingStrategy:
             )
 
         self._latest_forecasts[str(ctx.symbol)] = forecast
+        # Freshness stamp: exits/sizing must never consume a forecast older
+        # than 1 bar (TimesFMForecast is mutable — direct assignment).
+        forecast.asof_bar = int(getattr(ctx, "bar_index", -1))
 
         # 3. Canonical gates computed once: approval authority + scanner payload
         from quant.decision.pipeline import GatePipeline
@@ -300,6 +303,7 @@ class TimesFMTradingStrategy:
                 forecast_steps=["LONG" if p > snapshot.p50_path[0] else ("SHORT" if p < snapshot.p50_path[0] else "FLAT") for p in snapshot.p50_path],
                 curr_price=float(context_prices[-1]),
                 lat_ms=float(snapshot.latency_ms),
+                asof_bar=int(getattr(ctx, "bar_index", -1)),
             )
         try:
             t0 = time.perf_counter()
@@ -341,6 +345,7 @@ class TimesFMTradingStrategy:
                 forecast_steps=steps,
                 curr_price=curr_price,
                 lat_ms=lat_ms,
+                asof_bar=int(getattr(ctx, "bar_index", -1)),
             )
         except Exception as exc:
             logger.debug("TimesFMTradingStrategy forecast error: %s", exc)

@@ -33,3 +33,66 @@ def test_failed_inference_returns_model_unavailable_and_caches_nothing():
         decision = strategy.should_enter(ctx)
     assert decision.reason == "MODEL_UNAVAILABLE"
     assert strategy.get_latest_forecast("NIFTY") is None
+
+
+def test_no_phantom_allow_entry_gate():
+    import inspect
+
+    from quant.decision import timesfm_agents
+
+    src = inspect.getsource(timesfm_agents)
+    assert "allow_entry" not in src
+
+
+def _make_forecast(asof_bar: int):
+    import numpy as np
+
+    from quant.decision.timesfm_agents import TimesFMForecast
+
+    return TimesFMForecast(
+        horizon=32,
+        p50_path=np.full(32, 101.0, dtype=np.float32),
+        p10_path=np.full(32, 100.0, dtype=np.float32),
+        p90_path=np.full(32, 102.0, dtype=np.float32),
+        q_spread=2.0,
+        mean_forecast=101.0,
+        pct_change=0.01,
+        forecast_steps=["LONG"] * 32,
+        curr_price=100.0,
+        lat_ms=5.0,
+        asof_bar=asof_bar,
+    )
+
+
+def _run_manage_exit_capture(strategy, bar_index: int):
+    from unittest.mock import MagicMock
+
+    from quant.runtime import QuantEngine
+
+    eng = QuantEngine(gateway=MagicMock(), symbol="NIFTY", strategy=strategy)
+    eng._bar_index = bar_index
+    captured: dict = {}
+    pm = eng._get_position_manager()
+
+    def fake_manage_exit(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    pm.manage_exit = fake_manage_exit
+    eng._manage_exit(amt_dto={}, bar=_make_ctx().bar)
+    return captured
+
+
+def test_stale_forecast_not_used_for_exits():
+    strategy = TimesFMTradingStrategy()
+    strategy._latest_forecasts["NIFTY"] = _make_forecast(asof_bar=10)
+    captured = _run_manage_exit_capture(strategy, bar_index=13)  # 3 bars stale
+    assert captured.get("timesfm_forecast") is None
+
+
+def test_fresh_forecast_reaches_exits():
+    strategy = TimesFMTradingStrategy()
+    fresh = _make_forecast(asof_bar=12)
+    strategy._latest_forecasts["NIFTY"] = fresh
+    captured = _run_manage_exit_capture(strategy, bar_index=13)  # 1 bar old: fresh
+    assert captured.get("timesfm_forecast") is fresh

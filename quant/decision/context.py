@@ -15,6 +15,10 @@ class DecisionContext:
     bar: Optional[Bar] = None             # the bar that closed to produce state
     symbol: str = ""
     market: str = "NSE"
+    # Index of the bar that produced this context (-1 = unknown; set by
+    # DecisionContextBuilder from its bar_index param). Lets downstream
+    # caches (e.g. TimesFM forecasts) stamp what they computed against.
+    bar_index: int = -1
     # session / risk facts
     session_open: bool = True
     warmup_complete: bool = True      # enough bars (> 15) for analysis

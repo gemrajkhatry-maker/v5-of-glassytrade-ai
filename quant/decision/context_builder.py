@@ -395,6 +395,7 @@ class DecisionContextBuilder:
             bar=bar,
             symbol=symbol,
             market=market,
+            bar_index=bar_index,
             session_open=session_allow_entry(
                 effective_time, market=market, contract_expiry=contract_expiry
             ) if effective_time else (session_info.allow_entry if session_info else True),

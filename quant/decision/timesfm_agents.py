@@ -44,6 +44,7 @@ class TimesFMForecast:
     forecast_steps: List[str]   # 32 step direction labels: LONG | SHORT | FLAT
     curr_price: float           # latest bar close price
     lat_ms: float               # inference latency in milliseconds
+    asof_bar: int = -1          # bar index the forecast was computed at (-1 = unknown)
 
 
 def _format_scanning_rationale(
@@ -105,7 +106,6 @@ class TimesFMScanningAgent:
         session_phase = str(ctx.session_phase or "").upper()
         allow_trend = getattr(ctx, "allow_trend", True)
         allow_reversion = getattr(ctx, "allow_reversion", True)
-        allow_entry = getattr(ctx, "allow_entry", True) and ctx.session_open
 
         poc = float(ctx.poc or (ctx.state.poc if ctx.state else curr_price))
         vah = float(ctx.vah or (ctx.state.vah if ctx.state else curr_price))
@@ -126,7 +126,7 @@ class TimesFMScanningAgent:
 
         # Setup A: Triple-A Long (Absorption at VAL + positive CVD + TimesFM upward slope)
         if (
-            allow_entry
+            ctx.session_open
             and allow_trend
             and (curr_price <= val + tol or "SELL" in absorption or stacked_imb == "BUY")
             and cvd_slope > 1.0
@@ -144,7 +144,7 @@ class TimesFMScanningAgent:
 
         # Setup B: Triple-A Short (Absorption at VAH + negative CVD + TimesFM downward slope)
         elif (
-            allow_entry
+            ctx.session_open
             and allow_trend
             and not is_option
             and (curr_price >= vah - tol or "BUY" in absorption or stacked_imb == "SELL")
@@ -163,7 +163,7 @@ class TimesFMScanningAgent:
 
         # Setup C: Value Area Breakout
         elif (
-            allow_entry
+            ctx.session_open
             and allow_trend
             and curr_price > vah
             and cvd_slope > 0.5
@@ -177,7 +177,7 @@ class TimesFMScanningAgent:
             rationale = f"Initiative Breakout above VAH ({vah:.1f}) on {symbol} with sustained TimesFM 32-step acceptance."
 
         elif (
-            allow_entry
+            ctx.session_open
             and allow_trend
             and not is_option
             and curr_price < val
@@ -193,7 +193,7 @@ class TimesFMScanningAgent:
 
         # Setup D: Value Area Fade Reversion
         elif (
-            allow_entry
+            ctx.session_open
             and allow_reversion
             and not is_option
             and curr_price >= vah
@@ -208,7 +208,7 @@ class TimesFMScanningAgent:
             rationale = f"VA-Fade short: Price probe above VAH rejected; TimesFM projecting mean-reversion toward POC ({poc:.1f})."
 
         elif (
-            allow_entry
+            ctx.session_open
             and allow_reversion
             and curr_price <= val
             and cvd_slope >= 0.0
@@ -223,7 +223,7 @@ class TimesFMScanningAgent:
 
         # Setup E: Model-Directed Momentum (Pure TimesFM Directional Drift + CVD Concordance)
         elif (
-            allow_entry
+            ctx.session_open
             and allow_trend
             and abs(forecast.pct_change) >= 0.0010
         ):
@@ -254,7 +254,7 @@ class TimesFMScanningAgent:
         # 4-Gate Evaluations
         is_opening = any(p in session_phase for p in ("OPENING", "PRE_OPEN", "PRE_MARKET"))
         is_closing = any(p in session_phase for p in ("CLOSE", "POST_MARKET", "EOD"))
-        g1 = bool(ctx.session_open and ctx.warmup_complete and not is_opening and not is_closing and allow_entry)
+        g1 = bool(ctx.session_open and ctx.warmup_complete and not is_opening and not is_closing)
         g1_msg = ""
         if not g1:
             if not ctx.session_open:
