@@ -8,6 +8,7 @@ from quant.bars import Bar
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import QuantDecision
 from quant.decision.timesfm_agents import TimesFMForecast
+from quant.execution.exits import ExitEngine
 from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
 from quant.runtime import QuantEngine
 
@@ -46,7 +47,10 @@ def test_should_enter_approves_triple_a_long(bullish_forecast):
         vah=8190.0,
         val=8109.0,
         cvd_slope=4.5,
-        absorption_side="BUY",
+        absorption_side="SELL_ABSORBED",
+        agent_direction="LONG",
+        triple_a_phase="AGGRESSION",
+        triple_a_signal="LONG",
         session_phase="PRIMARY",
         position_open=False,
     )
