@@ -124,12 +124,20 @@ backend/.active_contracts.json
 # local junk
 .env.bak-*
 
-# runtime audit generated artifacts
-runtime_audit/out/
-runtime_audit/fixtures/
-
 # Local MLX model weights (never stage)
 models/
 
-# Graphify knowledge graph artifacts
-graphify-out/
+# Graphify knowledge graph artifacts, generated at any depth (the root and
+# quant/ trees were already covered by the bare pattern).
+**/graphify-out/
+
+# Throwaway probe / bench / audit script trees. Kept on disk for the tooling
+# that reads them, but they are not project history. Covers the generated
+# runtime_audit/out/ and runtime_audit/fixtures/ artifacts too.
+runtime_audit/
+scratch/
+.kilo/
+.commandcode/
+
+# Orphaned bytecode for a removed source tree (62 .pyc, no .py, no importers)
+quantv2/
