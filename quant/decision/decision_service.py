@@ -8,6 +8,7 @@ QuantDecision is consumed by the backend wiring (quant signal → domain Signal
 """
 
 from __future__ import annotations
+from quant.contracts.constants import CONFIDENCE_HIGH_THRESHOLD
 from quant.contracts.enums import MarketState
 
 from dataclasses import dataclass, field
@@ -70,7 +71,7 @@ class DecisionService:
         if (
             not allow_positioned
             and ctx.data_quality is not None
-            and ctx.agent_probability >= 0.65
+            and ctx.agent_probability >= CONFIDENCE_HIGH_THRESHOLD
             and not conviction_allowed(ctx.data_quality)
         ):
             return QuantDecision(

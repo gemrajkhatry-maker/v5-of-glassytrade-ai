@@ -37,6 +37,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from quant.contracts.constants import MAX_NOTIONAL_LEVERAGE, NOTIONAL_LEVERAGE_GUARD
 from quant.decision.timesfm_agents import TimesFMForecast
 
 logger = logging.getLogger(__name__)
@@ -231,7 +232,11 @@ class TimesFMPositionSizer:
             # Capital deployment cap: notional value must not exceed 2.5x equity leverage
             if entry > 0:
                 notional_per_lot = entry * lot_size
-                max_dep_lots = max(1, int((equity * 2.5) // notional_per_lot)) if notional_per_lot <= (equity * 3.0) else 0
+                max_dep_lots = (
+                    max(1, int((equity * MAX_NOTIONAL_LEVERAGE) // notional_per_lot))
+                    if notional_per_lot <= (equity * NOTIONAL_LEVERAGE_GUARD)
+                    else 0
+                )
                 lots = min(lots, max_dep_lots)
             if max_lots is not None and max_lots > 0:
                 lots = min(lots, max_lots)

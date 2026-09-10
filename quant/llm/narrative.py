@@ -35,7 +35,6 @@ from typing import (
 
 from quant.decision.context import DecisionContext
 from quant.contracts.enums import MarketState as _MS
-from quant.decision.timesfm_forecast_factory import FALLBACK_BAND_PCT
 from quant.contracts.vocabulary import is_opening_phase
 
 # A rule is (name, predicate(ctx) -> bool, build(ctx) -> decision dict).
@@ -87,8 +86,8 @@ def _pos_take_profit_pred(c: DecisionContext) -> bool:
     return bool(
         tp > 0
         and (
-            (side == "LONG" and px >= tp * (1 - FALLBACK_BAND_PCT))
-            or (side == "SHORT" and px <= tp * (1 + FALLBACK_BAND_PCT))
+            (side == "LONG" and px >= tp * (1.0 - TP_TOUCH_TOLERANCE_PCT))
+            or (side == "SHORT" and px <= tp * (1.0 + TP_TOUCH_TOLERANCE_PCT))
         )
     )
 

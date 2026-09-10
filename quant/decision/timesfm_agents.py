@@ -77,9 +77,9 @@ def _format_scanning_rationale(
     else:
         phase_label = "Session"
 
-    if is_opening_phase(phase):
+    if any(p in phase for p in ("OPENING", "PRE_OPEN")):
         return f"Opening 15m session warmup on {symbol}; accumulating initial balance."
-    if is_closing_phase(phase):
+    if any(p in phase for p in ("CLOSE", "POST_MARKET")):
         return f"Market close protection active on {symbol}; standing down."
 
     if curr_price > vah:

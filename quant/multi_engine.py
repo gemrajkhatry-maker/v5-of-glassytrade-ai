@@ -40,11 +40,11 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from quant.decision.timesfm_forecast_factory import FALLBACK_BAND_PCT
 from quant.amt.session.scanner import OptionScannerService
 from quant.brokers.live_gateway import LiveGateway
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 from quant.contracts.aggregates import INITIAL_CAPITAL
-from quant.decision.timesfm_forecast_factory import FALLBACK_BAND_PCT
 from quant.contracts.enums import MarketState
 from quant.contracts.contracts import ContractRef
 from quant.contracts.instrument_registry import (
@@ -824,7 +824,7 @@ class QuantCoordinator:
                 agent_dec["activePosition"] = act_pos
             else:
                 steps = list((agent_dec or {}).get("forecastSteps") or [pos_side] * 32)
-                mean_fc = float((agent_dec or {}).get("meanForecast") or (curr_px * ((1 + FALLBACK_BAND_PCT) if pos_side == "LONG" else (1 - FALLBACK_BAND_PCT))))
+                mean_fc = float((agent_dec or {}).get("meanForecast") or (curr_px * (1.0 + FALLBACK_BAND_PCT if pos_side == "LONG" else 1.0 - FALLBACK_BAND_PCT)))
                 q_spread = float((agent_dec or {}).get("quantileSpread") or 0.0)
                 agent_dec = {
                     "role": "POSITION_MANAGEMENT",

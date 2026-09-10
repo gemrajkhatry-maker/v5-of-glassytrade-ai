@@ -184,6 +184,22 @@ CONFIDENCE_LOW_THRESHOLD = 0.50
 MIN_GRADE_SCORE_THRESHOLD = 1
 
 # ============================================================================
+# Canonical sizing literals (D-28)
+# ============================================================================
+# Equity fallback when a DecisionContext carries none. Must be the ONE
+# canonical capital, never a local literal: the scanner used 100000 and the
+# snapshot client 200000 while INITIAL_CAPITAL is 1000000 — three different
+# numbers for one concept, all on the sizing path.
+from quant.contracts.aggregates import INITIAL_CAPITAL as _INITIAL_CAPITAL
+
+FALLBACK_EQUITY: float = float(_INITIAL_CAPITAL)
+
+# Notional leverage bound applied in TimesFM dynamic sizing. Named so the
+# 2.5x / 3.0x pair cannot drift apart between readers.
+MAX_NOTIONAL_LEVERAGE: float = 2.5
+NOTIONAL_LEVERAGE_GUARD: float = 3.0
+
+# ============================================================================
 # Analysis Parameters
 # ============================================================================
 # Fabio's framework: the Initial Balance is the high/low of the FIRST HOUR.
