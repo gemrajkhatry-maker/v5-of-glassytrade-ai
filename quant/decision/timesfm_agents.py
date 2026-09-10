@@ -313,7 +313,7 @@ class TimesFMScanningAgent:
                 from quant.decision.timesfm_sizing import TimesFMPositionSizer
                 sizer = TimesFMPositionSizer()
                 sizing_res = sizer.compute_size(
-                    equity=100000.0,
+                    equity=float(getattr(ctx, "equity", None) or 100000.0),
                     entry=curr_price,
                     side=direction,
                     forecast=forecast,
