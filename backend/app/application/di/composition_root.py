@@ -123,6 +123,30 @@ def _create_storage_adapter(container: DIContainer, config: "Configuration"):
     return SQLiteStorageAdapter(db_path)
 
 
+def _advisor_enabled_from_env() -> bool:
+    """Whether an advisor would actually be built, mirroring the authority.
+
+    ``quant.wiring_advisor.build_live_advisor`` hard-disables on
+    ``LLM_ADVISOR_ENABLED`` being a false-family value BEFORE it ever considers
+    TimesFM. Composition previously treated the same flag as one arm of an
+    OR-enable, so with ``LLM_ADVISOR_ENABLED=false`` +
+    ``TIMESFM_ADVISOR_ENABLED=true`` the coordinator recorded
+    ``advisor_enabled=True`` while ``build_live_advisor()`` returned ``None`` —
+    the two disagreed about whether an advisor existed.
+
+    The false-family token set below is copied verbatim from the authority
+    (``wiring_advisor.py``: ``("0", "false", "no", "disable", "disabled")``).
+    Anything else (including unset, which defaults to ``"false"``) falls
+    through to the TimesFM check.
+    """
+    llm = os.getenv("LLM_ADVISOR_ENABLED", "false").strip().lower()
+    if llm in ("0", "false", "no", "disable", "disabled"):
+        return False
+    return llm in ("1", "true", "yes") or os.getenv(
+        "TIMESFM_ADVISOR_ENABLED", "false"
+    ).strip().lower() in ("1", "true", "yes")
+
+
 def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     """Build the QuantCoordinator — the deterministic decision brain for the
     WS viewer + REST shell. Reuses the same market-data / broker adapters
@@ -159,10 +183,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         # mapping at composition time prevents the quant runtime from reading
         # YAML or inventing brokerage/slippage defaults.
         "cost_profiles": _coordinator_cost_profiles(config),
-        "advisor_enabled": (
-            os.getenv("LLM_ADVISOR_ENABLED", "false").strip().lower() in ("true", "1", "yes")
-            or os.getenv("TIMESFM_ADVISOR_ENABLED", "false").strip().lower() in ("true", "1", "yes")
-        ),
+        "advisor_enabled": _advisor_enabled_from_env(),
         # C2: the configured per-trade risk must reach the engines' SessionRisk.
         # NO silent fallback: the effective value is whatever the loader + live
         # validator settled on (config_models), and boot fails if it is absent.
