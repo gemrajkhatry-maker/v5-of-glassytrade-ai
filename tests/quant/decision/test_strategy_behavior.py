@@ -570,3 +570,56 @@ def test_e2e_allow_positioned_still_requires_gate_3():
     assert any(g.gate == 2 and g.passed for g in d.gate_results), (
         f"gate 2 must be bypassed by allow_positioned, got: {d.gate_results}"
     )
+
+
+def test_e2e_entry_blocked_on_inferred_data_quality():
+    """E2E entries must enforce the data-quality gate like DecisionService.
+
+    Scanner-green + canonical-green ctx with inferred data_quality
+    (CANDLE_GAUSSIAN) and agent_probability 0.7 must return approved=False
+    with reason DATA_QUALITY_BLOCKED — mirroring DecisionService.evaluate.
+    """
+    import numpy as np
+
+    from quant.decision.timesfm_agents import TimesFMForecast
+    from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
+
+    horizon = 32
+    curr_price = 8110.0
+    p50 = np.linspace(curr_price, curr_price + 35.0, horizon)
+    fc = TimesFMForecast(
+        horizon=horizon,
+        p50_path=p50,
+        p10_path=p50 - 5.0,
+        p90_path=p50 + 5.0,
+        q_spread=10.0,
+        mean_forecast=float(p50[-1]),
+        pct_change=(p50[-1] - curr_price) / curr_price,
+        forecast_steps=["LONG"] * horizon,
+        curr_price=curr_price,
+        lat_ms=10.0,
+    )
+    ctx = make_context(
+        close=curr_price,
+        symbol="CRUDEOIL",
+        poc=8150.0,
+        vah=8190.0,
+        val=8109.0,
+        cvd_slope=4.5,
+        absorption_side="BUY",
+        session_phase="PRIMARY",
+        session_open=True,
+        warmup_complete=True,
+        position_open=False,
+        cooldown_remaining_sec=0,
+        risk_halted=False,
+        agent_direction="LONG",
+        agent_probability=0.7,
+        data_quality=DataQuality.CANDLE_GAUSSIAN,
+        triple_a_phase="AGGRESSION",
+        triple_a_signal="LONG",
+    )
+
+    d = TimesFMTradingStrategy().should_enter(ctx, forecast=fc)
+    assert d.approved is False, "E2E must block entries on inferred data quality"
+    assert d.reason == "DATA_QUALITY_BLOCKED"

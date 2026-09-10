@@ -1,4 +1,4 @@
-"""Task 4 (STRUCT-8): failed TimesFM inference must return None, not a synthetic flat forecast."""
+"""Task 12: failed TimesFM inference must return None, not a synthetic flat forecast."""
 
 from __future__ import annotations
 
