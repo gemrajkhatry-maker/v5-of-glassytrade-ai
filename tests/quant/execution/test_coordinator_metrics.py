@@ -164,3 +164,27 @@ def test_coordinator_metrics_provider_function():
     coord = FakeCoordinator(engines={})
     provider = coordinator_metrics_provider(coord)
     assert isinstance(provider, CoordinatorMetricsProvider)
+
+
+def test_totals_expose_model_risk_failures():
+    """D-2 follow-up: a degraded ExitEngine session must be visible in /v1/metrics.
+
+    The model-risk counter lives on quant.execution.exits; the metrics snapshot
+    must surface the live process-level value, not an import-time snapshot.
+    """
+    import quant.execution.exits as exits_mod
+
+    # No real coordinator needed: an empty engine map exercises the totals path.
+    provider = CoordinatorMetricsProvider(FakeCoordinator(engines={}))
+    totals = provider.snapshot()["totals"]
+
+    assert "model_risk_failures" in totals
+    assert totals["model_risk_failures"] == exits_mod.MODEL_RISK_FAILURES
+
+    # A real failure must move the exposed value, not just the module global.
+    exits_mod.MODEL_RISK_FAILURES += 1
+    try:
+        totals = provider.snapshot()["totals"]
+        assert totals["model_risk_failures"] == exits_mod.MODEL_RISK_FAILURES
+    finally:
+        exits_mod.MODEL_RISK_FAILURES -= 1

@@ -61,7 +61,7 @@ def test_full_close_preserves_engine_sourced_label():
     assert pm._exits.last_exit_source == "TIMESFM_RISK_AUTHORITY:VAR_STOP"
 
 
-def test_model_risk_failure_is_logged_and_counted(monkeypatch, caplog):
+def test_model_risk_failure_is_logged_and_counted(caplog):
     """D-2: a raising TimesFMRiskAuthority must not vanish silently."""
     import logging
 
@@ -92,10 +92,14 @@ def test_model_risk_failure_is_logged_and_counted(monkeypatch, caplog):
     eng._timesfm_risk = _Boom()
     before = exits_mod.MODEL_RISK_FAILURES
     with caplog.at_level(logging.WARNING, logger="quant.execution.exits"):
-        decision = eng.evaluate(pos, bar_close=100.5, bar_index=2, timesfm_forecast=fc)
+        # bar_close=100.5 alone never touches the sl=99.0 stop, so supply the
+        # bar low that genuinely trips it — proving the engine ran the
+        # deterministic rules after the model authority raised.
+        decision = eng.evaluate(pos, bar_close=100.5, bar_low=98.5, bar_index=2, timesfm_forecast=fc)
 
     # The engine still falls back to deterministic rules (behaviour preserved)...
-    assert decision is not None
+    assert decision.should_exit is True
+    assert eng.last_exit_source == "DETERMINISTIC:SL"
     # ...but the failure is now counted and logged, not swallowed.
     assert exits_mod.MODEL_RISK_FAILURES == before + 1
     assert any("TimesFM risk authority failed" in r.message for r in caplog.records)

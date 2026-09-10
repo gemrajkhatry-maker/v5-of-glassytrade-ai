@@ -311,6 +311,7 @@ async def metrics():
         provider = coordinator_metrics_provider(coordinator)
         return provider.snapshot()
     # Fallback: no coordinator — return empty but well-formed payload
+    from quant.execution import exits as _exits_mod
     return {
         "engines": {},
         "totals": {
@@ -318,6 +319,7 @@ async def metrics():
             "approved_count": 0,
             "blocked_count": 0,
             "engine_count": 0,
+            "model_risk_failures": _exits_mod.MODEL_RISK_FAILURES,
         },
     }
 

@@ -214,7 +214,7 @@ class ExitEngine:
                 # ratchet for the whole bar with no signal to ops.
                 logger.warning(
                     "TimesFM risk authority failed for %s (%s) — falling back to "
-                    "deterministic exits for this bar (total failures: %d)",
+                    "deterministic exits for this bar (failure count now at least: %d)",
                     position._id, exc, MODEL_RISK_FAILURES + 1,
                     exc_info=True,
                 )

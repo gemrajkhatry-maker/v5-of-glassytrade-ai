@@ -51,6 +51,10 @@ class CoordinatorMetricsProvider:
 
     def snapshot(self) -> dict[str, Any]:
         """Return a snapshot of per-engine activity and aggregate totals."""
+        # Read lazily so the exposed value tracks the live counter rather than
+        # an import-time snapshot (the increment happens on the exit hot path).
+        import quant.execution.exits as exits_mod
+
         engines: dict[str, dict[str, Any]] = {}
         now = time.time()
         total_decisions = 0
@@ -72,6 +76,7 @@ class CoordinatorMetricsProvider:
                 "approved_count": total_approved,
                 "blocked_count": total_blocked,
                 "engine_count": len(engines),
+                "model_risk_failures": exits_mod.MODEL_RISK_FAILURES,
             },
         }
 
