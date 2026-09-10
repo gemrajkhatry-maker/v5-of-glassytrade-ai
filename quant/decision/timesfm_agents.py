@@ -180,6 +180,145 @@ class TimesFMScanningAgent:
         absorption = str(ctx.absorption_side or "").upper()
         stacked_imb = str(getattr(ctx, "stacked_imbalance_direction", "") or "").upper()
 
+        action, direction, setup, confidence, confidence_score, rationale = self._detect_setup(
+            ctx, forecast,
+            curr_price=curr_price, vah=vah, val=val, poc=poc,
+            session_phase=session_phase,
+            cvd_slope=cvd_slope, absorption=absorption, stacked_imb=stacked_imb,
+            allow_trend=allow_trend, allow_reversion=allow_reversion,
+            is_option=is_option, symbol=symbol,
+        )
+
+        # 4-Gate Evaluations (gate 1 already computed above the profile guard)
+
+        # Fabio AMT Structural Target Identification
+        def _valid_target(t: float) -> bool:
+            if not t or t <= 0:
+                return False
+            # Scale check: structural target must be within 20% of curr_price
+            return abs(t - curr_price) / curr_price <= 0.20
+
+        structural_target = None
+        if direction == "LONG":
+            if setup == "VA_FADE" and poc > curr_price and _valid_target(poc):
+                structural_target = poc
+            elif setup in ("BREAKOUT", "MODEL_MOMENTUM"):
+                npoc_a = getattr(ctx, "npoc_above", 0.0)
+                prior_p = getattr(ctx, "prior_poc", 0.0)
+                if npoc_a > curr_price and _valid_target(npoc_a):
+                    structural_target = npoc_a
+                elif prior_p > curr_price and _valid_target(prior_p):
+                    structural_target = prior_p
+                elif vah > curr_price and _valid_target(vah):
+                    structural_target = vah
+            elif setup == "TRIPLE_A":
+                prior_p = getattr(ctx, "prior_poc", 0.0)
+                if vah > curr_price and _valid_target(vah):
+                    structural_target = vah
+                elif prior_p > curr_price and _valid_target(prior_p):
+                    structural_target = prior_p
+        elif direction == "SHORT":
+            if setup == "VA_FADE" and 0 < poc < curr_price and _valid_target(poc):
+                structural_target = poc
+            elif setup in ("BREAKOUT", "MODEL_MOMENTUM"):
+                npoc_b = getattr(ctx, "npoc_below", 0.0)
+                prior_p = getattr(ctx, "prior_poc", 0.0)
+                if 0 < npoc_b < curr_price and _valid_target(npoc_b):
+                    structural_target = npoc_b
+                elif 0 < prior_p < curr_price and _valid_target(prior_p):
+                    structural_target = prior_p
+                elif 0 < val < curr_price and _valid_target(val):
+                    structural_target = val
+            elif setup == "TRIPLE_A":
+                prior_p = getattr(ctx, "prior_poc", 0.0)
+                if 0 < val < curr_price and _valid_target(val):
+                    structural_target = val
+                elif 0 < prior_p < curr_price and _valid_target(prior_p):
+                    structural_target = prior_p
+
+        is_high_conviction = bool(confidence_score >= 0.80)
+
+        dynamic_sizing = self._dynamic_sizing(
+            ctx, forecast, direction, structural_target, curr_price, is_high_conviction,
+        )
+
+        g3 = bool(direction != "FLAT")
+        g4 = bool(
+            abs(forecast.mean_forecast - curr_price) >= (curr_price * 0.001)
+            or (dynamic_sizing and float(dynamic_sizing.get("payoffRatio", 0.0)) >= 1.4)
+        )
+
+        gate_results = [
+            {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": g1, "message": g1_msg},
+            {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": g2, "message": "" if g2 else "Cooldown"},
+            {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": g3, "message": "" if g3 else "No direction"},
+            {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": g4, "message": "" if g4 else "RR fail"},
+        ]
+
+        rec_opt = None
+        if chain is not None and direction != "FLAT":
+            try:
+                from quant.decision.timesfm_option_selector import TimesFMOptionSelector
+                opt_selector = TimesFMOptionSelector()
+                ranked = opt_selector.evaluate_chain(
+                    chain=chain,
+                    underlying=symbol,
+                    forecast=forecast,
+                    direction=direction,
+                )
+                if ranked:
+                    top = ranked[0]
+                    rec_opt = {
+                        "symbol": top.symbol,
+                        "strike": top.strike,
+                        "optionType": top.option_type,
+                        "delta": top.delta,
+                        "expectedROC": top.expected_roc,
+                        "timesfmEdge": top.timesfm_edge,
+                        "thetaViable": top.is_theta_viable,
+                        "compositeScore": top.composite_score,
+                    }
+            except Exception as e:
+                logger.debug("Failed evaluating recommended option in TimesFMScanningAgent: %s", e)
+
+        all_gates_passed = all(g.get("passed", False) for g in gate_results)
+        is_entry = action in ("ENTER_LONG", "ENTER_SHORT") and direction in ("LONG", "SHORT")
+        timing = "ENTER_NOW" if (is_entry and all_gates_passed) else str(ctx.session_phase or "REGULAR")
+
+        return {
+            "role": "SCANNING",
+            "action": action,
+            "direction": direction,
+            "setup": setup,
+            "reason": None,
+            "confidence": confidence,
+            "confidenceScore": round(confidence_score, 3),
+            "rationale": rationale,
+            "forecastSteps": forecast.forecast_steps,
+            "quantileSpread": round(forecast.q_spread, 4),
+            "meanForecast": round(forecast.mean_forecast, 2),
+            "gateResults": gate_results,
+            "activePosition": None,
+            "dynamicTrailStop": None,
+            "dynamicSizing": dynamic_sizing,
+            "recommendedOption": rec_opt,
+            "source": "TIMESFM_3.0_NATIVE",
+            "latencyMs": round(forecast.lat_ms, 1),
+            "modelLabel": f"TimesFM-{setup}",
+            "modelVersions": {"timesfm": "3.0", "agent_role": "SCANNING", "engine": "native_direct"},
+            "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
+            "timing": timing,
+            "sizeFraction": 1.0 if direction != "FLAT" else 0.0,
+            "latencyUs": int(forecast.lat_ms * 1000),
+        }
+
+
+    def _detect_setup(
+        self, ctx, forecast, *, curr_price, vah, val, poc, session_phase,
+        cvd_slope, absorption, stacked_imb, allow_trend,
+        allow_reversion, is_option, symbol,
+    ):
+        """Return (action, direction, setup, confidence, confidence_score, rationale)."""
         va_range = max(vah - val, curr_price * 0.001)
         tol = va_range * 0.15
 
@@ -317,55 +456,10 @@ class TimesFMScanningAgent:
                     f"drift ({short_steps}/{total_steps} bearish steps, q_spread={forecast.q_spread:.1f}) with CVD concordance ({cvd_slope:.1f})."
                 )
 
-        # 4-Gate Evaluations (gate 1 already computed above the profile guard)
+        return action, direction, setup, confidence, confidence_score, rationale
 
-        # Fabio AMT Structural Target Identification
-        def _valid_target(t: float) -> bool:
-            if not t or t <= 0:
-                return False
-            # Scale check: structural target must be within 20% of curr_price
-            return abs(t - curr_price) / curr_price <= 0.20
-
-        structural_target = None
-        if direction == "LONG":
-            if setup == "VA_FADE" and poc > curr_price and _valid_target(poc):
-                structural_target = poc
-            elif setup in ("BREAKOUT", "MODEL_MOMENTUM"):
-                npoc_a = getattr(ctx, "npoc_above", 0.0)
-                prior_p = getattr(ctx, "prior_poc", 0.0)
-                if npoc_a > curr_price and _valid_target(npoc_a):
-                    structural_target = npoc_a
-                elif prior_p > curr_price and _valid_target(prior_p):
-                    structural_target = prior_p
-                elif vah > curr_price and _valid_target(vah):
-                    structural_target = vah
-            elif setup == "TRIPLE_A":
-                prior_p = getattr(ctx, "prior_poc", 0.0)
-                if vah > curr_price and _valid_target(vah):
-                    structural_target = vah
-                elif prior_p > curr_price and _valid_target(prior_p):
-                    structural_target = prior_p
-        elif direction == "SHORT":
-            if setup == "VA_FADE" and 0 < poc < curr_price and _valid_target(poc):
-                structural_target = poc
-            elif setup in ("BREAKOUT", "MODEL_MOMENTUM"):
-                npoc_b = getattr(ctx, "npoc_below", 0.0)
-                prior_p = getattr(ctx, "prior_poc", 0.0)
-                if 0 < npoc_b < curr_price and _valid_target(npoc_b):
-                    structural_target = npoc_b
-                elif 0 < prior_p < curr_price and _valid_target(prior_p):
-                    structural_target = prior_p
-                elif 0 < val < curr_price and _valid_target(val):
-                    structural_target = val
-            elif setup == "TRIPLE_A":
-                prior_p = getattr(ctx, "prior_poc", 0.0)
-                if 0 < val < curr_price and _valid_target(val):
-                    structural_target = val
-                elif 0 < prior_p < curr_price and _valid_target(prior_p):
-                    structural_target = prior_p
-
-        is_high_conviction = bool(confidence_score >= 0.80)
-
+    def _dynamic_sizing(self, ctx, forecast, direction, structural_target, curr_price, is_high_conviction):
+        """Return the dynamicSizing payload dict, or None when direction is FLAT."""
         dynamic_sizing = None
         if direction != "FLAT":
             try:
@@ -395,77 +489,7 @@ class TimesFMScanningAgent:
                 }
             except Exception as e:
                 logger.debug("Failed computing dynamic sizing in TimesFMScanningAgent: %s", e)
-
-        g3 = bool(direction != "FLAT")
-        g4 = bool(
-            abs(forecast.mean_forecast - curr_price) >= (curr_price * 0.001)
-            or (dynamic_sizing and float(dynamic_sizing.get("payoffRatio", 0.0)) >= 1.4)
-        )
-
-        gate_results = [
-            {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": g1, "message": g1_msg},
-            {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": g2, "message": "" if g2 else "Cooldown"},
-            {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": g3, "message": "" if g3 else "No direction"},
-            {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": g4, "message": "" if g4 else "RR fail"},
-        ]
-
-        rec_opt = None
-        if chain is not None and direction != "FLAT":
-            try:
-                from quant.decision.timesfm_option_selector import TimesFMOptionSelector
-                opt_selector = TimesFMOptionSelector()
-                ranked = opt_selector.evaluate_chain(
-                    chain=chain,
-                    underlying=symbol,
-                    forecast=forecast,
-                    direction=direction,
-                )
-                if ranked:
-                    top = ranked[0]
-                    rec_opt = {
-                        "symbol": top.symbol,
-                        "strike": top.strike,
-                        "optionType": top.option_type,
-                        "delta": top.delta,
-                        "expectedROC": top.expected_roc,
-                        "timesfmEdge": top.timesfm_edge,
-                        "thetaViable": top.is_theta_viable,
-                        "compositeScore": top.composite_score,
-                    }
-            except Exception as e:
-                logger.debug("Failed evaluating recommended option in TimesFMScanningAgent: %s", e)
-
-        all_gates_passed = all(g.get("passed", False) for g in gate_results)
-        is_entry = action in ("ENTER_LONG", "ENTER_SHORT") and direction in ("LONG", "SHORT")
-        timing = "ENTER_NOW" if (is_entry and all_gates_passed) else str(ctx.session_phase or "REGULAR")
-
-        return {
-            "role": "SCANNING",
-            "action": action,
-            "direction": direction,
-            "setup": setup,
-            "reason": None,
-            "confidence": confidence,
-            "confidenceScore": round(confidence_score, 3),
-            "rationale": rationale,
-            "forecastSteps": forecast.forecast_steps,
-            "quantileSpread": round(forecast.q_spread, 4),
-            "meanForecast": round(forecast.mean_forecast, 2),
-            "gateResults": gate_results,
-            "activePosition": None,
-            "dynamicTrailStop": None,
-            "dynamicSizing": dynamic_sizing,
-            "recommendedOption": rec_opt,
-            "source": "TIMESFM_3.0_NATIVE",
-            "latencyMs": round(forecast.lat_ms, 1),
-            "modelLabel": f"TimesFM-{setup}",
-            "modelVersions": {"timesfm": "3.0", "agent_role": "SCANNING", "engine": "native_direct"},
-            "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
-            "timing": timing,
-            "sizeFraction": 1.0 if direction != "FLAT" else 0.0,
-            "latencyUs": int(forecast.lat_ms * 1000),
-        }
-
+        return dynamic_sizing
 
 class TimesFMPositionAgent:
     """Agent 2: Manages active positions according to Fabio AMT rules and TimesFM quantiles."""
