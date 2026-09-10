@@ -934,12 +934,12 @@ a stop."
 ## Task 8: D-13 — the bar path and the tick path must agree on the breached stop
 
 **Files:**
-- Modify: `quant/execution/exits.py` — reorder so the merged (trail/breakeven) stop is checked before the raw SL, or unify via a shared resolver in `quant/execution/exit_checks.py`
+- Modify: `quant/execution/exits.py` (`evaluate` — reorder the protective-stop resolution)
 - Test: `tests/quant/execution/test_exits_trailing.py` (append)
 
 **Interfaces:**
 - Consumes: `ExitEngine._trail`, `ExitEngine._breakeven` (existing).
-- Produces: on a bar that pierces both the raw SL and the active trail/breakeven, `ExitDecision.reason` is `TRAIL`/`BREAKEVEN` and the price is the merged stop — identical to the tick path at `position_manager.manage_tick_exit`.
+- Produces: on a bar that pierces both the raw SL and an armed trail/breakeven, `ExitDecision.reason` is `TRAIL`/`BREAKEVEN` and `close_price` is the merged stop — identical to the tick path at `position_manager.manage_tick_exit`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -978,17 +978,17 @@ Expected: FAIL with `assert 'SL' == 'TRAIL'`
 
 - [ ] **Step 3: Write the minimal implementation**
 
-In `quant/execution/exits.py`, move the Rule 2 stop-loss check so the merged protective stop is resolved first. Replace the Rule 2 / Rule 3 / Rule 4 / Rule 4b ordering block. Concretely, replace:
+The fix is a **reorder**. Adding the block without moving the existing one leaves the raw-SL check first and the bug intact. The order inside `evaluate` must end up as:
 
-```python
-        # Rule 2: Stop-loss
-        r = check_stop_loss(position, low, high)
-        if r:
-            self.last_exit_source = f"DETERMINISTIC:{r.reason}"
-            return r
-```
+1. spread blowout (unchanged)
+2. TimesFM risk-authority block (unchanged, from Task 1)
+3. **protective stop (NEW POSITION — moved up from Rule 4b)**
+4. CVD kill
+5. take-profit tiers
+6. trailing/breakeven **state advance** for the next bar
+7. time stop
 
-and the later Rule 4b merge, with a single protective-stop resolution placed BEFORE the raw-SL check:
+Delete the current `# Rule 2: Stop-loss` / `check_stop_loss(...)` lines entirely — the block below subsumes them (`protective_reason == "SL"` is the raw-SL case). Insert at position 3:
 
 ```python
         # Rule 2: protective stop — the TIGHTEST of raw SL, breakeven floor and
@@ -1023,7 +1023,7 @@ and the later Rule 4b merge, with a single protective-stop resolution placed BEF
             return ExitDecision(True, r.reason, close)
 ```
 
-Then in the Rule 4b section, delete the now-duplicated breakeven/trail recomputation and keep only the *update* of those stores (the `check_trailing_stop` call still computes `be_floor`/`trail_stop` for the NEXT bar) plus its VWAP-drift early exit:
+Then confirm the Rule 4b block reads as the state advance only:
 
 ```python
         # Rule 4b: advance the trailing/breakeven stores for the NEXT bar.
@@ -1053,9 +1053,16 @@ Then in the Rule 4b section, delete the now-duplicated breakeven/trail recomputa
 
 Remove the now-unused `check_stop_loss` import only if nothing else uses it; grep `check_stop_loss` first and keep the import if `exit_checks` tests reference it.
 
+**Expect existing tests to change.** Assertions that encode the OLD order must be updated to the new, intended behaviour (state this in the commit body):
+
+- `tests/quant/execution/test_exits_trailing.py` — a bar low piercing both the raw SL and the armed trail now returns `TRAIL` at `trail_stop`, not `SL` at the raw SL.
+- `tests/quant/execution/test_exit_source.py::test_exit_source_labels_deterministic_sl` — that position has no trail and no breakeven armed, so it still returns `SL`; verify it passes unchanged.
+
+If any other test asserts the old ordering, fix it to assert the new behaviour. Do not weaken it to accept either.
+
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/execution/test_exits.py tests/quant/execution/test_exits_trailing.py tests/quant/execution/test_exits_spread.py tests/quant/execution/test_tick_level_exits.py -v`
+Run: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/execution/test_exits.py tests/quant/execution/test_exits_trailing.py tests/quant/execution/test_exits_spread.py tests/quant/execution/test_tick_level_exits.py tests/quant/execution/test_exit_source.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Add the tick-path parity assertion**
