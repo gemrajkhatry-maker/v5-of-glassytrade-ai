@@ -1641,14 +1641,6 @@ class QuantEngine:
         if remaining is not None:
             self._check_thesis_flip(amt_dto, bar)
 
-    def _check_pyramid(self, amt_dto: dict, bar) -> None:
-        pm = self._get_position_manager()
-        pm.check_pyramid(amt_dto, bar, pm.current_position, self._bar_index)
-        # Consume the ratcheted base produced by check_pyramid (E10 / Task 8).
-        if pm.base_override is not None:
-            pm.current_position = pm.base_override
-            pm.base_override = None
-
     # =========================================================================
     # 6. EVENTS — emission, event store, reconciliation
     # =========================================================================

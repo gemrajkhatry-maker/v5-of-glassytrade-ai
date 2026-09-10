@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Protocol, TYPE_CHECKING
+from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from quant.auction_state import AuctionState
@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from quant.decision.decision_service import QuantDecision
 
 
+@runtime_checkable
 class TradingStrategy(Protocol):
     """Protocol for pluggable trading strategies.
     

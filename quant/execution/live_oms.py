@@ -369,7 +369,7 @@ class LiveOMS:
 
         Routes through IBroker.execute_order() so the pyramid is a real broker
         order, not a ghost position. The base position's SL must be ratcheted
-        to new_sl by the caller (runtime._check_pyramid) after this fills.
+        to new_sl by the caller (PositionManager.check_pyramid) after this fills.
 
         E9: pyramids are DISABLED under LiveOMS until end-to-end
         submit→fill→linked-close is implemented. Creating an in-memory

@@ -172,7 +172,7 @@ class PaperOMS:
           - Size: 50% of base (P1) or 25% of base (P2)
 
         The base position's SL must be ratcheted to new_sl by the caller
-        (runtime._check_pyramid) after this fills, so the combined bundle
+        (PositionManager.manage_exit, via check_pyramid) after this fills, so the combined bundle
         is guaranteed positive: SL is behind the new support level.
         """
         size = snap_to_lot(abs(size), self._lot_size)

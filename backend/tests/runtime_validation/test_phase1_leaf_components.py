@@ -9,7 +9,7 @@ adapter. Leaves with no live equivalent (standalone ATR) are dropped.
 
 Coverage per component:
   1a. Market data ingestion   -> tests.helpers.market_data.generate_market_data + OHLC invariants
-  1b. Indicator/excursions    -> update_excursions (live exit_rules MAE/MFE tracking)
+  1b. Indicators              -> (excursion tracking removed: exit_rules.update_excursions had no production caller)
   1c. Signal generation       -> SignalBuilder.build (real SL/TP/grade pipeline)
   1d. Risk sizing             -> Portfolio.open_position (tiered risk sizing math)
   1e. OMS                     -> Portfolio order lifecycle + ExitEngine stop-loss rule
@@ -30,7 +30,6 @@ from quant.contracts.aggregates import Portfolio, INITIAL_CAPITAL
 from quant.contracts.enums import SignalType, SetupType, Source, Side, PositionStatus
 from quant.decision.context import DecisionContext
 from quant.decision.signal_builder import SignalBuilder
-from quant.execution.exit_rules import update_excursions
 from quant.execution.exits import ExitEngine as LiveExitEngine
 from quant.execution.order import Order as LiveOrder
 from quant.execution.order import Position as LivePosition
@@ -105,33 +104,6 @@ class TestMarketDataIngestion:
     def test_bearish_regime_drifts_down(self):
         data = generate_market_data(days=50, start_price=100.0, regime="bearish")
         assert data[-1].close < data[0].open
-
-
-# ---------------------------------------------------------------------------
-# 1b. Excursion tracking (live exit_rules.update_excursions)
-# ---------------------------------------------------------------------------
-
-
-class TestIndicators:
-    def test_excursions_track_mae_mfe(self):
-        pos = Position(
-            side=Side.LONG, entry_price=Decimal("100"), size=Decimal("1"),
-            stop_loss=Decimal("95"), take_profit=Decimal("110"),
-        )
-        update_excursions(pos, 95.0)   # adverse move of 5
-        update_excursions(pos, 108.0)  # favorable move of 8
-        assert float(pos.mae) == pytest.approx(5.0)
-        assert float(pos.mfe) == pytest.approx(8.0)
-
-    def test_short_position_excursion_sign(self):
-        pos = Position(
-            side=Side.SHORT, entry_price=Decimal("100"), size=Decimal("1"),
-            stop_loss=Decimal("105"), take_profit=Decimal("90"),
-        )
-        update_excursions(pos, 103.0)  # adverse move of 3
-        update_excursions(pos, 96.0)   # favorable move of 4
-        assert float(pos.mae) == pytest.approx(3.0)
-        assert float(pos.mfe) == pytest.approx(4.0)
 
 
 # ---------------------------------------------------------------------------

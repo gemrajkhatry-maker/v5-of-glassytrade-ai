@@ -1,60 +1,13 @@
 """Tests for exit_rules.py pure functions."""
 
 import pytest
-from decimal import Decimal
 import time
 
-from quant.contracts.entities import Position, Side, PositionStatus
 from quant.execution.exit_rules import (
     get_session_time_stop,
     TIME_STOP_TABLE,
     HARD_MAX_HOLD_SECONDS,
 )
-
-
-class TestUpdateExcursions:
-    """Test MAE/MFE tracking."""
-
-    def test_update_excursions_long(self):
-        """Test excursion updates for long position."""
-        from quant.execution.exit_rules import update_excursions
-        
-        pos = Position(
-            id="test-exc-1",
-            symbol="NIFTY",
-            side=Side.LONG,
-            entry_price=Decimal("100.0"),
-            size=Decimal("1.0"),
-        )
-        pos.mfe = Decimal("0")
-        pos.mae = Decimal("0")
-        
-        update_excursions(pos, 105.0)  # +5 profit
-        assert pos.mfe == 5
-        assert pos.mae == 0
-        
-        update_excursions(pos, 98.0)  # -2 loss
-        assert pos.mae == 2
-
-    def test_update_excursions_short(self):
-        """Test excursion updates for short position."""
-        from quant.execution.exit_rules import update_excursions
-        
-        pos = Position(
-            id="test-exc-2",
-            symbol="NIFTY",
-            side=Side.SHORT,
-            entry_price=Decimal("100.0"),
-            size=Decimal("1.0"),
-        )
-        pos.mfe = Decimal("0")
-        pos.mae = Decimal("0")
-        
-        update_excursions(pos, 95.0)  # +5 profit for short
-        assert pos.mfe == 5
-        
-        update_excursions(pos, 102.0)  # -2 loss for short
-        assert pos.mae == 2
 
 
 class TestClassifyExit:

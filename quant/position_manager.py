@@ -79,8 +79,8 @@ class PositionManager:
         # this holds the live Position object for OMS calls.
         self.current_position: Position | None = None
         # Ratcheted base position produced by the latest pyramid fill. Consumed
-        # (and cleared) by manage_exit's return or runtime._check_pyramid so the
-        # trail state keyed by _id stays consistent with ExitEngine.
+        # (and cleared) by manage_exit's own return so the trail state keyed by
+        # _id stays consistent with ExitEngine.
         self.base_override: Position | None = None
         # Reserved rupee risk per open pyramid add-on, keyed by position _id.
         self._pyramid_open_risk: dict[str, float] = {}

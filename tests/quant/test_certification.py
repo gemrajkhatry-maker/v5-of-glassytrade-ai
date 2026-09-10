@@ -283,10 +283,40 @@ def test_s10_pyramid_adds_only_when_all_gates_align():
 
 
 def test_s10_pyramid_cert_records_flow():
-    """The engine's _check_pyramid wrapper syncs pyramid state; cert records
-    must exist for the underlying decisions (S1 traceability extends to
-    adds)."""
+    """Pyramids are gated through PositionManager.manage_exit (the live path),
+    not an engine wrapper; cert records must exist for the underlying
+    decisions (S1 traceability extends to adds).
+
+    The engine no longer owns a _check_pyramid wrapper (D-25): the only call
+    site is manage_exit -> PositionManager.check_pyramid.
+    """
     from quant.runtime import QuantEngine
     eng = _engine_from(scenario_displacement_breakout)
-    # Even when no pyramid fires, the engine must not crash on the wrapper.
-    assert hasattr(eng, "_check_pyramid")
+    assert not hasattr(eng, "_check_pyramid"), "dead engine wrapper resurfaced"
+
+    # Real path: a risk-free base retesting its leg LVN with confirming
+    # absorption drives check_pyramid through manage_exit's caller.
+    from quant.bars import Bar
+    from quant.execution.exits import ExitEngine
+    from quant.execution.oms import PaperOMS
+    from quant.execution.order import Order, Position
+    from quant.decision.signal_builder import Signal
+    from quant.execution.risk import SessionRisk
+    from quant.position_manager import PositionManager
+
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=99.0, tp=104.0,
+                 rr=2.0, model_label="Triple-A", symbol="S", timestamp="t0")
+    pos = Position(order=Order(sig, 10), open_price=100.0, open_time="t0", size=10)
+    pm = PositionManager(
+        oms=PaperOMS(lot_size=1.0), exits=ExitEngine(),
+        risk=SessionRisk(storage=None, symbol="S"),
+        emit_fn=lambda e: None, symbol="S", market="MCX",
+        contract_expiry=None, tick_size=0.05,
+    )
+    pm._exits.evaluate(pos, bar_close=101.0, bar_index=3,
+                       bar_high=101.0, bar_low=100.9)
+    assert pm._exits.is_risk_free(pos), "breakeven should arm at 0.8R+"
+    bar = Bar(time="t1", open=100.0, high=100.1, low=99.95, close=100.05, volume=100)
+    dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+    pm.check_pyramid(dto, bar, pos, bar_index=5)
+    assert pm.pyramid_count == 1, "real path failed to record the add"

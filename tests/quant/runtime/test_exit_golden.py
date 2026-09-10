@@ -1,5 +1,8 @@
 # tests/quant/runtime/test_exit_golden.py
-"""Golden characterization test for QuantEngine._manage_exit() and _check_pyramid().
+"""Golden characterization test for QuantEngine._manage_exit() / PositionManager.
+
+Pyramid gating now lives only in PositionManager.check_pyramid (called from
+manage_exit); the engine no longer exposes a _check_pyramid wrapper.
 
 Captures PositionClosed events from a known position + bar sequence.
 This becomes the regression safety net for extracting the position manager.

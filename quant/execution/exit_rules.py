@@ -10,11 +10,9 @@ from quant.contracts.enums import MarketState
 import logging
 import time
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from quant.contracts.enums import CushionState, MarketStateCodec, Side
-from quant.contracts.constants import MIN_RR_RATIO
+from quant.contracts.enums import CushionState, MarketStateCodec
 
 if TYPE_CHECKING:
     from quant.contracts.entities import Position
@@ -79,58 +77,6 @@ class ExitReason:
 # ---------------------------------------------------------------------------
 # Pure Exit Rule Functions
 # ---------------------------------------------------------------------------
-
-
-def update_excursions(position: "Position", current_price: float) -> None:
-    """Update MAE/MFE/peak_profit tracking on Position.
-
-    MAE (Maximum Adverse Excursion): Largest unrealized loss from entry.
-    MFE (Maximum Favorable Excursion): Largest unrealized gain from entry.
-
-    Args:
-        position: Position to update.
-        current_price: Current market price.
-    """
-    is_long = position.side == Side.LONG or position.side.value == "LONG"
-    entry_price = float(position.entry_price)
-
-    unrealised = (
-        (current_price - entry_price) if is_long else (entry_price - current_price)
-    )
-
-    mfe = float(position.mfe)
-    mae = float(position.mae)
-
-    if unrealised > mfe:
-        position.mfe = Decimal(str(unrealised))
-
-    if unrealised < -mae:
-        position.mae = Decimal(str(-unrealised))
-
-
-def update_peak_profit(position: "Position", current_price: float) -> float:
-    """Update peak profit tracking and return the current peak.
-
-    Args:
-        position: Position to update.
-        current_price: Current market price.
-
-    Returns:
-        The updated peak profit value.
-    """
-    is_long = position.side == Side.LONG or position.side.value == "LONG"
-    entry_price = float(position.entry_price)
-
-    unrealised = (
-        (current_price - entry_price) if is_long else (entry_price - current_price)
-    )
-
-    peak_profit = float(position.peak_profit)
-    if unrealised > peak_profit:
-        position.peak_profit = Decimal(str(unrealised))
-        peak_profit = unrealised
-
-    return peak_profit
 
 
 def classify_exit(
@@ -229,28 +175,3 @@ def get_session_time_stop(
             phase_stop = 1.0
 
     return phase_stop
-
-
-def is_valid_rr(
-    entry: float, sl: float, tp: float, min_rr: float | None = None
-) -> bool:
-    """Validate risk-reward ratio.
-
-    Args:
-        entry: Entry price.
-        sl: Stop loss price.
-        tp: Take profit price.
-        min_rr: Minimum required RR ratio (default from constants).
-
-    Returns:
-        True if RR ratio meets minimum threshold.
-    """
-
-    threshold = min_rr if min_rr is not None else MIN_RR_RATIO
-    if entry <= 0:
-        return False
-    risk = abs(entry - sl)
-    reward = abs(tp - entry)
-    if risk <= 0 or reward <= 0:
-        return False
-    return (reward / risk) >= threshold
