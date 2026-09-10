@@ -106,6 +106,17 @@ broken.)
 ### D-6 · MEDIUM · `optionGreekDelta` is never produced → delta always a flat 0.50
 `quant/decision/context_builder.py:456-460`
 
+> **Corrected 2026-09-10 during execution:** there is no chain-Greek producer
+> available to wire. `AMTResult` (`quant/contracts/value_objects.py`) has no
+> `option_greek_delta` field, so `optionGreekDelta` can never be emitted from
+> `amt_result_to_dto` (an `getattr(r, "option_greek_delta", None)` emit would
+> always be `None`, a no-op). And `deltaNormalizedOption` is candle
+> *order-flow* delta, not a Greek, and a test exists to keep it out of the
+> Greek path. The unreachable `amt_dto["optionGreekDelta"]` branch was
+> therefore **removed**, not faked, in favour of a single named constant
+> (`DEFAULT_OPTION_DELTA = 0.50`) that documents itself as the authoritative
+> default until a real option chain is wired.
+
 ```python
 option_delta=(
     float(amt_dto["optionGreekDelta"])

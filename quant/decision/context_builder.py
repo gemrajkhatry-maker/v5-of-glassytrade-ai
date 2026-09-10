@@ -19,6 +19,14 @@ from quant.decision.data_quality import normalize_data_quality
 
 logger = logging.getLogger(__name__)
 
+# Conservative ATM delta used to scale underlying stop distance into option
+# premium distance. There is NO chain Greek producer in this codebase:
+# AMTResult carries no option delta, and deltaNormalizedOption is candle
+# order-flow delta (see tests/quant/decision/test_option_delta_semantics.py).
+# So this default is authoritative until a real option chain is wired.
+# ponytail: wire a real chain delta here when the chain feed lands.
+DEFAULT_OPTION_DELTA = 0.50
+
 # Deterministic conviction used for gate 4's probability check when the engine
 # decides from the auction state alone (at the 0.65 data-quality conviction
 # threshold). The decision-critical path is 100% deterministic by design — no
@@ -452,12 +460,10 @@ class DecisionContextBuilder:
             is_expiry=is_expiry,
             profile_shape=str(amt_dto.get("profileShape") or ""),
             # deltaNormalizedOption is candle order-flow delta, not an option
-            # Greek. Only a chain-provided optionGreekDelta may reach option
-            # premium stop translation; missing Greeks stay None.
+            # Greek. No chain-Greek producer exists, so options fall back to
+            # DEFAULT_OPTION_DELTA and futures stay None.
             option_delta=(
-                float(amt_dto["optionGreekDelta"])
-                if amt_dto.get("optionGreekDelta") is not None
-                else (0.50 if is_option_contract(symbol) else None)
+                DEFAULT_OPTION_DELTA if is_option_contract(symbol) else None
             ),
             contested_bubble_zone=bool(amt_dto.get("contestedZone") or False),
             stacked_imbalance_direction=_si_dir,
