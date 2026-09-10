@@ -1670,11 +1670,12 @@ class TestInputValidationBugs:
         assert len(pm.pyramid_positions) == 0
 
     def test_closed_ids_not_cleared_between_calls(self):
-        """_closed_ids persists across manage_exit calls.
+        """_closed_ids intentionally persists for the PositionManager lifetime.
 
-        BUG: _closed_ids is initialized in __init__ but never cleared.
-        If the same PositionManager is reused across sessions, stale
-        _closed_ids may prevent legitimate closes.
+        D-15 invariant: the double-close guard lives as long as the manager
+        does, so an id that was already closed in this manager is refused by
+        design. A stale id is not a bug to work around — it is exactly the
+        signal the guard uses to avoid a double close.
         """
         from quant.execution.exits import ExitDecision
         from quant.position_manager import PositionManager
@@ -1697,7 +1698,8 @@ class TestInputValidationBugs:
         pos = _make_position(pos_id="stale-pos-id")
         exit_dec = ExitDecision(True, "SL", 95.0)
 
-        # BUG: The guard rejects it even though it's a new session
+        # By design (D-15): the guard refuses an id already closed by this
+        # manager, so the OMS is never asked to close it twice.
         result = pm._execute_full_close(pos, exit_dec, "t")
         assert result is None  # Rejected by guard
         # The position was never actually closed (OMS not called)
@@ -1920,10 +1922,12 @@ BUGS FOUND BY EDGE CASE TESTS:
     - Impact: Division by zero in technical indicators
     - Fix: Validate prices > 0
 
-18. [MINOR] _closed_ids not cleared between sessions
+18. [RESOLVED by D-15] _closed_ids lives for the manager lifetime
     - Test: test_closed_ids_not_cleared_between_calls
-    - Impact: Stale _closed_ids may prevent legitimate closes in new session
-    - Fix: Clear _closed_ids at session start
+    - Status: intended behaviour, not a defect. The double-close guard is
+      deliberately scoped to the manager, so an id already closed by this
+      manager is refused and the OMS is never asked to close it twice.
+      (Task 9 made the guard persistent; the prior per-call reset was the bug.)
 
 19. [MINOR] manage_exit crashes with AttributeError on None bar
     - Test: test_manage_exit_with_invalid_bar

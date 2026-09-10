@@ -206,12 +206,16 @@ def close_lingering_pyramids(pm, price: float, time_str: str, reason: str) -> in
             failed.append(pyr_pos)
             continue
         if fill is None:
-            # Double-close guard skipped this add-on: nothing executed, so
-            # there is no fill pnl and no risk to release.
-            logger.warning(
-                "⚠️ [EOD PYRAMID CLOSE] %s: add-on %s already closed — skipped",
+            # Double-close guard refused this add-on: nothing executed at the
+            # broker, so we cannot prove it is flat. Treat it as a FAILED close
+            # (D-15): keep it in the book so the next EOD/force-close pass
+            # retries it instead of silently orphaning a possibly-live position.
+            logger.error(
+                "❌ [EOD PYRAMID CLOSE] %s: add-on %s refused by the close guard "
+                "— it may still be open at the broker; retrying next pass",
                 pm.symbol, str(pos_id)[:8],
             )
+            failed.append(pyr_pos)
             continue
         closed += 1
         # Because we detached the add-on, _execute_full_close's own E11 sweep

@@ -149,9 +149,33 @@ def test_pyramid_only_close_survives_double_close_guard():
     closed = close_lingering_pyramids(pm, 98.0, "t4", "EOD_SQUARE_OFF")
 
     assert closed == 0
-    assert pm.pyramid_positions == [], "a guarded skip is not a lingering add-on"
     assert spied.realized_calls == [], "no fill means no risk release"
     assert pm._pyramid_open_risk == {"already-closed": 0.5}, "risk stays reserved"
+
+
+def test_guarded_skip_keeps_addon_in_book_for_retry():
+    """A guarded skip is a FAILED close, not a successful one (D-15).
+
+    ``_closed_ids`` now lives for the manager lifetime, so an id collision
+    (e.g. a reused/replayed id) is reachable. The skip means nothing executed
+    at the broker, so the add-on may still be live: dropping it from the book
+    would orphan a real position with no retry. It must stay in the book.
+    """
+    pm = _make_pm()
+    addon = _pyramid(_id="dup-1")
+    pm.pyramid_positions = [addon]
+    pm._closed_ids.add("dup-1")
+    pm.current_position = None
+
+    from quant.runtime import close_lingering_pyramids
+
+    closed = close_lingering_pyramids(pm, 98.0, "t", "EOD_SQUARE_OFF")
+
+    assert closed == 0, "a guarded skip closed nothing"
+    assert [p._id for p in pm.pyramid_positions] == ["dup-1"], (
+        "the add-on may still be open at the broker, so it must stay in the book"
+    )
+    assert pm.pyramid_count == 1, "book count must match pyramid_positions"
 
 
 def test_pyramid_only_close_one_failure_does_not_orphan_the_rest():
