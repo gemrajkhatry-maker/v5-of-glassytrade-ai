@@ -107,7 +107,7 @@ logger = logging.getLogger(__name__)
 _HOTPATH = get_hotpath_tracer()
 
 # Deterministic conviction used for gate 4's probability check when the engine
-# decides from the auction state alone (above the 0.55 min_probability
+# decides from the auction state alone (at the 0.65 data-quality conviction
 # threshold). The decision-critical path is 100% deterministic by design — no
 # model inference is involved, so _decide never waits on external calls.
 # Price-scaled WS ``amt`` keys that must stay on the OPTION contract's scale

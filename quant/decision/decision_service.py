@@ -70,7 +70,7 @@ class DecisionService:
         if (
             not allow_positioned
             and ctx.data_quality is not None
-            and ctx.agent_probability >= 0.9
+            and ctx.agent_probability >= 0.65
             and not conviction_allowed(ctx.data_quality)
         ):
             return QuantDecision(

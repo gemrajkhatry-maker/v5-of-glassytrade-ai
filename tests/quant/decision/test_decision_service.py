@@ -1,4 +1,7 @@
+from dataclasses import replace
+
 from quant.bars import Bar
+from quant.decision.data_quality import DataQuality
 from quant.decision.decision_service import DecisionService, QuantDecision
 from quant.decision.context import DecisionContext
 
@@ -121,3 +124,22 @@ def test_approved_signal_carries_model_label():
     assert d.signal.model_label, "Approved signal must have a non-empty model_label"
     assert d.model_label, "QuantDecision must carry model_label when approved"
     assert d.signal.model_label == d.model_label, "Signal and decision model_label must match"
+
+
+def test_data_quality_blocked_at_deterministic_conviction():
+    ctx = replace(
+        _ctx(agent_probability=0.7),
+        data_quality=DataQuality.PRICE_DIRECTION_PROXY,
+    )
+    d = DecisionService().evaluate(ctx)
+    assert not d.approved and d.signal is None
+    assert d.reason == "DATA_QUALITY_BLOCKED"
+
+
+def test_data_quality_gate_passes_for_allowlisted_quality():
+    ctx = replace(
+        _ctx(agent_probability=0.7),
+        data_quality=DataQuality.TICK_EXACT,
+    )
+    d = DecisionService().evaluate(ctx)
+    assert d.reason != "DATA_QUALITY_BLOCKED"

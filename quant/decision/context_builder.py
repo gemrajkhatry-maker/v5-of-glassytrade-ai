@@ -20,7 +20,7 @@ from quant.decision.data_quality import normalize_data_quality
 logger = logging.getLogger(__name__)
 
 # Deterministic conviction used for gate 4's probability check when the engine
-# decides from the auction state alone (above the 0.55 min_probability
+# decides from the auction state alone (at the 0.65 data-quality conviction
 # threshold). The decision-critical path is 100% deterministic by design — no
 # model inference is involved, so _decide never waits on external calls.
 _DETERMINISTIC_CONVICTION = 0.7
