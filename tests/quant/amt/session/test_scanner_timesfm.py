@@ -249,8 +249,14 @@ def test_scanning_agent_model_momentum_inside_value_area():
     assert all(g["passed"] for g in res["gateResults"])
 
 
-def test_timesfm_strategy_model_momentum_entry():
-    """Verify TimesFMTradingStrategy generates Signal for MODEL_MOMENTUM."""
+def test_timesfm_strategy_model_momentum_blocked_without_canonical_edge():
+    """MODEL_MOMENTUM without a canonical setup path must not trade.
+
+    Gate 3 has no MODEL_MOMENTUM path (ctx.agent_direction is None here, so
+    "No direction") and gate 4 reports "RR fail". Momentum drift alone is a
+    minor drift (runtime thesis-flip skips it) — entries require canonical
+    edge like all E2E setups.
+    """
     from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
 
     strat = TimesFMTradingStrategy(target_horizon=32)
@@ -269,9 +275,8 @@ def test_timesfm_strategy_model_momentum_entry():
     )
 
     dec = strat.should_enter(ctx, forecast=forecast)
-    assert dec.approved is True
-    assert dec.signal is not None
-    assert dec.signal.type == "LONG"
-    assert dec.signal.reason == "MODEL_MOMENTUM"
-    assert dec.signal.sl < 8150.0
-    assert dec.signal.tp > 8150.0
+    assert dec.approved is False
+    assert dec.signal is None
+    joined = " ".join(dec.block_reasons)
+    assert "TRIPLE_A_EDGE" in joined
+    assert "RISK_REWARD" in joined
