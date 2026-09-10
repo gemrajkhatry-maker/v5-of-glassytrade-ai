@@ -49,11 +49,13 @@ _SCANNER_ENV_KEYS = (
 )
 
 
-def test_from_env_defaults(monkeypatch):
+def test_from_settings_defaults(monkeypatch):
+    # The settings adapter is the only authority; absent/falsy knobs fall back
+    # to the class-level defaults (D-23 collapsed the duplicate from_env path).
     for k in _SCANNER_ENV_KEYS:
         monkeypatch.delenv(k, raising=False)
-    cfg = ScannerConfig.from_env()
-    assert cfg.top_n == 4
+    cfg = ScannerConfig.from_settings(object())
+    assert cfg.top_n == ScannerConfig.DEFAULT_TOP_N
     assert cfg.underlyings == ("CRUDEOIL", "NATURALGAS", "GOLDM", "SILVERM")
     assert cfg.option_type == ""
     assert cfg.preferred_option_type is None
@@ -61,14 +63,16 @@ def test_from_env_defaults(monkeypatch):
     assert cfg.strikes_around_atm == 2
 
 
-def test_from_env_parsing_matches_settings_adapter(monkeypatch):
+def test_from_settings_parsing_matches_settings_adapter():
     # settings_adapter strips but does NOT upper() and does NOT drop empties.
-    monkeypatch.setenv("SCANNER_TOP_N", "8")
-    monkeypatch.setenv("SCANNER_UNDERLYINGS", " crudeoil , GOLD ")
-    monkeypatch.setenv("SCANNER_OPTION_TYPE", "CE")
-    monkeypatch.setenv("SCANNER_EXPIRY_INDEX", "1")
-    monkeypatch.setenv("STRIKES_AROUND_ATM", "3")
-    cfg = ScannerConfig.from_env()
+    class _AdapterLike:
+        SCANNER_TOP_N = 8
+        SCANNER_UNDERLYINGS = [" crudeoil ", " GOLD "]
+        SCANNER_OPTION_TYPE = "CE"
+        SCANNER_EXPIRY_INDEX = 1
+        STRIKES_AROUND_ATM = 3
+
+    cfg = ScannerConfig.from_settings(_AdapterLike())
     assert cfg.top_n == 8
     assert cfg.underlyings == ("crudeoil", "GOLD")
     assert cfg.preferred_option_type == "CE"
