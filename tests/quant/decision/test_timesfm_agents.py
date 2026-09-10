@@ -404,3 +404,131 @@ def test_scanning_agent_gate1_opening_noise_fails():
     assert g1["passed"] is False
     assert "Opening noise" in g1["message"]
 
+
+def test_position_agent_short_in_profit_no_false_thesis_flip():
+    """Option short in profit with normal option spread dispersion must NOT trigger thesis flip."""
+    agent = TimesFMPositionAgent(target_horizon=32)
+    # NIFTY 15 SEP 23450 PUT short @ 102.8, curr=99.7, in profit, cvd_slope=0.0
+    bar = Bar("2026-09-10T10:20:00+05:30", 101.0, 101.5, 99.5, 99.7, 5000, 0)
+    ctx = DecisionContext(
+        symbol="NIFTY 15 SEP 23450 PUT",
+        bar=bar,
+        position_open=True,
+        position_side="SHORT",
+        position_entry_price=102.8,
+        position_sl=107.0,
+        position_tp=85.0,
+        position_unrealized_pnl=1982.5,
+        position_bars_held=0,
+        cvd_slope=0.0,
+        absorption_side="",
+        stacked_imbalance_direction="",
+    )
+    # Forecast mean 101.64 (favorable for short since < 102.8 entry), q_spread 13.60 (normal for options)
+    p50 = np.linspace(99.7, 101.64, 32)
+    p10 = p50 - 6.8
+    p90 = p50 + 6.8
+    option_forecast = TimesFMForecast(
+        horizon=32,
+        p50_path=p50,
+        p10_path=p10,
+        p90_path=p90,
+        q_spread=13.60,
+        mean_forecast=101.64,
+        pct_change=(101.64 - 99.7) / 99.7,
+        forecast_steps=["FLAT"] * 32,
+        curr_price=99.7,
+        lat_ms=12.0,
+    )
+    res = agent.evaluate(ctx, option_forecast)
+    assert res["action"] in ("HOLD", "TIGHTEN_SL")
+    assert res["reason"] != "THESIS_FLIP"
+    assert "Opposing order flow (0.0)" not in res["rationale"]
+    assert "Order flow steady" in res["rationale"] or "holding" in res["rationale"]
+
+
+def test_position_agent_thesis_flip_opposing_cvd_accurate_rationale():
+    """When thesis flip triggers due to opposing CVD, rationale must accurately state the CVD slope."""
+    agent = TimesFMPositionAgent(target_horizon=32)
+    bar = Bar("2026-09-10T10:20:00+05:30", 100.0, 102.0, 99.0, 101.5, 5000, 2000)
+    ctx = DecisionContext(
+        symbol="NIFTY 15 SEP 23450 PUT",
+        bar=bar,
+        position_open=True,
+        position_side="SHORT",
+        position_entry_price=100.0,
+        position_sl=105.0,
+        position_tp=85.0,
+        position_unrealized_pnl=-150.0,
+        position_bars_held=1,
+        cvd_slope=3.2,
+        stacked_imbalance_direction="BUY",
+    )
+    p50 = np.linspace(101.5, 104.0, 32)
+    forecast = TimesFMForecast(
+        horizon=32,
+        p50_path=p50,
+        p10_path=p50 - 5.0,
+        p90_path=p50 + 5.0,
+        q_spread=10.0,
+        mean_forecast=104.0,
+        pct_change=0.02,
+        forecast_steps=["LONG"] * 32,
+        curr_price=101.5,
+        lat_ms=10.0,
+    )
+    res = agent.evaluate(ctx, forecast)
+    assert res["action"] == "EXIT"
+    assert res["reason"] == "THESIS_FLIP"
+    assert "Opposing order flow (CVD slope +3.2)" in res["rationale"]
+    assert "buyer pressure" in res["rationale"]
+
+
+def test_scanner_triple_a_long_fires_on_sell_absorbed_far_from_val():
+    """LONG Setup A must fire via the absorption arm alone (price far from VAL)."""
+    import numpy as np
+    from types import SimpleNamespace
+    from quant.decision.timesfm_agents import TimesFMScanningAgent, TimesFMForecast
+    px = 100.0
+    ctx = SimpleNamespace(
+        symbol="NIFTY", bar=SimpleNamespace(close=px), state=None,
+        session_phase="MORNING", session_open=True, warmup_complete=True,
+        allow_trend=True, allow_reversion=True,
+        poc=99.0, vah=101.0, val=90.0, cvd_slope=1.5,
+        absorption_side="SELL_ABSORBED", stacked_imbalance_direction="",
+        risk_halted=False, cooldown_remaining_sec=0.0,
+        market_state=SimpleNamespace(value="BALANCED"))
+    fc = TimesFMForecast(
+        horizon=32, p50_path=np.full(32, 101.0, dtype=np.float32),
+        p10_path=np.full(32, 100.0, dtype=np.float32),
+        p90_path=np.full(32, 102.0, dtype=np.float32),
+        q_spread=2.0, mean_forecast=101.0, pct_change=0.01,
+        forecast_steps=["LONG"] * 32, curr_price=px, lat_ms=5.0)
+    res = TimesFMScanningAgent().evaluate(ctx, fc)
+    assert res["setup"] == "TRIPLE_A" and res["direction"] == "LONG"
+
+
+def test_scanner_triple_a_short_fires_on_buy_absorbed_far_from_vah():
+    """SHORT Setup B must fire via the absorption arm alone (price far from VAH)."""
+    import numpy as np
+    from types import SimpleNamespace
+    from quant.decision.timesfm_agents import TimesFMScanningAgent, TimesFMForecast
+    px = 100.0
+    ctx = SimpleNamespace(
+        symbol="NIFTY", bar=SimpleNamespace(close=px), state=None,
+        session_phase="MORNING", session_open=True, warmup_complete=True,
+        allow_trend=True, allow_reversion=True,
+        poc=101.0, vah=110.0, val=99.0, cvd_slope=-1.5,
+        absorption_side="BUY_ABSORBED", stacked_imbalance_direction="",
+        risk_halted=False, cooldown_remaining_sec=0.0,
+        market_state=SimpleNamespace(value="BALANCED"))
+    fc = TimesFMForecast(
+        horizon=32, p50_path=np.full(32, 99.0, dtype=np.float32),
+        p10_path=np.full(32, 98.0, dtype=np.float32),
+        p90_path=np.full(32, 100.0, dtype=np.float32),
+        q_spread=2.0, mean_forecast=99.0, pct_change=-0.01,
+        forecast_steps=["SHORT"] * 32, curr_price=px, lat_ms=5.0)
+    res = TimesFMScanningAgent().evaluate(ctx, fc)
+    assert res["setup"] == "TRIPLE_A" and res["direction"] == "SHORT"
+
+

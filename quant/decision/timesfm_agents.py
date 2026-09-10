@@ -122,7 +122,7 @@ class TimesFMScanningAgent:
         if (
             allow_entry
             and allow_trend
-            and (curr_price <= val + tol or absorption == "BUY" or stacked_imb == "BUY")
+            and (curr_price <= val + tol or "SELL" in absorption or stacked_imb == "BUY")
             and cvd_slope > 1.0
             and forecast.pct_change > 0.0005
         ):
@@ -140,7 +140,7 @@ class TimesFMScanningAgent:
         elif (
             allow_entry
             and allow_trend
-            and (curr_price >= vah - tol or absorption == "SELL" or stacked_imb == "SELL")
+            and (curr_price >= vah - tol or "BUY" in absorption or stacked_imb == "SELL")
             and cvd_slope < -1.0
             and forecast.pct_change < -0.0005
         ):
@@ -450,8 +450,9 @@ class TimesFMPositionAgent:
         reason = "TREND_INTACT"
         confidence = "High"
         confidence_score = 0.85
+        cvd_text = f"CVD confirms trend ({cvd_slope:+.1f})" if abs(cvd_slope) >= 0.5 else "Order flow steady"
         rationale = (
-            f"CVD confirms trend ({cvd_slope:.1f}) and TimesFM 32-step trajectory remains favorable — "
+            f"{cvd_text} and TimesFM 32-step trajectory remains favorable — "
             f"holding {symbol} {side} ({bars_held} bars held, PnL: {pnl:+.1f})."
         )
 
@@ -485,32 +486,53 @@ class TimesFMPositionAgent:
                 f"with partial take-profit on {symbol} {side} (+{profit:.1f} pts)."
             )
 
-        # 4. THESIS FLIP / OPPOSING ABSORPTION / UNCERTAINTY SHOCK
+        # 4. THESIS FLIP / OPPOSING ABSORPTION / ADVERSE ORDER FLOW
         elif (
             # Opposing absorption cluster (Fabio: institutional inventory capping the move)
-            (side == "LONG" and absorption in ("SELL", "SELL_ABSORBED"))
-            or (side == "SHORT" and absorption in ("BUY", "BUY_ABSORBED"))
+            (side == "LONG" and absorption in ("BUY", "BUY_ABSORBED"))
+            or (side == "SHORT" and absorption in ("SELL", "SELL_ABSORBED"))
             # Or opposing stacked imbalance with opposing CVD
             or (side == "LONG" and stacked_imb == "SELL" and cvd_slope < -1.0)
             or (side == "SHORT" and stacked_imb == "BUY" and cvd_slope > 1.0)
+            # Or strong opposing CVD divergence without stacked imbalance
+            or (side == "LONG" and cvd_slope <= -2.5)
+            or (side == "SHORT" and cvd_slope >= 2.5)
             # Or TimesFM trajectory breaks down significantly against trade
             or (side == "LONG" and forecast.mean_forecast < entry_price - (0.5 * risk))
             or (side == "SHORT" and forecast.mean_forecast > entry_price + (0.5 * risk))
-            # Or sudden volatility spread shock
-            or (forecast.q_spread > curr_price * 0.008)
         ):
             action = "EXIT"
             reason = "THESIS_FLIP"
             confidence = "High"
             confidence_score = 0.90
-            if side == "LONG" and absorption in ("SELL", "SELL_ABSORBED"):
-                rationale = "Heavy sell absorption cluster — sellers in control."
-            elif side == "SHORT" and absorption in ("BUY", "BUY_ABSORBED"):
+            if side == "LONG" and absorption in ("BUY", "BUY_ABSORBED"):
                 rationale = "Heavy buy absorption cluster — buyers in control."
+            elif side == "SHORT" and absorption in ("SELL", "SELL_ABSORBED"):
+                rationale = "Heavy sell absorption cluster — sellers in control."
+            elif (side == "LONG" and stacked_imb == "SELL" and cvd_slope < -1.0) or (side == "LONG" and cvd_slope <= -2.5):
+                rationale = (
+                    f"Thesis flip on {symbol} LONG: Opposing order flow (CVD slope {cvd_slope:+.1f}) "
+                    f"and seller pressure — exiting before stop loss hit."
+                )
+            elif (side == "SHORT" and stacked_imb == "BUY" and cvd_slope > 1.0) or (side == "SHORT" and cvd_slope >= 2.5):
+                rationale = (
+                    f"Thesis flip on {symbol} SHORT: Opposing order flow (CVD slope {cvd_slope:+.1f}) "
+                    f"and buyer pressure — exiting before stop loss hit."
+                )
+            elif side == "LONG" and forecast.mean_forecast < entry_price - (0.5 * risk):
+                rationale = (
+                    f"Thesis flip on {symbol} LONG: TimesFM 32-step trajectory breakdown "
+                    f"(projected {forecast.mean_forecast:.2f} breaches 0.5R envelope) — exiting before stop loss hit."
+                )
+            elif side == "SHORT" and forecast.mean_forecast > entry_price + (0.5 * risk):
+                rationale = (
+                    f"Thesis flip on {symbol} SHORT: TimesFM 32-step trajectory breakdown "
+                    f"(projected {forecast.mean_forecast:.2f} breaches 0.5R envelope) — exiting before stop loss hit."
+                )
             else:
                 rationale = (
-                    f"Thesis flip on {symbol} {side}: Opposing order flow ({cvd_slope:.1f}) and TimesFM trajectory breakdown — "
-                    f"exiting at market before stop loss hit."
+                    f"Thesis flip on {symbol} {side}: Invalidation of market structure — "
+                    f"exiting before stop loss hit."
                 )
 
         # 5. RISK-ZERO RATCHET (Breakeven Trailing)
