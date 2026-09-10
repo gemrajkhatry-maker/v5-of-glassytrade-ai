@@ -171,3 +171,63 @@ def test_forecast_path_applies_expiry_and_day_of_week_cuts():
     monday = SessionRisk(storage=None, symbol="SYM", day_of_week=0)
     qty_monday = monday.position_size(100.0, 99.0, lot_size=1.0, forecast=fc, side="LONG")
     assert qty_monday == pytest.approx(qty_normal * 0.5)
+
+
+def test_model_sizing_failure_counted_and_still_refuses(monkeypatch):
+    """Finding 1 (review of D-12): a raising model-sizing call must be
+    distinguishable from a genuine budget-zero. The refuse path must bump an
+    observable counter (per instance) and still return 0.0."""
+    from quant.execution.risk import SessionRisk
+
+    risk = SessionRisk(storage=None, symbol="SYM", base_risk_pct=0.05)
+    assert risk.model_sizing_failures == 0
+
+    import quant.decision.timesfm_sizing as sz
+
+    class _Boom:
+        def compute_size(self, **_k):
+            raise RuntimeError("empty p10_path")
+
+    monkeypatch.setattr(sz, "TimesFMPositionSizer", lambda *a, **k: _Boom())
+
+    class _Fc:
+        forecast_steps = ["LONG"] * 32
+
+    qty = risk.position_size(100.0, 99.0, lot_size=1.0, forecast=_Fc(), side="LONG")
+    assert qty == 0.0
+    assert risk.model_sizing_failures == 1
+
+
+def test_forecast_path_snaps_to_lots_before_expiry_cut():
+    """Finding 2 (review of D-12): the forecast path must snap the model
+    quantity to whole lots FIRST, then apply the expiry and day-of-week
+    multipliers on the snapped value — same order as the static branches
+    (which compute whole lots and multiply the returned qty by the Mon/Fri
+    factor). Pinned with lot_size=75: the model returns 24975 (333 lots);
+    snapping first then halving gives an exact 0.5 cut (12487.5), whereas the
+    old snap-last order floored the halved value to 12450."""
+    import numpy as np
+
+    from quant.decision.timesfm_agents import TimesFMForecast
+    from quant.execution.risk import SessionRisk
+
+    p50 = np.linspace(100.0, 104.0, 32)
+    fc = TimesFMForecast(
+        horizon=32, p50_path=p50, p10_path=p50 - 1.0, p90_path=p50 + 1.0,
+        q_spread=2.0, mean_forecast=float(p50[-1]), pct_change=0.04,
+        forecast_steps=["LONG"] * 32, curr_price=100.0, lat_ms=1.0,
+    )
+
+    normal = SessionRisk(storage=None, symbol="SYM", day_of_week=2)  # Wednesday
+    qty_normal = normal.position_size(100.0, 99.0, lot_size=75.0, forecast=fc, side="LONG")
+    assert qty_normal == 24975.0  # snapped model size: 333 lots x 75
+
+    expiry = SessionRisk(storage=None, symbol="SYM", day_of_week=2)
+    qty_expiry = expiry.position_size(100.0, 99.0, lot_size=75.0, forecast=fc,
+                                      side="LONG", is_expiry=True)
+    # Snap first, then halve -> an exact 0.5 cut on the snapped value.
+    assert qty_expiry == 12487.5
+
+    monday = SessionRisk(storage=None, symbol="SYM", day_of_week=0)
+    qty_monday = monday.position_size(100.0, 99.0, lot_size=75.0, forecast=fc, side="LONG")
+    assert qty_monday == 12487.5

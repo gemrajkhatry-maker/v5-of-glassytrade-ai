@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 # silently: a degraded session has to be distinguishable from a healthy one.
 MODEL_RISK_FAILURES = 0
 
+# TimesFM *entry sizing* failures observed since process start (Finding 1 of
+# the D-12 review). Distinct from MODEL_RISK_FAILURES (exit-side degradation):
+# a sizing failure refuses the entry, so it must be visible to operators
+# instead of looking like a genuine risk-budget-zero rejection.
+MODEL_SIZING_FAILURES = 0
+
 
 @dataclass(frozen=True)
 class ExitDecision:

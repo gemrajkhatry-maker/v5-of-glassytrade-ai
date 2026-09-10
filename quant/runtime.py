@@ -1147,6 +1147,12 @@ class QuantEngine:
             )
             # If strategy provides a TimesFM forecast, pass it for dynamic Kelly & VaR sizing
             tfm_fc = self._fresh_forecast()
+            # Finding 1 (review of D-12): distinguish a model-sizing REFUSAL
+            # from a genuine budget-zero so the operator-facing reason is
+            # truthful. Snapshot the per-call count around the sizing call.
+            _sizing_failures_before = getattr(
+                self._risk, "model_sizing_failures", 0,
+            )
             quantity = clamp_quantity(
                 self._risk.position_size(
                     signal.entry, signal.sl, lot_size=self._oms.lot_size,
@@ -1166,11 +1172,16 @@ class QuantEngine:
                 # each micro-bar) — a new reason string every evaluation would
                 # re-open the blocking episode and spam SignalBlocked. The
                 # payload carries the signal; the log line prints entry/sl.
-                self._latch_or_signal_block(
-                    signal,
-                    f"risk budget affords 0 lots (lot={self._oms.lot_size})",
-                    bar.time,
+                _model_sizing_failed = (
+                    getattr(self._risk, "model_sizing_failures", 0)
+                    > _sizing_failures_before
                 )
+                _zero_reason = (
+                    "model sizing unavailable (TimesFM failure) — refusing entry"
+                    if _model_sizing_failed
+                    else f"risk budget affords 0 lots (lot={self._oms.lot_size})"
+                )
+                self._latch_or_signal_block(signal, _zero_reason, bar.time)
                 return
             # Portfolio-level ceiling: aggregate open risk across ALL engines.
             # Per-engine SessionRisk stays authoritative for its own halts;

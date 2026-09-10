@@ -320,6 +320,7 @@ async def metrics():
             "blocked_count": 0,
             "engine_count": 0,
             "model_risk_failures": _exits_mod.MODEL_RISK_FAILURES,
+            "model_sizing_failures": _exits_mod.MODEL_SIZING_FAILURES,
         },
     }
 

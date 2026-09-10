@@ -100,6 +100,11 @@ class SessionRisk:
         else:
             self._day_of_week = day_of_week
         self._load_status: RiskLoadStatus = RiskLoadStatus.MEMORY_ONLY
+        # Finding 1 (review of D-12): a TimesFM sizing failure refuses the
+        # entry (returns 0.0) — indistinguishable from a genuine budget-zero
+        # unless we count it. Per-instance so callers can attribute the
+        # refusal to THIS call, plus a process-level global for /v1/metrics.
+        self._model_sizing_failures = 0
         self._load()
 
     def _key(self) -> str:
@@ -109,6 +114,15 @@ class SessionRisk:
     def load_status(self) -> RiskLoadStatus:
         """How this session's initial state was established — for telemetry."""
         return self._load_status
+
+    @property
+    def model_sizing_failures(self) -> int:
+        """Count of TimesFM entry-sizing failures that refused an entry.
+
+        Finding 1 (review of D-12): callers must be able to tell a broken
+        sizer from a genuinely unaffordable trade.
+        """
+        return self._model_sizing_failures
 
     def _load(self) -> None:
         if self._storage is None:
@@ -363,21 +377,35 @@ class SessionRisk:
                         max_rupee_risk_cap=max_rupee_risk_cap,
                     )
                     qty = float(res.quantity)
-                    # The forecast path must honour the same protective cuts as
-                    # the static branches: expiry halving and the Mon/Fri
-                    # defensive multiplier. Applying them only below meant they
-                    # silently did not apply on the E2E path.
+                    # Finding 2 (review of D-12): match the static branches'
+                    # ordering — snap to WHOLE LOTS first, then apply the
+                    # expiry halving and the Mon/Fri defensive multiplier on
+                    # the snapped value (mirroring
+                    # `qty * DAY_OF_WEEK_MULTIPLIER.get(...)` at the end of
+                    # the static branches). Snapping last floored the cut
+                    # (150 -> 75 -> 50 with lot_size=75: a 0.33 cut, not 0.5)
+                    # and silently produced 0.0 for sub-lot results.
+                    if lot_size and lot_size > 1.0:
+                        qty = float(int(qty // lot_size) * lot_size)
                     if is_expiry:
                         qty *= 0.5
                     qty *= DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
-                    if lot_size and lot_size > 1.0:
-                        qty = float(int(qty // lot_size) * lot_size)
                     return qty
                 except Exception as exc:
                     # Do NOT fall through to the static deployment policy: it is
                     # a structurally different, non-risk-equivalent size (it
                     # ignores max_rupee_risk_cap and sizes on notional). If the
                     # model path is unavailable, REFUSE the trade.
+                    self._model_sizing_failures += 1
+                    try:
+                        # Process-level mirror for /v1/metrics (same shape as
+                        # exits.MODEL_RISK_FAILURES). Lazy import: exits pulls
+                        # in the order/exit-rule stack and risk must stay
+                        # importable standalone.
+                        import quant.execution.exits as _exits_mod
+                        _exits_mod.MODEL_SIZING_FAILURES += 1
+                    except Exception:  # pragma: no cover - telemetry only
+                        pass
                     logger.error(
                         "TimesFM dynamic sizing failed (%s) — refusing entry "
                         "rather than switching to the deployment policy", exc,

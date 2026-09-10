@@ -188,3 +188,23 @@ def test_totals_expose_model_risk_failures():
         assert totals["model_risk_failures"] == exits_mod.MODEL_RISK_FAILURES
     finally:
         exits_mod.MODEL_RISK_FAILURES -= 1
+
+
+def test_totals_expose_model_sizing_failures():
+    """Finding 1 (review of D-12): a TimesFM *entry sizing* failure must be
+    observable in /v1/metrics, distinct from the pre-existing exit-side
+    model_risk_failures counter."""
+    import quant.execution.exits as exits_mod
+
+    provider = CoordinatorMetricsProvider(FakeCoordinator(engines={}))
+    totals = provider.snapshot()["totals"]
+
+    assert "model_sizing_failures" in totals
+    assert totals["model_sizing_failures"] == exits_mod.MODEL_SIZING_FAILURES
+
+    exits_mod.MODEL_SIZING_FAILURES += 1
+    try:
+        totals = provider.snapshot()["totals"]
+        assert totals["model_sizing_failures"] == exits_mod.MODEL_SIZING_FAILURES
+    finally:
+        exits_mod.MODEL_SIZING_FAILURES -= 1

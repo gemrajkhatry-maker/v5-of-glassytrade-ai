@@ -77,6 +77,7 @@ class CoordinatorMetricsProvider:
                 "blocked_count": total_blocked,
                 "engine_count": len(engines),
                 "model_risk_failures": exits_mod.MODEL_RISK_FAILURES,
+                "model_sizing_failures": exits_mod.MODEL_SIZING_FAILURES,
             },
         }
 
