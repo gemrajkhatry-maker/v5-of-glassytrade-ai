@@ -165,3 +165,79 @@ def test_tp_still_books_when_bar_does_not_breach_the_protective_stop():
     assert d.should_exit and d.reason == "TP1"
     assert d.close_price == 110.0
     assert d.partial_fraction == 0.5
+
+
+def test_authority_stop_wins_over_deterministic_candidate():
+    """D-16: the deterministic trail could propose a looser stop than the
+    TimesFM authority had already ratcheted on the same bar."""
+    import numpy as np
+
+    from quant.decision.signal_builder import Signal
+    from quant.decision.timesfm_agents import TimesFMForecast
+    from quant.execution.exits import ExitEngine
+    from quant.execution.order import Order, Position
+
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=95.0, tp=110.0,
+                 rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
+    pos = Position(order=Order(sig, 10.0), open_price=100.0, open_time="t0", size=10.0)
+
+    p50 = np.linspace(100.0, 108.0, 32)
+    fc = TimesFMForecast(
+        horizon=32, p50_path=p50, p10_path=p50 - 1.0, p90_path=p50 + 1.0,
+        q_spread=2.0, mean_forecast=float(p50[-1]), pct_change=0.08,
+        forecast_steps=["LONG"] * 32, curr_price=100.0, lat_ms=1.0,
+    )
+
+    eng = ExitEngine()
+    eng.evaluate(pos, bar_close=106.0, bar_high=107.0, bar_low=105.0,
+                 bar_index=3, timesfm_forecast=fc)
+    after_authority = eng._trail[pos._id].stop
+
+    # A later bar with NO forecast must not loosen the authority's stop.
+    eng.evaluate(pos, bar_close=104.0, bar_high=106.0, bar_low=103.0, bar_index=4)
+    assert eng._trail[pos._id].stop >= after_authority
+
+
+def test_deterministic_advance_can_only_tighten_a_live_trail(monkeypatch):
+    """D-16 (non-vacuous): the state-advance (Rule 6) must clamp a looser
+    deterministic candidate against a live trail, not just rely on the helper's
+    own internal ratchet. check_trailing_stop is stubbed to return a LOOSER
+    candidate so the write-site contract is what is under test."""
+    import quant.execution.exit_checks as checks_mod
+    from quant.execution.exits import _Trail
+
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=95.0, tp=1000.0,
+                 rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
+    pos = Position(order=Order(sig, 10.0), open_price=100.0, open_time="t0", size=10.0)
+    eng = ExitEngine()
+    eng._trail[pos._id] = _Trail(active=True, stop=106.0)   # authority ratchet
+
+    def _loosening_helper(*a, **k):
+        return None, k.get("be_floor"), 101.0               # < 106.0 -> would loosen
+
+    monkeypatch.setattr(checks_mod, "check_trailing_stop", _loosening_helper)
+
+    d = eng.evaluate(pos, bar_close=107.0, bar_high=107.5, bar_low=106.5, bar_index=4)
+    assert not d.should_exit
+    assert eng._trail[pos._id].stop == 106.0                # clamped, not loosened
+
+
+def test_deterministic_advance_can_still_tighten_a_live_trail(monkeypatch):
+    """D-16 counterpart: a TIGHTER deterministic candidate still advances."""
+    import quant.execution.exit_checks as checks_mod
+    from quant.execution.exits import _Trail
+
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=95.0, tp=1000.0,
+                 rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
+    pos = Position(order=Order(sig, 10.0), open_price=100.0, open_time="t0", size=10.0)
+    eng = ExitEngine()
+    eng._trail[pos._id] = _Trail(active=True, stop=104.0)
+
+    def _tightening_helper(*a, **k):
+        return None, k.get("be_floor"), 106.5
+
+    monkeypatch.setattr(checks_mod, "check_trailing_stop", _tightening_helper)
+
+    d = eng.evaluate(pos, bar_close=107.0, bar_high=107.5, bar_low=106.5, bar_index=4)
+    assert not d.should_exit
+    assert eng._trail[pos._id].stop == 106.5

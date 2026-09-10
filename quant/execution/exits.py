@@ -298,6 +298,18 @@ class ExitEngine:
                 if tr is None:
                     tr = _Trail()
                     self._trail[position._id] = tr
+                elif tr.active and tr.stop is not None:
+                    # Single trail authority (D-16). The TimesFM quantile
+                    # ratchet (Rule 2) already owns the stop for this bar; this
+                    # deterministic advance may only tighten what the authority
+                    # wrote, never loosen it. check_trailing_stop ratchets
+                    # against the same value today, but the contract is enforced
+                    # here, at the write site, so a future helper that stops
+                    # ratcheting cannot silently widen a live stop.
+                    trail_stop = (
+                        max(float(trail_stop), float(tr.stop)) if long
+                        else min(float(trail_stop), float(tr.stop))
+                    )
                 tr.active = True
                 tr.stop = trail_stop
             if r:
