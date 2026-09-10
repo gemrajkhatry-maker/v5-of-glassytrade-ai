@@ -1425,8 +1425,13 @@ class QuantEngine:
         sizing — callers get None and fall back to deterministic behavior.
         """
         tfm_fc = getattr(self._strategy, "get_latest_forecast", lambda s: None)(self.symbol)
-        if tfm_fc is not None and getattr(tfm_fc, "asof_bar", -1) >= 0:
-            age = self._bar_index - int(tfm_fc.asof_bar)
+        asof = getattr(tfm_fc, "asof_bar", -1)
+        try:
+            asof = int(asof)
+        except (TypeError, ValueError):
+            asof = -1
+        if tfm_fc is not None and asof >= 0:
+            age = self._bar_index - asof
             if age > 1:
                 logger.warning(
                     "⚠️ [STALE FORECAST] %s: cached forecast %d bars old — deterministic exits",

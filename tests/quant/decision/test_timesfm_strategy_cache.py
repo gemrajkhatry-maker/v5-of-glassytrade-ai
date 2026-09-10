@@ -96,3 +96,16 @@ def test_fresh_forecast_reaches_exits():
     strategy._latest_forecasts["NIFTY"] = fresh
     captured = _run_manage_exit_capture(strategy, bar_index=13)  # 1 bar old: fresh
     assert captured.get("timesfm_forecast") is fresh
+
+
+def test_non_int_asof_bar_passes_through_as_fresh():
+    """Regression: a forecast whose asof_bar cannot be compared/coerced to an
+    int (e.g. a MagicMock from an unstubbed attribute) must not crash the
+    freshness check — it is treated as untracked and passes through."""
+    from types import SimpleNamespace
+
+    strategy = TimesFMTradingStrategy()
+    weird = SimpleNamespace(asof_bar=object())  # int() raises TypeError
+    strategy._latest_forecasts["NIFTY"] = weird
+    captured = _run_manage_exit_capture(strategy, bar_index=13)
+    assert captured.get("timesfm_forecast") is weird

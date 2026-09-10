@@ -2,13 +2,11 @@
   "decisions": [
     {
       "approved": false,
-      "reason": "GATE_REJECTED",
+      "reason": "DATA_QUALITY_BLOCKED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
-        "SESSION_PHASE: Warming up \u2014 insufficient bars",
-        "TRIPLE_A_EDGE: No direction",
-        "RISK_REWARD: RR fail"
+        "Data quality is unavailable or inferred"
       ],
       "signal_type": null,
       "signal_entry": null,
@@ -18,13 +16,11 @@
     },
     {
       "approved": false,
-      "reason": "GATE_REJECTED",
+      "reason": "DATA_QUALITY_BLOCKED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
-        "SESSION_PHASE: Warming up \u2014 insufficient bars",
-        "TRIPLE_A_EDGE: No direction",
-        "RISK_REWARD: RR fail"
+        "Data quality is unavailable or inferred"
       ],
       "signal_type": null,
       "signal_entry": null,
@@ -34,13 +30,11 @@
     },
     {
       "approved": false,
-      "reason": "GATE_REJECTED",
+      "reason": "DATA_QUALITY_BLOCKED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
-        "SESSION_PHASE: Warming up \u2014 insufficient bars",
-        "TRIPLE_A_EDGE: No direction",
-        "RISK_REWARD: RR fail"
+        "Data quality is unavailable or inferred"
       ],
       "signal_type": null,
       "signal_entry": null,
@@ -50,13 +44,11 @@
     },
     {
       "approved": false,
-      "reason": "GATE_REJECTED",
+      "reason": "DATA_QUALITY_BLOCKED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
-        "SESSION_PHASE: Warming up \u2014 insufficient bars",
-        "TRIPLE_A_EDGE: No direction",
-        "RISK_REWARD: RR fail"
+        "Data quality is unavailable or inferred"
       ],
       "signal_type": null,
       "signal_entry": null,
