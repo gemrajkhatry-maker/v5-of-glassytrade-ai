@@ -31,13 +31,14 @@ A release is **blocked** if any of these is true:
 
 | ID | Defect | Severity | Check | Fixed |
 |---|---|---|---|---|
-| D-2 | Model exit authority silently swallowed (`exits.py:195-197`) — a raising risk authority disables **all** model exits and stop-tightening with no log | BLOCKING | automated | ☐ |
-| D-3 | A close path bypasses `_execute_full_close`, so no `exit_source` stamp and no double-close guard (`runtime.py:1402-1411`) | BLOCKING | automated | ☐ |
-| D-4 | Absent volume profile fabricates an **approved** VA_FADE entry (`timesfm_agents.py:145-150`) — reproduced | BLOCKING | automated | ☐ |
-| D-10 | Shared TimesFM engine can double-feed the model window (data race **and** async-lag ordering) — reproduced | HIGH | automated | ☐ |
+| D-2 | Model exit authority silently swallowed (`exits.py:195-197`) — a raising risk authority disables **all** model exits and stop-tightening with no log | BLOCKING | automated | ✅ |
+| D-3 | A close path bypasses `_execute_full_close`, so no `exit_source` stamp and no double-close guard (`runtime.py:1402-1411`) | BLOCKING | automated | ✅ |
+| D-4 | Absent volume profile fabricates an **approved** VA_FADE entry (`timesfm_agents.py:145-150`) — reproduced | BLOCKING | automated | ✅ |
+| D-10 | Shared TimesFM engine can double-feed the model window (data race **and** async-lag ordering) — reproduced | HIGH | automated | ✅ |
 
-Rationale for each in the audit §2–§4. Until these are closed, treat paper
-results as non-representative.
+All four are now closed and regression-gated; the gate exits 0 (16 passed, 0 failed).
+See the ledger `.superpowers/sdd/progress.md` for the per-task commits, and the
+residuals section below for what remains accepted rather than fixed.
 
 ---
 
@@ -217,3 +218,30 @@ Risk if it fires: <consequence>.  Monitor: <signal>.  Owner: <name>.
 ```
 
 No blocking defect may be left both unfixed and unsigned.
+
+
+---
+
+## 7. Final remediation record (2026-09-10)
+
+Every audit defect is now either fixed or explicitly recorded as an accepted residual.
+
+- **Fixed and gated:** D-2, D-3, D-4, D-5, D-6 (retired, no producer exists), D-7, D-10, D-11,
+  D-12, D-13, D-15, D-16 (contract hardening), D-17, D-18, D-19, D-20, D-21, D-22, D-23, D-24,
+  D-25, D-26, D-27, D-28.
+- **Accepted residuals (recorded, not hidden):**
+  - R-D5a: fixing the leg-LVN key did NOT revive the pyramid engine — `leg_lvns` is empty on
+    ~95% of bars because 1m candles rarely produce the >=3 volume buckets the displacement leg
+    needs. A producer/data-granularity problem, not the read.
+  - D-16's clamp is provably a no-op on today's inputs (the helper already ratchets internally);
+    its value is a contract that a second store cannot silently widen a live stop.
+  - No gap-through-stop modelling: a gap fills exactly at the stop on every exit path.
+  - `snap_to_lot` rounds rather than floors, so an expiry half-cut lands ~0.15% over intent.
+  - `quant/decision/timesfm_client.py` is reachable only when `TIMESFM_NATIVE=false` (default
+    true); recommendation on record is to keep it and add a `use_native_engine=False` test.
+  - `frontend/tests/runtime-audit/harness.tsx` imports a payload fixture that has never been
+    tracked or on disk (pre-existing).
+
+Two process lessons from this run are recorded in the ledger: a subagent's uncommitted working
+tree can revert prior tasks (verify a "pre-existing failure" claim against git), and combined
+suite runs can appear to hang purely from competing OpenMP thread pools.
