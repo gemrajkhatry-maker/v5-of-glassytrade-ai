@@ -468,6 +468,11 @@ def _run_with_signal(signal: Signal, lot_size: int = 1):
     eng = QuantEngine(
         SyntheticGateway(_ticks()), "SYM", interval_seconds=1, lot_size=lot_size,
     )
+    # Pin a mid-week day: QuantEngine builds SessionRisk with the WALL-CLOCK
+    # weekday, and DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri — so without
+    # this the expected quantity below is calendar-dependent (125 on Tue-Thu,
+    # 63 on Mon/Fri).
+    eng._risk._day_of_week = 1
     eng._strategy = _FixedStrategy(signal)
     trace = eng.run()
     return next(e for e in trace if isinstance(e, PositionOpened))
