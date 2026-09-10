@@ -293,3 +293,22 @@ def test_options_scalping_suppresses_short_direction():
     # 3. DecisionService never approves SHORT on options
     dec = DecisionService().evaluate(ctx)
     assert not dec.approved or (dec.signal and dec.signal.type == "LONG")
+
+
+def test_dead_market_state_is_enum_not_string():
+    from types import SimpleNamespace
+    from quant.contracts.enums import MarketState
+    from quant.decision.context_builder import DecisionContextBuilder
+    bar = SimpleNamespace(close=100.0, high=101.0, low=99.0,
+                          time="2026-09-10T10:00:00+05:30")
+    risk = SimpleNamespace(halted=False, consecutive_losses=0,
+                           equity=100000.0, risk_per_trade_pct=0.05)
+    ctx = DecisionContextBuilder().build(
+        bar=bar, symbol="NIFTY", market="NSE", contract_expiry=None,
+        tick_size=0.05, bar_index=20, warm_bars=0,
+        cooldown_remaining_sec=0.0, risk_state=risk,
+        amt_dto={"marketState": "DEAD"})
+    assert ctx.market_state == MarketState.DEAD
+    # MarketState is a str-Enum so == also matches the raw "DEAD" string;
+    # identity pins the type contract (DecisionContext.market_state: MarketState).
+    assert ctx.market_state is MarketState.DEAD

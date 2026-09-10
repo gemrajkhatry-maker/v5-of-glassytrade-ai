@@ -382,7 +382,7 @@ class DecisionContextBuilder:
         raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
         break_dir = str(amt_dto.get("breakDirection") or "").upper()
         break_type = str(amt_dto.get("breakType") or "").upper()
-        if raw_ms == "DEAD": amt_market_state = "DEAD"
+        if raw_ms == "DEAD": amt_market_state = MarketState.DEAD
         elif raw_ms == "IMBALANCED": amt_market_state = MarketState.IMBALANCED
         else: amt_market_state = MarketState.BALANCED
 
