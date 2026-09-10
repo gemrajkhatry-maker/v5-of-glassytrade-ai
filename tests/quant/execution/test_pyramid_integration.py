@@ -142,3 +142,27 @@ def test_pyramid_release_uses_each_pyr_pnl():
                        float((close_px - 101.0) * 1.0)])
     assert pnls == pytest.approx(expected), \
         "each release must carry its own fill pnl"
+
+
+def test_pyramid_reads_leg_lvn_from_the_dto_key_that_exists():
+    """D-5: the DTO emits legLvns (plural). Reading legLvn (singular) made the
+    pyramid guard return on every bar, making the whole engine inert."""
+    from quant.position_manager import PositionManager
+    from quant.execution.oms import PaperOMS
+    from quant.execution.exits import ExitEngine
+    from quant.execution.risk import SessionRisk
+
+    pm = PositionManager(
+        oms=PaperOMS(lot_size=1.0), exits=ExitEngine(),
+        risk=SessionRisk(storage=None, symbol="SYM"), emit_fn=lambda e: None,
+        symbol="SYM", market="NSE", contract_expiry=None, tick_size=0.05,
+    )
+    # The guard under test is the leg-LVN source line; assert the resolution
+    # itself so the test does not depend on the rest of the pyramid ladder.
+    resolved = pm._resolve_leg_lvn({"legLvns": [99.5, 101.25], "legLvn": None}, close_px=101.0)
+    assert resolved == 101.25
+
+    legacy = pm._resolve_leg_lvn({"legLvn": 100.0}, close_px=100.0)
+    assert legacy == 100.0
+
+    assert pm._resolve_leg_lvn({}, close_px=100.0) == 0.0

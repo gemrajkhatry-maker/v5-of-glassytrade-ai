@@ -492,6 +492,25 @@ class PositionManager:
         self._exits._tp_tier[position._id] = 2
         return remaining
 
+    @staticmethod
+    def _resolve_leg_lvn(amt_dto: dict, close_px: float) -> float:
+        """Nearest impulse-leg LVN from the AMT DTO.
+
+        The DTO emits ``legLvns`` (plural, the full list); ``legLvn`` (singular)
+        is a legacy key the AMT layer never produces. Reading only the singular
+        key made the pyramid guard bail on every bar, so add-ons never fired.
+        """
+        raw = amt_dto.get("legLvns")
+        if isinstance(raw, (list, tuple)):
+            valid = [float(x) for x in raw if float(x) > 0]
+            if valid:
+                return min(valid, key=lambda x: abs(x - float(close_px)))
+        try:
+            legacy = float(amt_dto.get("legLvn") or 0.0)
+        except (TypeError, ValueError):
+            legacy = 0.0
+        return legacy if legacy > 0 else 0.0
+
     def check_pyramid(self, amt_dto: dict, bar, position, bar_index: int) -> None:
         """Spec §13.2 pyramid engine: add-on positions at Impulse Leg LVN retest.
 
@@ -537,7 +556,7 @@ class PositionManager:
         # Need the Impulse Leg LVN from the AMT DTO — use the caller-passed
         # payload (event purity), not a fresh read of mutable state.
         amt_dto = amt_dto or self._get_amt_dto() or {}
-        leg_lvn = float(amt_dto.get("legLvn") or 0.0)
+        leg_lvn = self._resolve_leg_lvn(amt_dto, float(bar.close))
         if leg_lvn <= 0:
             return  # No Layer 3 LVN available yet
 
