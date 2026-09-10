@@ -42,3 +42,27 @@ def test_degenerate_quantiles_fall_back_to_a_flat_path():
     fc = build_forecast(None, curr_price=100.0, horizon=4, lat_ms=1.0)
     assert np.allclose(fc.p50_path, 100.0)
     assert fc.q_spread == 0.0
+
+
+def test_steps_are_flat_aware():
+    from quant.decision.timesfm_forecast_factory import make_steps
+
+    steps = make_steps([99.0, 100.0, 101.0], curr_price=100.0)
+    assert steps == ["SHORT", "FLAT", "LONG"]
+
+
+def test_no_producer_emits_binary_only_steps():
+    """Every TimesFMForecast construction must go through the factory, so no
+    site can emit a LONG/SHORT-only series that consumers cannot test for."""
+    import pathlib
+    import re
+
+    root = pathlib.Path("quant")
+    offenders = []
+    for path in root.rglob("*.py"):
+        if path.name == "timesfm_forecast_factory.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for m in re.finditer(r'"LONG" if p > curr_price else "SHORT"', text):
+            offenders.append(f"{path}:{text[:m.start()].count(chr(10)) + 1}")
+    assert not offenders, f"binary-only step labels remain: {offenders}"
