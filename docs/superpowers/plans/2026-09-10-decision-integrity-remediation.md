@@ -23,6 +23,8 @@
 - Test invocation prefix for every task: `PYTHONPATH=backend:. .venv/bin/python -m pytest`.
 - Reference: `docs/reviews/2026-09-10-pre-release-code-audit.md` (defect IDs D-1..D-28 match this plan).
 - Do NOT delete `backend/graphify-out/` contents before Task 20's `git rm -r --cached` succeeds — order matters.
+- **Brief-integrity rule (learned in Tasks 1 and 2).** A task's stated END STATE — its interfaces, its test assertions, and its release-gate check — outranks the literal code in its steps. Two briefs in this plan shipped code that could not be transcribed as written: Task 1's `global` was a `SyntaxError`, and Task 2's helper double-closed each add-on. When a brief's code and its own end state conflict, implement the end state, keep the semantics the brief names, and report the contradiction with the evidence. Never silently ship a different design, and never weaken a test to make a contradiction go away.
+- **When a fix routes work through a shared path, check what else that path does.** `_execute_full_close` calls `self._risk.record_trade(fill.pnl)` with `count_as_trade=True` default, which increments `trades_today` and moves the consecutive win/loss counters that `SessionRisk.can_trade()` reads against `max_trades_per_session`. Any task that funnels a previously-uncounted close through that path must preserve the original `count_as_trade=False` intent or state why the change is intended.
 
 ---
 
@@ -128,7 +130,25 @@ In `quant/execution/exits.py`, add the counter near the other module-level state
 MODEL_RISK_FAILURES = 0
 ```
 
-Replace the swallowing handler at the end of the model-exit block:
+Replace the swallowing handler at the end of the model-exit block. Two ordering details matter and were wrong in an earlier draft of this plan:
+
+- `global MODEL_RISK_FAILURES` must go at the TOP of `evaluate` (just after the docstring-equivalent first statement), not inside the handler. A `global` declaration placed after the name has already been used in the same scope is a **SyntaxError**, not a style issue. Confirmed empirically.
+- The handler's first statement must be `logger.` with the increment after it. `scripts/pre_release_decision_check.py` requires the first non-comment statement of this handler to be `logger.` or `raise`; a leading `global` or `+=` scores FAIL.
+
+So, at the top of `evaluate`:
+
+```python
+    def evaluate(
+        self,
+        position: Position,
+        ...
+        timesfm_forecast: object | None = None,
+    ) -> ExitDecision:
+        global MODEL_RISK_FAILURES
+        from quant.execution.exit_checks import (
+```
+
+and the handler:
 
 ```python
             except Exception as exc:
@@ -136,15 +156,16 @@ Replace the swallowing handler at the end of the model-exit block:
                 # swallowing this disables the dynamic VaR stop, the trajectory
                 # take-profit, the velocity-decay exit and the quantile stop
                 # ratchet for the whole bar with no signal to ops.
-                global MODEL_RISK_FAILURES
-                MODEL_RISK_FAILURES += 1
                 logger.warning(
                     "TimesFM risk authority failed for %s (%s) — falling back to "
                     "deterministic exits for this bar (total failures: %d)",
-                    position._id, exc, MODEL_RISK_FAILURES,
+                    position._id, exc, MODEL_RISK_FAILURES + 1,
                     exc_info=True,
                 )
+                MODEL_RISK_FAILURES += 1
 ```
+
+The logged total is `MODEL_RISK_FAILURES + 1` so it equals the post-increment counter. The counter is best-effort under concurrency (two threads can log the same total); that is acceptable for a diagnostic and must not be "fixed" with a lock on the exit hot path.
 
 Add `import logging` and a module logger if absent (check the top of the file first; if `logger` already exists, reuse it):
 
@@ -743,25 +764,34 @@ the pyramid add-on engine was inert in production."
 
 ---
 
-## Task 6: D-6 — option delta must come from the chain, not a hardcoded 0.50
+## Task 6: D-6 — retire the unreachable `optionGreekDelta` branch (corrected)
 
 **Files:**
-- Modify: `quant/amt/dto.py:53` area (add the key), `quant/decision/context_builder.py:455-460`
+- Modify: `quant/decision/context_builder.py` (`option_delta=` expression)
 - Test: `tests/quant/decision/test_option_delta_semantics.py` (append)
+- Modify: `docs/reviews/2026-09-10-pre-release-code-audit.md` (correct D-6's stated remedy)
 
 **Interfaces:**
-- Consumes: AMT DTO optional key `optionGreekDelta` (float or None).
-- Produces: `DecisionContext.option_delta` is the chain delta for options, `None` for futures; when absent the scanner falls back to the conservative ATM default.
+- Consumes: nothing new.
+- Produces: `DecisionContext.option_delta` documents, in one place, that it is a best-effort default and cannot be a chain Greek today.
+
+> **CORRECTION (found while executing).** The original Task 6 said to emit `optionGreekDelta` from `amt_result_to_dto` via `getattr(r, "option_greek_delta", None)`. That is wrong twice over:
+> 1. `AMTResult` (`quant/contracts/value_objects.py`) has **no** `option_greek_delta` field, so the planned `getattr` default would always yield `None` — a no-op, not a fix.
+> 2. `deltaNormalizedOption` is candle **order-flow** delta, not a Greek, and a test exists to keep it out (`tests/quant/decision/test_option_delta_semantics.py`).
+>
+> There is therefore no chain-Greek producer available to wire. This task does not invent one; it removes a misleading dead branch and records the truth.
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `tests/quant/decision/test_option_delta_semantics.py`:
 
 ```python
-def test_chain_delta_reaches_the_context():
-    """D-6: optionGreekDelta was read but never produced, so ctx.option_delta
-    was always the 0.50 ATM fallback — wrong for every OTM strike."""
+def test_option_delta_is_a_documented_default_not_a_chain_greek():
+    """D-6 (corrected): no chain-Greek producer exists, so option_delta is
+    always the documented ATM default. Assert that plainly so a future reader
+    (or a future chain integration) cannot mistake it for a real Greek."""
     from types import SimpleNamespace
+
     from quant.decision.context_builder import DecisionContextBuilder
 
     bar = SimpleNamespace(close=150.0, open=149.0, high=151.0, low=148.0,
@@ -772,57 +802,72 @@ def test_chain_delta_reaches_the_context():
     ctx = DecisionContextBuilder().build(
         bar=bar, symbol="NIFTY 24600 CALL", market="NSE", contract_expiry=None,
         tick_size=0.05, bar_index=20, warm_bars=0, cooldown_remaining_sec=0.0,
-        risk_state=risk, amt_dto={"optionGreekDelta": 0.32},
+        risk_state=risk, amt_dto={},
     )
-    assert ctx.option_delta == 0.32
+    # Options get the conservative ATM default; futures get None.
+    assert ctx.option_delta == 0.50
 
-    ctx_fallback = DecisionContextBuilder().build(
-        bar=bar, symbol="NIFTY 24600 CALL", market="NSE", contract_expiry=None,
+    ctx_fut = DecisionContextBuilder().build(
+        bar=bar, symbol="NIFTY FUT", market="NSE", contract_expiry=None,
         tick_size=0.05, bar_index=20, warm_bars=0, cooldown_remaining_sec=0.0,
         risk_state=risk, amt_dto={},
     )
-    assert ctx_fallback.option_delta == 0.50
+    assert ctx_fut.option_delta is None
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/decision/test_option_delta_semantics.py -k chain_delta -v`
-Expected: FAIL with `assert 0.5 == 0.32`
+Run: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/decision/test_option_delta_semantics.py -k documented_default -v`
+Expected: FAIL with `ImportError: cannot import name 'DEFAULT_OPTION_DELTA'` (after Step 3 adds the name, re-run: PASS). If it PASSES now, the behaviour already holds — say so in the report and keep the test as a pin.
 
-- [ ] **Step 3: Write the minimal implementation**
+- [ ] **Step 3: Remove the dead branch and name the default**
 
-In `quant/amt/dto.py`, in `amt_result_to_dto`, immediately after the `"dataQuality": (...)` entry, add:
+In `quant/decision/context_builder.py`, replace the `option_delta=` expression with a single named constant defined at module top:
 
 ```python
-        # Option Greek delta for the traded contract, when a chain snapshot is
-        # available. None (not 0.0) so consumers can distinguish "no chain"
-        # from "delta is genuinely zero" — option-premium stop translation
-        # scales by this and must refuse rather than assume.
-        "optionGreekDelta": getattr(r, "option_greek_delta", None),
+# Conservative ATM delta used to scale underlying stop distance into option
+# premium distance. There is NO chain Greek producer in this codebase:
+# AMTResult carries no option delta, and deltaNormalizedOption is candle
+# order-flow delta (see tests/quant/decision/test_option_delta_semantics.py).
+# So this default is authoritative until a real option chain is wired.
+# ponytail: wire a real chain delta here when the chain feed lands.
+DEFAULT_OPTION_DELTA = 0.50
 ```
 
-In `quant/decision/context_builder.py`, replace the `option_delta=` expression with:
+and at the construction site:
 
 ```python
             option_delta=(
-                float(amt_dto["optionGreekDelta"])
-                if amt_dto.get("optionGreekDelta") is not None
-                else (0.50 if is_option_contract(symbol) else None)
+                DEFAULT_OPTION_DELTA if is_option_contract(symbol) else None
             ),
 ```
 
-(This is the existing expression; the fix is producing the key — verify the block matches and leave it unchanged if so.)
+This deletes the unreachable `amt_dto["optionGreekDelta"]` branch rather than adding a producer for a key nothing can populate.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run tests to verify they pass**
 
 Run: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/decision/test_option_delta_semantics.py -v`
+Expected: PASS (all, including the pre-existing `test_translation_requires_explicit_greek_delta`)
+
+- [ ] **Step 5: Correct the audit document**
+
+In `docs/reviews/2026-09-10-pre-release-code-audit.md`, amend D-6 to state the corrected finding: no chain-Greek producer exists, `optionGreekDelta` cannot be emitted from `AMTResult`, and the branch was removed rather than faked. Keep the original text below a `> Corrected 2026-09-10 during execution:` note so the record shows the change of understanding.
+
+- [ ] **Step 6: Run the affected suites**
+
+Run: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/decision/ tests/quant/amt/ -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add quant/amt/dto.py quant/decision/context_builder.py tests/quant/decision/test_option_delta_semantics.py
-git commit -m "fix: emit optionGreekDelta so premium stops scale by the real delta"
+git add quant/decision/context_builder.py tests/quant/decision/test_option_delta_semantics.py docs/reviews/2026-09-10-pre-release-code-audit.md
+git commit -m "refactor: retire the unreachable optionGreekDelta branch
+
+AMTResult carries no option delta, so the planned emit was a no-op and the
+branch never ran. There is no chain-Greek producer to wire; the ATM default is
+now a named constant with that fact documented, instead of a dead branch that
+implied a live Greek was being consumed."
 ```
 
 ---
