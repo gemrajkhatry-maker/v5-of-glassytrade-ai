@@ -77,7 +77,9 @@ def test_dead_market_state_is_enum_not_string():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m pytest tests/quant/decision/test_context_builder_behavior.py::test_dead_market_state_is_enum_not_string -q`
-Expected: FAIL (`"DEAD" != MarketState.DEAD`)
+Expected: FAIL on the `assert ctx.market_state is MarketState.DEAD` identity line (note:
+`MarketState` is a `str, Enum`, so the `==` assertion alone passes even for the raw string —
+the `is` line is what reproduces the bug)
 
 - [ ] **Step 3: Minimal implementation** — in `context_builder.py:385`, change `amt_market_state = "DEAD"` to `amt_market_state = MarketState.DEAD`.
 
