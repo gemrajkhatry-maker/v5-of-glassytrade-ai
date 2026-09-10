@@ -532,3 +532,61 @@ def test_scanner_triple_a_short_fires_on_buy_absorbed_far_from_vah():
     assert res["setup"] == "TRIPLE_A" and res["direction"] == "SHORT"
 
 
+def test_position_agent_thesis_flip_cvd_divergence_isolated(base_forecast):
+    """Standalone CVD-divergence arms fire without stacked imbalance or absorption."""
+    agent = TimesFMPositionAgent(target_horizon=32)
+    # Flat forecast: no trajectory breakdown, no inflection — isolates the CVD arm.
+    curr_price = 8105.0
+    p50 = np.full(32, curr_price)
+    flat_forecast = TimesFMForecast(
+        horizon=32,
+        p50_path=p50,
+        p10_path=p50 - 5.0,
+        p90_path=p50 + 5.0,
+        q_spread=10.0,
+        mean_forecast=curr_price,
+        pct_change=0.0,
+        forecast_steps=["FLAT"] * 32,
+        curr_price=curr_price,
+        lat_ms=10.0,
+    )
+    # LONG with strong negative CVD, no absorption / no stacked imbalance
+    bar = Bar("2026-09-08T16:10:00", 8110.0, 8112.0, 8102.0, 8105.0, 2500, -700)
+    ctx_long = DecisionContext(
+        symbol="CRUDEOIL",
+        bar=bar,
+        position_open=True,
+        position_side="LONG",
+        position_entry_price=8110.0,
+        position_sl=8090.0,
+        position_tp=8150.0,
+        position_unrealized_pnl=-50.0,
+        position_bars_held=2,
+        cvd_slope=-3.0,
+        absorption_side="",
+        stacked_imbalance_direction="",
+    )
+    res_long = agent.evaluate(ctx_long, flat_forecast)
+    assert res_long["action"] == "EXIT"
+    assert res_long["reason"] == "THESIS_FLIP"
+
+    # SHORT mirror with strong positive CVD, no absorption / no stacked imbalance
+    ctx_short = DecisionContext(
+        symbol="CRUDEOIL",
+        bar=bar,
+        position_open=True,
+        position_side="SHORT",
+        position_entry_price=8110.0,
+        position_sl=8130.0,
+        position_tp=8070.0,
+        position_unrealized_pnl=-50.0,
+        position_bars_held=2,
+        cvd_slope=3.0,
+        absorption_side="",
+        stacked_imbalance_direction="",
+    )
+    res_short = agent.evaluate(ctx_short, flat_forecast)
+    assert res_short["action"] == "EXIT"
+    assert res_short["reason"] == "THESIS_FLIP"
+
+

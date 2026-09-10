@@ -506,9 +506,9 @@ class TimesFMPositionAgent:
             confidence = "High"
             confidence_score = 0.90
             if side == "LONG" and absorption in ("BUY", "BUY_ABSORBED"):
-                rationale = "Heavy buy absorption cluster — buyers in control."
+                rationale = "Heavy buy absorption cluster — sellers in control."
             elif side == "SHORT" and absorption in ("SELL", "SELL_ABSORBED"):
-                rationale = "Heavy sell absorption cluster — sellers in control."
+                rationale = "Heavy sell absorption cluster — buyers in control."
             elif (side == "LONG" and stacked_imb == "SELL" and cvd_slope < -1.0) or (side == "LONG" and cvd_slope <= -2.5):
                 rationale = (
                     f"Thesis flip on {symbol} LONG: Opposing order flow (CVD slope {cvd_slope:+.1f}) "
