@@ -112,18 +112,22 @@ def test_natural_bar_close_books_each_addon_once():
                            close=120.5, volume=10))
     assert eng.state.position is not None
     # Bar 2: low pierces the BE floor armed at TP1 -> full close of runner +
-    # both add-ons at bar.close = 95.
+    # both add-ons. The BE floor is a RESTING ORDER, so the fill is at the stop
+    # level (100.0), not at bar.close (95.0) — see ExitEngine Rule 2. That
+    # convention matches the raw-SL check, the TP tiers, the spread blowout and
+    # the tick path; filling at bar.close was the outlier and would have booked
+    # a profit on a stopped-out trade.
     eng._on_bar_closed(Bar(time="b2", open=96.0, high=97.0, low=94.0,
                            close=95.0, volume=10))
     assert eng.state.position is None
 
     # Exact realized-pnl multiset: TP1 partial (@120, half), runner residual
-    # close (@95, remaining half), and each add-on's OWN fill pnl ONCE.
+    # close (@100 BE floor, remaining half), and each add-on's OWN fill pnl ONCE.
     expected = sorted([
-        (120.0 - 100.0) * 2.0,   # TP1 partial fill
-        (95.0 - 100.0) * 2.0,    # base runner full close
-        (95.0 - 100.5) * 2.0,    # pyramid 1 fill
-        (95.0 - 101.0) * 1.0,    # pyramid 2 fill
+        (120.0 - 100.0) * 2.0,   # TP1 partial fill (at the target)
+        (100.0 - 100.0) * 2.0,   # base runner full close (at the BE floor)
+        (100.0 - 100.5) * 2.0,   # pyramid 1 fill (at the BE floor)
+        (100.0 - 101.0) * 1.0,   # pyramid 2 fill (at the BE floor)
     ])
     actual = sorted(p for p in _pnls(auth.realized_calls))
     assert actual == pytest.approx(expected), (

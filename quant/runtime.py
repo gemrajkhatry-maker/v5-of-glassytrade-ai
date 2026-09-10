@@ -138,6 +138,21 @@ _DETERMINISTIC_CONVICTION = 0.7
 _WARMUP_BARS = 15
 
 
+def _as_counter(value) -> int:
+    """Coerce a diagnostic counter to int, defaulting to 0 when unusable.
+
+    A stubbed risk object (``MagicMock``) fabricates ANY attribute, so
+    ``getattr(obj, "model_sizing_failures", 0)`` returns a mock rather than the
+    ``0`` default and comparing two of them raises TypeError. A diagnostic
+    counter must never be able to break the sizing guard, so a non-numeric
+    value reads as "no failure recorded".
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def close_lingering_pyramids(pm, price: float, time_str: str, reason: str) -> int:
     """Close pyramid add-ons whose base position is already gone.
 
@@ -1150,8 +1165,11 @@ class QuantEngine:
             # Finding 1 (review of D-12): distinguish a model-sizing REFUSAL
             # from a genuine budget-zero so the operator-facing reason is
             # truthful. Snapshot the per-call count around the sizing call.
-            _sizing_failures_before = getattr(
-                self._risk, "model_sizing_failures", 0,
+            # int(...) coercion matters: a stubbed risk object (MagicMock)
+            # fabricates ANY attribute, so getattr's default never applies and
+            # the counter would be a mock, not 0.
+            _sizing_failures_before = _as_counter(
+                getattr(self._risk, "model_sizing_failures", 0)
             )
             quantity = clamp_quantity(
                 self._risk.position_size(
@@ -1173,7 +1191,7 @@ class QuantEngine:
                 # re-open the blocking episode and spam SignalBlocked. The
                 # payload carries the signal; the log line prints entry/sl.
                 _model_sizing_failed = (
-                    getattr(self._risk, "model_sizing_failures", 0)
+                    _as_counter(getattr(self._risk, "model_sizing_failures", 0))
                     > _sizing_failures_before
                 )
                 _zero_reason = (

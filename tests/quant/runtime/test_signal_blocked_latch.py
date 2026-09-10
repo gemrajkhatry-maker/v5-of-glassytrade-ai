@@ -239,3 +239,47 @@ def test_alternating_keys_keep_independent_episodes():
         eng._bar_index = bar_index
         eng._decide({}, _bar(i))
     assert len(blocked) == 2  # A emits, B emits, A is latched (same episode)
+
+
+def test_sizing_zero_with_mock_risk_emits_generic_reason_no_raise():
+    # Regression (task 12 round 2): a MagicMock risk fabricates any attribute,
+    # so probing `model_sizing_failures` returned a MagicMock and the `>`
+    # comparison raised TypeError inside the zero-quantity guard, killing the
+    # entry path. A non-numeric counter must be treated as "no model-sizing
+    # failure" and fall through to the generic budget reason.
+    eng, blocked, _ = _engine()
+    eng._risk.position_size.return_value = 0
+    # Belt-and-braces: prove the attribute really is a non-numeric mock.
+    assert not isinstance(eng._risk.model_sizing_failures, int)
+    eng._bar_index = 10
+    eng._decide({}, _bar(0))  # must not raise
+    assert len(blocked) == 1
+    assert "0 lots" in blocked[0].reason
+    assert "model sizing unavailable" not in blocked[0].reason
+
+
+def test_sizing_zero_with_advanced_real_counter_uses_model_reason():
+    # Intent of task 12 must survive the hardening: a REAL counter that
+    # genuinely advanced during the sizing call still yields the distinct
+    # model-sizing reason.
+    class _RealRisk:
+        def __init__(self):
+            self.model_sizing_failures = 0
+
+        def can_trade(self, *_, **__):
+            return (True, "")
+
+        def state(self, *_, **__):
+            return MagicMock(trades_today=0, equity=1_000_000)
+
+        def position_size(self, *_, **__):
+            self.model_sizing_failures += 1  # TimesFM refusal this call
+            return 0
+
+    eng, blocked, _ = _engine()
+    eng._risk = _RealRisk()
+    eng._strategy.should_enter.return_value = _ApprovedDecision(_sig())
+    eng._bar_index = 10
+    eng._decide({}, _bar(0))
+    assert len(blocked) == 1
+    assert "model sizing unavailable" in blocked[0].reason
