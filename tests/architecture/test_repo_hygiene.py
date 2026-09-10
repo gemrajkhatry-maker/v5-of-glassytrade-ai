@@ -12,6 +12,12 @@ FORBIDDEN_PREFIXES = (
     "quantv2/",
 )
 
+# runtime_audit/ is throwaway probe/fixture output *except* for the helper
+# modules live tracked tests import. tests/e2e/test_cross_process_injection.py
+# does `sys.path.insert(.../runtime_audit/e2e)` + `from boot_helper import ...`
+# at module scope, so that subtree must survive a fresh clone.
+RUNTIME_AUDIT_ALLOWED_PREFIXES = ("runtime_audit/e2e/",)
+
 
 def _tracked():
     out = subprocess.run(
@@ -21,5 +27,10 @@ def _tracked():
 
 
 def test_no_generated_or_throwaway_paths_are_tracked():
-    offenders = [p for p in _tracked() if p.startswith(FORBIDDEN_PREFIXES)]
+    offenders = [
+        p
+        for p in _tracked()
+        if p.startswith(FORBIDDEN_PREFIXES)
+        and not p.startswith(RUNTIME_AUDIT_ALLOWED_PREFIXES)
+    ]
     assert not offenders, f"{len(offenders)} tracked artifact paths, e.g. {offenders[:5]}"

@@ -132,12 +132,18 @@ models/
 **/graphify-out/
 
 # Throwaway probe / bench / audit script trees. Kept on disk for the tooling
-# that reads them, but they are not project history. Covers the generated
-# runtime_audit/out/ and runtime_audit/fixtures/ artifacts too.
-runtime_audit/
+# that reads them, but they are not project history.
 scratch/
 .kilo/
 .commandcode/
+
+# runtime_audit/ is NOT wholesale throwaway: the tracked test
+# tests/e2e/test_cross_process_injection.py imports
+# runtime_audit/e2e/boot_helper.py at module scope, so that helper (and the
+# sibling probes/tests the audit tree documents) must exist in a fresh clone.
+# Ignore only the generated run artifacts.
+runtime_audit/out/
+runtime_audit/fixtures/
 
 # Orphaned bytecode for a removed source tree (62 .pyc, no .py, no importers)
 quantv2/
