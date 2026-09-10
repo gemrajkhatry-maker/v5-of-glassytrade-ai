@@ -451,3 +451,61 @@ def test_pre_market_lock():
     d = DecisionService().evaluate(ctx)
     assert not d.approved, "Phase 1 opening noise must block all entries"
     assert d.signal is None
+
+
+def test_e2e_entry_requires_canonical_gate_approval():
+    """E2E scanner approval alone must not approve when a canonical gate blocks.
+
+    Scanner-favorable ctx (SELL absorption + rising CVD + bullish TimesFM
+    forecast) BUT an opposing stacked SELL imbalance blocks canonical gate 3.
+    should_enter must return approved=False with the canonical gate results.
+    """
+    import numpy as np
+
+    from quant.decision.pipeline import GatePipeline
+    from quant.decision.timesfm_agents import TimesFMForecast
+    from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
+
+    px = 100.0
+    ctx = make_context(
+        close=px,
+        poc=99.0,
+        vah=101.0,
+        val=99.0,
+        agent_direction="LONG",
+        cvd_slope=1.5,
+        absorption_side="SELL_ABSORBED",
+        stacked_imbalance_direction="SELL",  # opposes LONG -> canonical gate 3 blocks
+        stacked_imbalance_magnitude=3,
+        stacked_imbalance_price_low=99.5,
+        stacked_imbalance_price_high=100.5,
+        session_phase="NSE_PRIMARY",
+        session_open=True,
+        warmup_complete=True,
+        position_open=False,
+        cooldown_remaining_sec=0,
+        risk_halted=False,
+        market_state=MarketState.BALANCED,
+    )
+    fc = TimesFMForecast(
+        horizon=32,
+        p50_path=np.full(32, 101.0, dtype=np.float32),
+        p10_path=np.full(32, 100.0, dtype=np.float32),
+        p90_path=np.full(32, 102.0, dtype=np.float32),
+        q_spread=2.0,
+        mean_forecast=101.0,
+        pct_change=0.01,
+        forecast_steps=["LONG"] * 32,
+        curr_price=px,
+        lat_ms=5.0,
+    )
+
+    # Setup phase: the canonical pipeline really does block this ctx.
+    canonical = GatePipeline().evaluate(ctx)
+    assert any(not g.passed for g in canonical), (
+        f"test setup broken: canonical gates all pass: {canonical}"
+    )
+
+    d = TimesFMTradingStrategy().should_enter(ctx, forecast=fc)
+    assert d.approved is False, "E2E must not approve when a canonical gate blocks"
+    assert d.signal is None

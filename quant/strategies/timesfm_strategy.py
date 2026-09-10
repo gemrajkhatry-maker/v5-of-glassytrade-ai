@@ -153,6 +153,18 @@ class TimesFMTradingStrategy:
         is_entry = action in ("ENTER_LONG", "ENTER_SHORT") and direction in ("LONG", "SHORT")
 
         if is_entry and (all_gates_passed or allow_positioned):
+            from quant.decision.pipeline import GatePipeline
+            canonical = GatePipeline().evaluate(ctx, allow_positioned=allow_positioned)
+            failed = [g for g in canonical if not g.passed]
+            if failed:
+                failed_reasons = tuple(f"{g.name}: {g.reason}" for g in failed)
+                return QuantDecision(
+                    approved=False, signal=None, reason=setup,
+                    phase=str(ctx.session_phase or ""),
+                    gate_results=tuple(canonical),
+                    block_reasons=failed_reasons,
+                    model_label=f"TimesFM-{setup}",
+                )
             curr_price = float(ctx.bar.close)
             sizing = scan_res.get("dynamicSizing")
             if sizing and sizing.get("varStop") and sizing.get("targetPrice"):
