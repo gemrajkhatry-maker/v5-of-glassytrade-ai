@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from quant.decision.context import DecisionContext
+from quant.contracts.vocabulary import absorption_direction, is_opening_phase
 from quant.decision.timesfm_forecast_factory import build_forecast
 from quant.session_gates import session_allow_entry
 
@@ -452,7 +453,7 @@ class TimesFMEngine:
             }
 
         session_phase = str(ctx.session_phase or "").upper()
-        is_opening = any(p in session_phase for p in ("OPENING", "PRE_OPEN", "PRE_MARKET"))
+        is_opening = is_opening_phase(session_phase)
         if is_opening:
             return {
                 "role": "SCANNING",
@@ -578,17 +579,14 @@ class TimesFMEngine:
         """
         logger.info("TimesFMEngine: using rule-based fallback for %s (error: %s)", ctx.symbol, error_msg)
 
-        # Simple rule-based direction from AMT context. Absorption follows
-        # canonical AMT semantics: SELL_ABSORBED = sellers absorbed = bullish
-        # (LONG), BUY_ABSORBED = buyers absorbed = bearish (SHORT). Substring
-        # match tolerates both the full `_ABSORBED` DTO form and the legacy
-        # bare "BUY"/"SELL" form; the bare-only comparison this replaces was
-        # dead against the live DTO (which always sends `_ABSORBED`).
+        # Simple rule-based direction from AMT context. Absorption semantics
+        # live in quant.contracts.vocabulary (canonical: SELL_ABSORBED = sellers
+        # absorbed = bullish/LONG, BUY_ABSORBED = bearish/SHORT).
         direction = "FLAT"
-        absorption = str(ctx.absorption_side or "").upper()
-        if ctx.cvd_slope > 0 and "SELL" in absorption:
+        absorbed = absorption_direction(ctx.absorption_side)
+        if ctx.cvd_slope > 0 and absorbed == "LONG":
             direction = "LONG"
-        elif ctx.cvd_slope < 0 and "BUY" in absorption:
+        elif ctx.cvd_slope < 0 and absorbed == "SHORT":
             direction = "SHORT"
 
         forecast_steps = [direction] * self.target_horizon

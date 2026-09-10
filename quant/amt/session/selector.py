@@ -17,6 +17,7 @@ from datetime import date, datetime, timedelta
 import logging
 
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+from quant.contracts.vocabulary import is_call_symbol, is_put_symbol
 from quant.contracts.timezones import today_ist
 
 logger = logging.getLogger(__name__)
@@ -473,14 +474,8 @@ class OptionSelector:
         # which fail if this guard is restored verbatim. Deliberately not
         # restored — flagging here instead of re-deleting silently.
 
-        from quant.contracts.instrument_registry import is_option_contract
-        sym_upper = option_symbol.upper().rstrip()
-        is_call = is_option_contract(option_symbol) and (
-            sym_upper.endswith(("CALL", "CE")) or sym_upper.endswith("-CE")
-        )
-        is_put = is_option_contract(option_symbol) and (
-            sym_upper.endswith(("PUT", "PE")) or sym_upper.endswith("-PE")
-        )
+        is_call = is_call_symbol(option_symbol)
+        is_put = is_put_symbol(option_symbol)
 
         if str(signal.type).upper() == "LONG" and not is_call:
             logger.debug(

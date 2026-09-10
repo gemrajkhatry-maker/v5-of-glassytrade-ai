@@ -11,6 +11,7 @@ import logging
 
 from quant.contracts.enums import MarketState
 from quant.contracts.instrument_registry import is_option_contract
+from quant.contracts.vocabulary import absorption_direction
 from quant.decision.context import DecisionContext
 from quant.session_gates import ist_dt, session_allow_entry
 from quant.amt.session.context import get_session_info
@@ -126,8 +127,8 @@ class DecisionContextBuilder:
             return "LONG" if break_dir == "UP" else "SHORT"
         if triple_a_sig in ("LONG", "SHORT"):
             return triple_a_sig
-        if amt_dto.get("absorptionSide") in ("SELL_ABSORBED", "BUY_ABSORBED"):
-            return {"SELL_ABSORBED": "LONG", "BUY_ABSORBED": "SHORT"}.get(amt_dto.get("absorptionSide"))
+        if absorption_direction(amt_dto.get("absorptionSide")):
+            return absorption_direction(amt_dto.get("absorptionSide"))
         if obi >= 0.20 and close_px > vwap_upper_1:
             return "LONG"
         if obi <= -0.20 and close_px < vwap_lower_1:
@@ -223,8 +224,8 @@ class DecisionContextBuilder:
                 acceptance=bool(amt_dto.get("acceptanceAbove") or amt_dto.get("acceptanceBelow") or amt_dto.get("acceptance", False)),
                 cvd_agrees=cvd_agrees,
             )
-        if nearest_leg_lvn > 0 and amt_dto.get("absorptionSide") in ("SELL_ABSORBED", "BUY_ABSORBED"):
-            direction = "LONG" if amt_dto.get("absorptionSide") == "SELL_ABSORBED" else "SHORT"
+        if nearest_leg_lvn > 0 and absorption_direction(amt_dto.get("absorptionSide")):
+            direction = absorption_direction(amt_dto.get("absorptionSide"))
             return SetupEvidence(
                 setup_type="LVN_SNIPER", direction=direction,
                 level=nearest_leg_lvn, absorption=True, cvd_agrees=cvd_agrees,

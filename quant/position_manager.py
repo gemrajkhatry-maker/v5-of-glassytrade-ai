@@ -11,6 +11,7 @@ import logging
 from typing import Callable
 
 from quant.contracts.enums import MarketState
+from quant.contracts.vocabulary import absorption_direction
 from quant.decision.stops import structural_stop
 from quant.execution.exit_checks import is_terminal_tp_only, tp2_level
 from quant.execution.exits import ExitDecision, ExitEngine
@@ -570,11 +571,12 @@ class PositionManager:
 
         long = position.size > 0
 
-        # Absorption direction must agree with the open position
-        # "SELL_ABSORBED" is bullish (absorbed sellers), "BUY_ABSORBED" is bearish
-        if long and absorption_side != "SELL_ABSORBED":
+        # Absorption direction must agree with the open position (canonical
+        # semantics: SELL_ABSORBED bullish, BUY_ABSORBED bearish).
+        absorbed = absorption_direction(absorption_side)
+        if long and absorbed != "LONG":
             return
-        if not long and absorption_side != "BUY_ABSORBED":
+        if not long and absorbed != "SHORT":
             return
 
         # Candle close must confirm the direction

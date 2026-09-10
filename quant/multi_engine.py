@@ -52,6 +52,7 @@ from quant.contracts.instrument_registry import (
     is_option_contract,
     root_token,
 )
+from quant.contracts.vocabulary import is_call_symbol, is_put_symbol
 from quant.session_gates import parse_contract_expiry
 from quant.contracts.market_calendar import is_trading_day
 from quant.contracts.timezones import IST, MCX_SESSION_CLOSE, NSE_SESSION_CLOSE
@@ -1493,11 +1494,10 @@ class QuantCoordinator:
         option = is_option_contract(symbol)
         strike = extract_option_strike(symbol) if option else None
         option_type = ""
-        upper = str(symbol).upper().strip()
         if option:
-            if upper.endswith(("CALL", "CE", "-CE")):
+            if is_call_symbol(symbol):
                 option_type = "CE"
-            elif upper.endswith(("PUT", "PE", "-PE")):
+            elif is_put_symbol(symbol):
                 option_type = "PE"
             if strike is None or not expiry_text or not option_type:
                 raise ValueError(

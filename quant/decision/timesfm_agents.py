@@ -26,6 +26,11 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from quant.contracts.instrument_registry import is_option_contract
+from quant.contracts.vocabulary import (
+    absorption_direction,
+    is_closing_phase,
+    is_opening_phase,
+)
 from quant.decision.context import DecisionContext
 
 logger = logging.getLogger(__name__)
@@ -56,7 +61,7 @@ def _format_scanning_rationale(
 ) -> str:
     """Generate session-timing and price-location aware scanning rationale."""
     phase = str(session_phase or "").upper()
-    if any(p in phase for p in ("OPENING", "PRE_OPEN", "PRE_MARKET")):
+    if is_opening_phase(phase):
         phase_label = "Opening range"
     elif any(p in phase for p in ("MIDDAY", "CHOP")):
         phase_label = "Midday"
@@ -66,7 +71,7 @@ def _format_scanning_rationale(
         phase_label = "Afternoon"
     elif "EVENING" in phase:
         phase_label = "Evening session"
-    elif any(p in phase for p in ("CLOSE", "POST_MARKET", "EOD")):
+    elif is_closing_phase(phase):
         phase_label = "Session close"
     else:
         phase_label = "Session"
@@ -108,8 +113,8 @@ class TimesFMScanningAgent:
 
         # Gate 1 (session phase) is evaluated before the profile guard so that a
         # missing profile still reports the true session-phase gate result.
-        is_opening = any(p in session_phase for p in ("OPENING", "PRE_OPEN", "PRE_MARKET"))
-        is_closing = any(p in session_phase for p in ("CLOSE", "POST_MARKET", "EOD"))
+        is_opening = is_opening_phase(session_phase)
+        is_closing = is_closing_phase(session_phase)
         g1 = bool(ctx.session_open and ctx.warmup_complete and not is_opening and not is_closing)
         g1_msg = ""
         if not g1:
@@ -542,8 +547,8 @@ class TimesFMPositionAgent:
         # 4. THESIS FLIP / OPPOSING ABSORPTION / ADVERSE ORDER FLOW
         elif (
             # Opposing absorption cluster (Fabio: institutional inventory capping the move)
-            (side == "LONG" and absorption in ("BUY", "BUY_ABSORBED"))
-            or (side == "SHORT" and absorption in ("SELL", "SELL_ABSORBED"))
+            (side == "LONG" and absorption_direction(absorption) == "SHORT")
+            or (side == "SHORT" and absorption_direction(absorption) == "LONG")
             # Or opposing stacked imbalance with opposing CVD
             or (side == "LONG" and stacked_imb == "SELL" and cvd_slope < -1.0)
             or (side == "SHORT" and stacked_imb == "BUY" and cvd_slope > 1.0)
@@ -558,9 +563,9 @@ class TimesFMPositionAgent:
             reason = "THESIS_FLIP"
             confidence = "High"
             confidence_score = 0.90
-            if side == "LONG" and absorption in ("BUY", "BUY_ABSORBED"):
+            if side == "LONG" and absorption_direction(absorption) == "SHORT":
                 rationale = "Heavy buy absorption cluster — sellers in control."
-            elif side == "SHORT" and absorption in ("SELL", "SELL_ABSORBED"):
+            elif side == "SHORT" and absorption_direction(absorption) == "LONG":
                 rationale = "Heavy sell absorption cluster — buyers in control."
             elif (side == "LONG" and stacked_imb == "SELL" and cvd_slope < -1.0) or (side == "LONG" and cvd_slope <= -2.5):
                 rationale = (

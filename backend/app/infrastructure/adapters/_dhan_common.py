@@ -61,13 +61,12 @@ def classify_symbol(symbol: str):
     re-implementing a narrower binary classifier here.
     """
     from quant.contracts.instrument_registry import DEFAULT_REGISTRY, is_option_contract
+    from quant.contracts.vocabulary import is_call_symbol, is_put_symbol
     from brokers.broker.dhan.application.exchange_resolver import DhanExchangeResolver
 
     is_option = is_option_contract(symbol)
-    is_call = is_option and (
-        symbol.upper().endswith(("CALL", "CE")) or bool(re.search(r"(?:CALL|CE)$", symbol.upper()))
-    )
-    is_put = is_option and not is_call
+    is_call = is_call_symbol(symbol)
+    is_put = is_put_symbol(symbol)
     dhan_exchange = DhanExchangeResolver.resolve(symbol.upper()).exchange
     spec = DEFAULT_REGISTRY.try_resolve(symbol)
     if spec is not None:

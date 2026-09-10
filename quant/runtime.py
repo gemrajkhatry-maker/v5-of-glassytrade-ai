@@ -49,6 +49,7 @@ from quant.amt.session.context import get_session_info
 from quant.bars import Bar
 from quant.contracts.contracts import ContractRef
 from quant.contracts.value_objects import OrderBook, OrderBookLevel
+from quant.contracts.vocabulary import is_call_symbol, is_put_symbol
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
 from quant.decision.signal_builder import clamp_quantity
@@ -1394,14 +1395,8 @@ class QuantEngine:
                 return
             signal = decision.signal
             held_side = "LONG" if pos.size > 0 else "SHORT"
-            from quant.contracts.instrument_registry import is_option_contract
-            sym_upper = self.symbol.upper().rstrip()
-            is_put = is_option_contract(self.symbol) and (
-                sym_upper.endswith(("PUT", "PE")) or sym_upper.endswith("-PE")
-            )
-            is_call = is_option_contract(self.symbol) and (
-                sym_upper.endswith(("CALL", "CE")) or sym_upper.endswith("-CE")
-            )
+            is_put = is_put_symbol(self.symbol)
+            is_call = is_call_symbol(self.symbol)
             if is_put:
                 held_thesis = "SHORT" if pos.size > 0 else "LONG"
             elif is_call:

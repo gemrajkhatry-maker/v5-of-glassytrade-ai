@@ -35,6 +35,7 @@ from typing import (
 
 from quant.decision.context import DecisionContext
 from quant.contracts.enums import MarketState as _MS
+from quant.contracts.vocabulary import is_opening_phase
 
 # A rule is (name, predicate(ctx) -> bool, build(ctx) -> decision dict).
 # RULE_TABLE is evaluated strictly in order; the first truthy predicate wins.
@@ -234,8 +235,7 @@ def _pos_default_monitor_build(c: DecisionContext) -> Dict[str, Any]:
 
 def _opening_noise_pred(c: DecisionContext) -> bool:
     # Guard 1: Opening noise — IB still forming
-    phase = str(c.session_phase or "").upper()
-    return any(p in phase for p in ("OPENING", "PRE_OPEN", "PRE_MARKET"))
+    return is_opening_phase(c.session_phase)
 
 
 def _opening_noise_build(c: DecisionContext) -> Dict[str, Any]:

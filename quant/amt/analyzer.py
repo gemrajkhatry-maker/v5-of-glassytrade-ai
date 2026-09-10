@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 from quant.amt import compute as mc
 
 from quant.contracts.enums import MarketState, SignalType, Source, SetupType
+from quant.contracts.vocabulary import is_call_symbol, is_put_symbol
 from quant.contracts.value_objects import (
     OHLC,
     OrderBook,
@@ -346,10 +347,9 @@ class AMTAnalyzer:
         """
         if not symbol:
             return "UNKNOWN"
-        sym = symbol.upper().rstrip()
-        if sym.endswith("CALL") or re.search(r"\d+\s*CE$", sym):
+        if is_call_symbol(symbol):
             return "CALL"
-        if sym.endswith("PUT") or re.search(r"\d+\s*PE$", sym):
+        if is_put_symbol(symbol):
             return "PUT"
         return "UNKNOWN"
 
