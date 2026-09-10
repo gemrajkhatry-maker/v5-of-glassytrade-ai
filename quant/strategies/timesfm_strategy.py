@@ -132,8 +132,10 @@ class TimesFMTradingStrategy:
 
         self._latest_forecasts[str(ctx.symbol)] = forecast
 
-        # 3. Evaluate via TimesFMScanningAgent
-        scan_res = self.scanning_agent.evaluate(ctx, forecast)
+        # 3. Canonical gates computed once: approval authority + scanner payload
+        from quant.decision.pipeline import GatePipeline
+        canonical = GatePipeline().evaluate(ctx, allow_positioned=allow_positioned)
+        scan_res = self.scanning_agent.evaluate(ctx, forecast, canonical_gates=tuple(canonical))
         action = scan_res.get("action", "FLAT")
         direction = scan_res.get("direction", "FLAT")
         setup = scan_res.get("setup", "NO_EDGE")
@@ -153,8 +155,6 @@ class TimesFMTradingStrategy:
         is_entry = action in ("ENTER_LONG", "ENTER_SHORT") and direction in ("LONG", "SHORT")
 
         if is_entry and (all_gates_passed or allow_positioned):
-            from quant.decision.pipeline import GatePipeline
-            canonical = GatePipeline().evaluate(ctx, allow_positioned=allow_positioned)
             failed = [g for g in canonical if not g.passed]
             if failed:
                 failed_reasons = tuple(f"{g.name}: {g.reason}" for g in failed)

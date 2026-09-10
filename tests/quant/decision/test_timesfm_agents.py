@@ -590,3 +590,25 @@ def test_position_agent_thesis_flip_cvd_divergence_isolated(base_forecast):
     assert res_short["reason"] == "THESIS_FLIP"
 
 
+def test_scanner_reports_canonical_gates_when_provided(base_forecast):
+    """Scanner gateResults must mirror canonical GateResults when provided."""
+    from quant.decision.result import GateResult
+
+    agent = TimesFMScanningAgent(target_horizon=32)
+    bar = Bar("2026-09-10T10:00:00+05:30", 99.5, 100.5, 99.0, 100.0, 2000, 100)
+    ctx = DecisionContext(
+        symbol="NIFTY",
+        bar=bar,
+        session_phase="NSE_PRIMARY",
+        position_open=False,
+        session_open=True,
+    )
+    res = agent.evaluate(
+        ctx,
+        base_forecast,
+        canonical_gates=(GateResult(1, True), GateResult(2, False, "Cooldown")),
+    )
+    assert res["gateResults"][1]["passed"] is False
+    assert res["gateResults"][1]["gate_name"] == "POSITION_COOLDOWN"
+
+
