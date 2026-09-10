@@ -114,6 +114,8 @@ class TimesFMRiskAuthority:
 
         # 1. Hard Dynamic VaR Stop breached
         if is_long and current_price <= dyn_stop:
+            self.record_forecast_outcome(
+                float(forecast.p50_path[-1]), float(current_price), float(entry))
             return ModelExitEvaluation(
                 should_exit=True,
                 reason="VAR_STOP",
@@ -123,6 +125,8 @@ class TimesFMRiskAuthority:
                 is_risk_free=is_risk_free,
             )
         elif (not is_long) and current_price >= dyn_stop and dyn_stop > 0:
+            self.record_forecast_outcome(
+                float(forecast.p50_path[-1]), float(current_price), float(entry))
             return ModelExitEvaluation(
                 should_exit=True,
                 reason="VAR_STOP",
@@ -148,6 +152,8 @@ class TimesFMRiskAuthority:
             inflection = (tau_star < 8) and (p50[-1] > p50[tau_star] + (forecast.q_spread * 0.25))
 
         if rr_achieved >= 1.5 and inflection:
+            self.record_forecast_outcome(
+                float(forecast.p50_path[-1]), float(current_price), float(entry))
             return ModelExitEvaluation(
                 should_exit=True,
                 reason="TRAJECTORY_INFLECTION",
@@ -177,6 +183,8 @@ class TimesFMRiskAuthority:
         # In Fabio AMT scalping, positions need time to work to the structural POC (15-45 mins).
         # Only exit for stagnation after at least 20 bars if completely dead.
         if bars_held >= max(tau_star + 5, 20) and rr_achieved < 0.2 and abs(forecast.pct_change) < 0.0002:
+            self.record_forecast_outcome(
+                float(forecast.p50_path[-1]), float(current_price), float(entry))
             return ModelExitEvaluation(
                 should_exit=True,
                 reason="VELOCITY_DECAY",

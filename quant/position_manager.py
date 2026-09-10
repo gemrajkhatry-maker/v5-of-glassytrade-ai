@@ -296,14 +296,19 @@ class PositionManager:
         self._closed_ids.add(pos_id)  # Mark as closed
         self._emit(PositionClosed(symbol=self.symbol, time=time_str, fill=fill))
         risk = self._risk.record_trade(fill.pnl)
+        try:
+            budget_mult = float(self._exits.session_budget_multiplier())
+        except Exception:
+            budget_mult = 1.0
         logger.info(
             "🔒 [POSITION CLOSED] %s reason=%s pnl=₹%.2f daily_pnl=₹%.2f "
-            "trades=%d/%d equity=₹%.0f halted=%s exit_source=%s",
+            "trades=%d/%d equity=₹%.0f halted=%s exit_source=%s budget_mult=%.2f",
             self.symbol, exit_dec.reason, fill.pnl,
             risk.daily_pnl, risk.trades_today,
             6,  # max_trades_per_session
             risk.equity, risk.halted,
             self._exits.last_exit_source,
+            budget_mult,
         )
         self._emit(RiskUpdated(symbol=self.symbol, time=time_str, risk=risk))
         return None

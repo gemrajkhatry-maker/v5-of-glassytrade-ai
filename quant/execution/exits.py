@@ -100,6 +100,11 @@ class ExitEngine:
         be_floor = self._breakeven.get(position._id)
         return be_floor is not None
 
+    def session_budget_multiplier(self) -> float:
+        if self._timesfm_risk is None:
+            return 1.0
+        return self._timesfm_risk.get_session_budget_multiplier()
+
     def evaluate(
         self,
         position: Position,

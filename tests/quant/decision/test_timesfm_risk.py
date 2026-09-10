@@ -145,6 +145,23 @@ def test_forecast_outcome_calibration_throttling():
     assert mult_bad >= 0.40  # floor at 0.4x
 
 
+def test_var_stop_records_forecast_calibration(trending_forecast):
+    authority = TimesFMRiskAuthority()
+    assert len(authority._forecast_errors) == 0
+    eval_res = authority.evaluate_exit(
+        position_id="test_calib_1",
+        side="LONG",
+        entry=8000.0,
+        current_price=7990.0,
+        bars_held=6,
+        forecast=trending_forecast,
+        active_sl=7980.0,
+    )
+    assert eval_res.should_exit is True
+    assert eval_res.reason == "VAR_STOP"
+    assert len(authority._forecast_errors) == 1
+
+
 def test_exit_engine_incorporates_timesfm_forecast(inflecting_forecast):
     engine = ExitEngine()
     pos = _make_dummy_position(entry=8000.0, sl=7980.0)
