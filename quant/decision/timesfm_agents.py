@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from quant.contracts.instrument_registry import is_option_contract
 from quant.decision.context import DecisionContext
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,10 @@ class TimesFMScanningAgent:
         canonical_gates: Optional[tuple] = None,
     ) -> Dict[str, Any]:
         symbol = str(ctx.symbol or "UNKNOWN")
+        # Retail scalpers are option buyers (long calls / long puts) with defined risk.
+        # Shorting naked options is disabled — option instruments can never emit
+        # ENTER_SHORT in advisory (mirrors the long-only guard in context_builder.py).
+        is_option = is_option_contract(symbol)
         curr_price = float(ctx.bar.close if ctx.bar else forecast.curr_price)
         session_phase = str(ctx.session_phase or "").upper()
         allow_trend = getattr(ctx, "allow_trend", True)
@@ -141,6 +146,7 @@ class TimesFMScanningAgent:
         elif (
             allow_entry
             and allow_trend
+            and not is_option
             and (curr_price >= vah - tol or "BUY" in absorption or stacked_imb == "SELL")
             and cvd_slope < -1.0
             and forecast.pct_change < -0.0005
@@ -173,6 +179,7 @@ class TimesFMScanningAgent:
         elif (
             allow_entry
             and allow_trend
+            and not is_option
             and curr_price < val
             and cvd_slope < -0.5
             and all(s == "SHORT" for s in forecast.forecast_steps[-16:])
@@ -188,6 +195,7 @@ class TimesFMScanningAgent:
         elif (
             allow_entry
             and allow_reversion
+            and not is_option
             and curr_price >= vah
             and cvd_slope <= 0.0
             and forecast.mean_forecast < curr_price
@@ -232,7 +240,7 @@ class TimesFMScanningAgent:
                     f"Model-Directed Momentum Long on {symbol}: TimesFM projecting +{forecast.pct_change*100:.2f}% "
                     f"drift ({long_steps}/{total_steps} bullish steps, q_spread={forecast.q_spread:.1f}) with CVD concordance ({cvd_slope:.1f})."
                 )
-            elif forecast.pct_change < 0 and (short_steps / total_steps) >= 0.60 and cvd_slope <= 0.5:
+            elif forecast.pct_change < 0 and not is_option and (short_steps / total_steps) >= 0.60 and cvd_slope <= 0.5:
                 action = "ENTER_SHORT"
                 direction = "SHORT"
                 setup = "MODEL_MOMENTUM"
