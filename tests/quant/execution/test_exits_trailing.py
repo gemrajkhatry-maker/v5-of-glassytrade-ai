@@ -52,3 +52,63 @@ def test_pop_trail_cleans_up():
     assert pos._id in eng._trail
     eng.pop_trail(pos)
     assert pos._id not in eng._trail
+
+
+def test_bar_path_books_trail_not_sl_when_trail_is_tighter():
+    """D-13: the bar path checked the raw frozen SL before the merged
+    trail/breakeven stop, so the same breach booked SL at the worse price on
+    the bar path and TRAIL on the tick path."""
+    from quant.decision.signal_builder import Signal
+    from quant.execution.exits import ExitEngine, _Trail
+    from quant.execution.order import Order, Position
+
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=95.0, tp=110.0,
+                 rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
+    pos = Position(order=Order(sig, 10.0), open_price=100.0, open_time="t0", size=10.0)
+
+    eng = ExitEngine()
+    # Arm a trailing stop well above the raw SL.
+    eng._trail[pos._id] = _Trail(active=True, stop=99.0)
+
+    # Bar sweeps below BOTH the trail (99.0) and the raw SL (95.0).
+    d = eng.evaluate(pos, bar_close=94.0, bar_high=101.0, bar_low=94.0, bar_index=5)
+
+    assert d.should_exit is True
+    assert d.reason == "TRAIL", f"expected TRAIL, got {d.reason} at {d.close_price}"
+    assert d.close_price == 99.0
+    assert eng.last_exit_source == "DETERMINISTIC:TRAIL"
+
+
+def test_tick_and_bar_paths_agree_on_the_breached_stop():
+    """The bar path and the tick path must book the same reason and price."""
+    from quant.decision.signal_builder import Signal
+    from quant.execution.exits import ExitEngine, _Trail
+    from quant.execution.order import Order, Position
+    from quant.execution.oms import PaperOMS
+    from quant.execution.risk import SessionRisk
+    from quant.position_manager import PositionManager
+
+    def _pos(pid):
+        sig = Signal(type="LONG", reason="r", entry=100.0, sl=95.0, tp=110.0,
+                     rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
+        return Position(order=Order(sig, 10.0), open_price=100.0,
+                        open_time="t0", size=10.0, _id=pid)
+
+    eng_bar = ExitEngine()
+    pos_bar = _pos("bar")
+    eng_bar._trail[pos_bar._id] = _Trail(active=True, stop=99.0)
+    d_bar = eng_bar.evaluate(pos_bar, bar_close=94.0, bar_high=101.0,
+                             bar_low=94.0, bar_index=5)
+
+    eng_tick = ExitEngine()
+    pos_tick = _pos("tick")
+    eng_tick._trail[pos_tick._id] = _Trail(active=True, stop=99.0)
+    pm = PositionManager(oms=PaperOMS(lot_size=1.0), exits=eng_tick,
+                         risk=SessionRisk(storage=None, symbol="SYM"),
+                         emit_fn=lambda e: None, symbol="SYM", market="NSE",
+                         contract_expiry=None, tick_size=0.05)
+    pm.manage_tick_exit(pos_tick, 94.0, "t1")
+    tick_reason = pm._exits.last_exit_source
+
+    assert d_bar.reason == "TRAIL"
+    assert tick_reason == "DETERMINISTIC:TRAIL"

@@ -220,11 +220,30 @@ class ExitEngine:
                 )
                 MODEL_RISK_FAILURES += 1
 
-        # Rule 2: Stop-loss
-        r = check_stop_loss(position, low, high)
-        if r:
-            self.last_exit_source = f"DETERMINISTIC:{r.reason}"
-            return r
+        # Rule 2: protective stop — the TIGHTEST of raw SL, breakeven floor and
+        # active trail. The bar path previously checked the raw frozen SL first,
+        # so a bar sweeping both the SL and the trail booked SL at the worse
+        # price while the identical tick breach booked TRAIL. One resolver, one
+        # price, one exit_source for the same economic event.
+        be_floor = self._breakeven.get(position._id)
+        tr = self._trail.get(position._id)
+        trail_stop = tr.stop if (tr and tr.active) else None
+        protective = float(sl)
+        protective_reason = "SL"
+        if trail_stop is not None:
+            if (long and trail_stop > protective) or (not long and trail_stop < protective):
+                protective, protective_reason = float(trail_stop), "TRAIL"
+        if be_floor is not None:
+            if (long and be_floor > protective) or (not long and be_floor < protective):
+                protective, protective_reason = float(be_floor), "BREAKEVEN"
+
+        breached = (long and low <= protective) or (not long and high >= protective)
+        if breached and protective_reason != "SL":
+            self.last_exit_source = f"DETERMINISTIC:{protective_reason}"
+            return ExitDecision(True, protective_reason, protective, trail_stop=protective)
+        if breached:
+            self.last_exit_source = "DETERMINISTIC:SL"
+            return ExitDecision(True, "SL", float(sl))
 
         # Rule 3: CVD kill
         r = check_cvd_kill(position, dto, self.cvd_kill_threshold)
@@ -243,7 +262,9 @@ class ExitEngine:
             return r
         self._tp_tier[position._id] = new_tier
 
-        # Rule 4b: Trailing stop + breakeven
+        # Rule 4b: advance the trailing/breakeven stores for the NEXT bar.
+        # The breach check for THIS bar already ran above, against the tightest
+        # protective level, so this call only ratchets state forward.
         be_floor = self._breakeven.get(position._id)
         tr = self._trail.get(position._id)
         trail_stop = tr.stop if tr else None
