@@ -1,4 +1,4 @@
-.PHONY: test test-backend test-quant test-brokers test-frontend test-ci lint clean parity
+.PHONY: test test-backend test-quant test-brokers test-frontend test-ci lint clean parity pre-release
 
 # Python interpreter: override with `make PYTHON=/path/to/python`
 PYTHON ?= $(CURDIR)/.venv/bin/python
@@ -29,6 +29,12 @@ parity:
 	PYTHONPATH=backend:. $(PYTHON) -m pytest tests/quant/test_golden_tape.py tests/quant/test_golden_replay.py tests/quant/test_golden_file.py tests/quant/certification/ -q --no-header
 	PYTHONPATH=backend:. $(PYTHON) -m tests.quant.certification.run_battery --limit 5
 
+# Pre-release decision-integrity gate: flow-authority audit, AMT DTO contract
+# coverage, canonical-behaviour probes, and the decision/strategy/exit suites.
+# See docs/PRE_RELEASE_DECISION_INTEGRITY_CHECKLIST.md
+pre-release:
+	PYTHONPATH=backend:. $(PYTHON) scripts/pre_release_decision_check.py
+
 lint:
 	$(PYTHON) -m ruff check quant backend/app brokers shared tests backend/tests
 	cd frontend && npx tsc --noEmit
@@ -43,4 +49,3 @@ test-arch:
 
 test-fast:
 	PYTHONPATH=backend:. $(PYTHON) -m pytest tests/quant/ tests/architecture/ -q --no-header -x
-
