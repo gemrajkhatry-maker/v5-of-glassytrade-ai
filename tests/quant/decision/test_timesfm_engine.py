@@ -186,7 +186,7 @@ def test_timesfm_engine_fallback_mode_returns_valid_payload():
         vah=6465.0,
         val=6445.0,
         cvd_slope=2.1,
-        absorption_side="BUY",
+        absorption_side="SELL_ABSORBED",
         session_phase="PRIMARY",
     )
     engine = TimesFMEngine(target_horizon=32)
@@ -200,7 +200,10 @@ def test_timesfm_engine_fallback_mode_returns_valid_payload():
         assert res["setup"] == "RULE_BASED_FALLBACK"
         assert res["confidence"] == "Low"
         assert res["confidenceScore"] == 0.2
-        assert res["direction"] == "LONG"  # cvd_slope > 0 and absorption_side == "BUY"
+        # Canonical AMT: SELL_ABSORBED (sellers absorbed) is bullish, and the
+        # CVD slope confirms it. The old bare "BUY" read was dead against the
+        # live DTO and directionally inverted.
+        assert res["direction"] == "LONG"
         assert res["action"] == "ENTER_LONG"
         assert res["role"] == "SCANNING"
         assert len(res["forecastSteps"]) == 32
@@ -243,7 +246,7 @@ def test_timesfm_engine_fallback_mode_short_edge():
         vah=6465.0,
         val=6445.0,
         cvd_slope=-3.5,
-        absorption_side="SELL",
+        absorption_side="BUY_ABSORBED",
         session_phase="PRIMARY",
     )
     engine = TimesFMEngine(target_horizon=32)
@@ -278,3 +281,51 @@ def test_timesfm_engine_fallback_mode_position_open():
 
         assert res["role"] == "POSITION_MANAGEMENT"
         assert res["action"] == "HOLD"
+
+
+def test_add_context_is_idempotent_within_a_stamped_bar():
+    """A shared engine (native advisor + E2E strategy) must not record the
+    same bar twice — a duplicated price series corrupts the model input."""
+    bar = Bar("2026-09-10T10:00:00", 100, 101, 99, 100.5, 1000, 100)
+    ctx = DecisionContext(symbol="NIFTY", bar=bar, bar_index=7)
+    engine = TimesFMEngine(target_horizon=8)
+
+    engine.add_context(ctx)                      # first consumer (strategy)
+    _, depth_after_first = engine.add_context(ctx)  # second consumer (advisor)
+
+    assert depth_after_first == 1
+    assert list(engine._price_buffers["NIFTY"]) == [100.5]
+
+    # A new bar still records normally.
+    ctx2 = DecisionContext(
+        symbol="NIFTY",
+        bar=Bar("2026-09-10T10:01:00", 101, 102, 100, 101.5, 1000, 100),
+        bar_index=8,
+    )
+    engine.add_context(ctx2)
+    assert list(engine._price_buffers["NIFTY"]) == [100.5, 101.5]
+
+
+def test_shared_engine_advisor_plus_strategy_records_bar_once():
+    """Regression: TIMESFM_END_TO_END + native advisor share one engine, so
+    engine.analyze() and strategy.should_enter() both run for the same bar."""
+    from unittest.mock import Mock
+    import numpy as np
+    from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
+
+    engine = TimesFMEngine(target_horizon=8)
+    strategy = TimesFMTradingStrategy(target_horizon=8, engine=engine)
+    bar = Bar("2026-09-10T10:00:00", 100, 101, 99, 100.5, 1000, 100)
+    ctx = DecisionContext(
+        symbol="NIFTY", bar=bar, bar_index=42, session_open=True,
+        warmup_complete=True, session_phase="PRIMARY",
+    )
+    fake = Mock()
+    fake.predict.return_value = Mock(
+        quantiles=np.tile(np.linspace(99, 102, 9), (8, 1))
+    )
+    with patch("quant.decision.timesfm_engine.get_timesfm_model", return_value=fake):
+        engine.analyze(ctx)
+        strategy.should_enter(ctx)
+
+    assert len(engine._price_buffers["NIFTY"]) == 1

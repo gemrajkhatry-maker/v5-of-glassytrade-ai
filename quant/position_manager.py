@@ -259,6 +259,15 @@ class PositionManager:
             )
             return None
 
+        # Exit-source truthfulness: closes that bypass ExitEngine.evaluate()
+        # (thesis flip, EOD square-off, tick-path TP) carry their own
+        # ExitDecision, so last_exit_source would otherwise log a stale value
+        # from an earlier bar (or empty). Stamp the deterministic reason unless
+        # the engine already named this exact reason itself.
+        _engine_reason = self._exits.last_exit_source.rpartition(":")[2]
+        if exit_dec.reason and _engine_reason != exit_dec.reason:
+            self._exits.last_exit_source = f"DETERMINISTIC:{exit_dec.reason}"
+
         fill = self._oms.close(position, exit_dec.close_price, time_str, exit_dec.reason)
         self.last_fill = fill
         self._exits.pop_trail(position)

@@ -87,6 +87,11 @@ class TimesFMEngine:
         )
         # Track how many live ticks have been added per symbol (after seeding)
         self._live_bar_counts: Dict[str, int] = collections.defaultdict(int)
+        # Last DecisionContext.bar_index recorded per symbol. The advisor's
+        # native engine and the E2E strategy share ONE TimesFMEngine, so both
+        # call add_context() for the same bar. Without this guard the model
+        # sees every price twice — a duplicated, distorted input series.
+        self._last_context_bar: Dict[str, int] = {}
         from quant.decision.timesfm_agents import (
             TimesFMForecast,
             TimesFMPositionAgent,
@@ -173,13 +178,32 @@ class TimesFMEngine:
             (prices_for_inference, context_bars_used)
             prices_for_inference — exactly `target_horizon` values for the model
             context_bars_used   — raw buffer depth (including historical seed)
+
+        Idempotent per bar: when the advisor and the strategy share one engine
+        (TIMESFM_END_TO_END + native advisor) both call this for the same
+        DecisionContext, and the price must be recorded exactly once.
         """
         symbol = str(ctx.symbol or "DEFAULT")
         price = float(ctx.bar.close if ctx.bar else (ctx.state.poc if ctx.state else 100.0))
+        bar_index = int(getattr(ctx, "bar_index", -1) or -1)
         buf = self._price_buffers[symbol]
+
+        # A stamped bar index already recorded for this symbol means another
+        # consumer (advisor vs strategy) beat us to it this bar. bar_index < 0
+        # means the caller did not stamp one (unit tests, ad-hoc probes) —
+        # append unchanged so those callers keep their existing semantics.
+        if bar_index >= 0 and self._last_context_bar.get(symbol) == bar_index:
+            return self._context_window(buf)
+
         buf.append(price)
         self._live_bar_counts[symbol] += 1
+        if bar_index >= 0:
+            self._last_context_bar[symbol] = bar_index
 
+        return self._context_window(buf)
+
+    def _context_window(self, buf) -> Tuple[List[float], int]:
+        """Project the rolling buffer to (inference window, raw depth)."""
         raw_prices = list(buf)
         context_bars_used = len(raw_prices)
 
@@ -396,11 +420,17 @@ class TimesFMEngine:
         """
         logger.info("TimesFMEngine: using rule-based fallback for %s (error: %s)", ctx.symbol, error_msg)
 
-        # Simple rule-based direction from AMT context
+        # Simple rule-based direction from AMT context. Absorption follows
+        # canonical AMT semantics: SELL_ABSORBED = sellers absorbed = bullish
+        # (LONG), BUY_ABSORBED = buyers absorbed = bearish (SHORT). Substring
+        # match tolerates both the full `_ABSORBED` DTO form and the legacy
+        # bare "BUY"/"SELL" form; the bare-only comparison this replaces was
+        # dead against the live DTO (which always sends `_ABSORBED`).
         direction = "FLAT"
-        if ctx.cvd_slope > 0 and ctx.absorption_side == "BUY":
+        absorption = str(ctx.absorption_side or "").upper()
+        if ctx.cvd_slope > 0 and "SELL" in absorption:
             direction = "LONG"
-        elif ctx.cvd_slope < 0 and ctx.absorption_side == "SELL":
+        elif ctx.cvd_slope < 0 and "BUY" in absorption:
             direction = "SHORT"
 
         forecast_steps = [direction] * self.target_horizon
