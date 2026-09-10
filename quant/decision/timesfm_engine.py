@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 # Global singleton model cache
 _TIMESFM_MODEL: Any = None
 _TIMESFM_LOCK = threading.Lock()
+# Serializes inference on the shared TimesFM singleton. The model object is not
+# documented as thread-safe and every engine in the coordinator shares it.
+_TIMESFM_INFER_LOCK = threading.Lock()
 _TIMESFM_MODEL_LOAD_ERROR: Optional[str] = None
 
 
@@ -92,6 +95,12 @@ class TimesFMEngine:
         # call add_context() for the same bar. Without this guard the model
         # sees every price twice — a duplicated, distorted input series.
         self._last_context_bar: Dict[str, int] = {}
+        # The advisor worker thread and the E2E strategy engine thread share
+        # ONE engine, so buffer mutation and the per-bar dedup must be atomic.
+        # The old check-then-act allowed both threads past the guard (same-bar
+        # double append) and allowed a lagging consumer to replay an older bar
+        # after a newer one (out-of-order window).
+        self._buffer_lock = threading.RLock()
         from quant.decision.timesfm_agents import (
             TimesFMForecast,
             TimesFMPositionAgent,
@@ -186,21 +195,26 @@ class TimesFMEngine:
         symbol = str(ctx.symbol or "DEFAULT")
         price = float(ctx.bar.close if ctx.bar else (ctx.state.poc if ctx.state else 100.0))
         bar_index = int(getattr(ctx, "bar_index", -1) or -1)
-        buf = self._price_buffers[symbol]
 
-        # A stamped bar index already recorded for this symbol means another
-        # consumer (advisor vs strategy) beat us to it this bar. bar_index < 0
-        # means the caller did not stamp one (unit tests, ad-hoc probes) —
-        # append unchanged so those callers keep their existing semantics.
-        if bar_index >= 0 and self._last_context_bar.get(symbol) == bar_index:
+        with self._buffer_lock:
+            buf = self._price_buffers[symbol]
+
+            # A stamped bar index must be STRICTLY newer than the last recorded
+            # one. Equal means another consumer already recorded this bar;
+            # lesser means a lagging consumer (advisor queue) is replaying a bar
+            # the engine thread has already passed. Both must be dropped, or
+            # the model window sees duplicate/out-of-order prices.
+            # bar_index < 0 means the caller did not stamp one (unit tests,
+            # ad-hoc probes) — append unchanged so those keep working.
+            if bar_index >= 0:
+                last = self._last_context_bar.get(symbol)
+                if last is not None and bar_index <= last:
+                    return self._context_window(buf)
+                self._last_context_bar[symbol] = bar_index
+
+            buf.append(price)
+            self._live_bar_counts[symbol] += 1
             return self._context_window(buf)
-
-        buf.append(price)
-        self._live_bar_counts[symbol] += 1
-        if bar_index >= 0:
-            self._last_context_bar[symbol] = bar_index
-
-        return self._context_window(buf)
 
     def _context_window(self, buf) -> Tuple[List[float], int]:
         """Project the rolling buffer to (inference window, raw depth)."""
@@ -344,7 +358,8 @@ class TimesFMEngine:
 
         try:
             np_prices = np.array(context_prices, dtype=np.float32)
-            res = model.predict(context=np_prices, horizon=self.target_horizon, return_quantiles=True)
+            with _TIMESFM_INFER_LOCK:
+                res = model.predict(context=np_prices, horizon=self.target_horizon, return_quantiles=True)
             lat_ms = (time.perf_counter() - t0) * 1000.0
         except Exception as e:
             # Inference failed — graceful fallback to rule-based

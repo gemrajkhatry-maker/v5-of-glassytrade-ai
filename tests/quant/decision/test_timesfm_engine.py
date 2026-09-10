@@ -360,3 +360,68 @@ def test_native_advisor_scanner_call_uses_model_gates():
             engine.analyze(ctx)
 
     assert "canonical_gates" not in evaluate.call_args.kwargs
+
+
+def test_add_context_is_thread_safe_for_one_bar():
+    """D-10: two consumers racing on the same bar must append it once."""
+    import threading
+
+    engine = TimesFMEngine(target_horizon=8)
+    bar = Bar("2026-09-10T10:00:00", 100, 101, 99, 100.5, 1000, 100)
+    ctx = DecisionContext(symbol="NIFTY", bar=bar, bar_index=42)
+
+    class _Rendezvous(dict):
+        def __init__(self):
+            super().__init__()
+            self._barrier = threading.Barrier(2, timeout=5)
+
+        def get(self, key, default=None):
+            value = super().get(key, default)
+            try:
+                self._barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+            return value
+
+    engine._last_context_bar = _Rendezvous()
+
+    def consumer():
+        try:
+            engine.add_context(ctx)
+        except Exception:
+            pass
+
+    threads = [threading.Thread(target=consumer) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert len(engine._price_buffers["NIFTY"]) == 1
+
+
+def test_add_context_ignores_a_late_replayed_bar():
+    """D-10: the advisor drains its queue behind the engine thread, so a bar
+    already recorded must not be appended again."""
+    engine = TimesFMEngine(target_horizon=8)
+
+    def mk(idx, px):
+        bar = Bar(f"2026-09-10T10:{idx:02d}:00", px, px, px, px, 10, 10)
+        return DecisionContext(symbol="NIFTY", bar=bar, bar_index=idx)
+
+    for idx, px in [(1, 100.0), (2, 101.0), (3, 102.0)]:
+        engine.add_context(mk(idx, px))          # strategy, on time
+    for idx, px in [(1, 100.0), (2, 101.0), (3, 102.0)]:
+        engine.add_context(mk(idx, px))          # advisor, lagging
+
+    assert list(engine._price_buffers["NIFTY"]) == [100.0, 101.0, 102.0]
+
+
+def test_add_context_still_accepts_unstamped_callers():
+    """bar_index < 0 (unit tests, ad-hoc probes) keeps appending."""
+    engine = TimesFMEngine(target_horizon=8)
+    bar = Bar("2026-09-10T10:00:00", 100, 101, 99, 100.5, 1000, 100)
+    ctx = DecisionContext(symbol="NIFTY", bar=bar, bar_index=-1)
+    engine.add_context(ctx)
+    engine.add_context(ctx)
+    assert len(engine._price_buffers["NIFTY"]) == 2

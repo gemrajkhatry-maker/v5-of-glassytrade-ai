@@ -28,7 +28,7 @@ from quant.decision.timesfm_agents import (
     TimesFMPositionAgent,
     TimesFMScanningAgent,
 )
-from quant.decision.timesfm_engine import TimesFMEngine
+from quant.decision.timesfm_engine import TimesFMEngine, _TIMESFM_INFER_LOCK
 from quant.execution.exits import ExitEngine
 from quant.modeling.contracts import ForecastStatus
 from quant.modeling.forecast_provider import ForecastProvider
@@ -308,7 +308,8 @@ class TimesFMTradingStrategy:
 
             model_inst = get_timesfm_model(self.device)
             np_prices = np.array(context_prices, dtype=np.float32)
-            res = model_inst.predict(context=np_prices, horizon=self.target_horizon, return_quantiles=True)
+            with _TIMESFM_INFER_LOCK:
+                res = model_inst.predict(context=np_prices, horizon=self.target_horizon, return_quantiles=True)
             lat_ms = (time.perf_counter() - t0) * 1000.0
 
             quantiles = getattr(res, "quantiles", None)
