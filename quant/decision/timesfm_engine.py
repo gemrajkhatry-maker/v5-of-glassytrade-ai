@@ -114,6 +114,9 @@ class TimesFMEngine:
         # ran model.predict, doubling latency and allowing the two payloads to
         # disagree on the very input the decision was made from.
         self._forecast_cache: Dict[str, Tuple[int, Any]] = {}
+        # The advisor worker and the strategy engine threads share this cache;
+        # read-modify-write of a per-bar forecast must be atomic.
+        self._forecast_lock = threading.Lock()
 
     def warmup(self) -> bool:
         """Load the model on startup. Returns True if model loaded successfully.
@@ -147,6 +150,32 @@ class TimesFMEngine:
         """
         entry = self._forecast_cache.get(str(symbol))
         return entry[1] if entry is not None else None
+
+    def record_forecast(self, symbol: str, bar_index: int, forecast: Any) -> None:
+        """Record the forecast computed for ``bar_index`` so the other consumer
+        on the shared engine reuses it instead of re-inferring.
+
+        D-11 works in both directions: the advisor's ``analyze`` records what it
+        inferred and the E2E strategy reuses it, and (this method) the strategy
+        records what it inferred so a later ``analyze`` reuses it. Whichever
+        consumer runs first owns the bar's one inference.
+
+        A forecast stamped with a different ``bar_index`` is never served —
+        Task 4 established strict monotonic bar semantics. Recording a new bar
+        always wins; a lagging writer must not overwrite a newer bar's forecast.
+        """
+        key = str(symbol)
+        try:
+            new_bar = int(bar_index)
+        except (TypeError, ValueError):
+            return
+        if forecast is None:
+            return
+        with getattr(self, "_forecast_lock", threading.Lock()):
+            existing = self._forecast_cache.get(key)
+            if existing is not None and int(existing[0]) > new_bar:
+                return
+            self._forecast_cache[key] = (new_bar, forecast)
 
     @staticmethod
     def health_check() -> Dict[str, Any]:
@@ -390,66 +419,81 @@ class TimesFMEngine:
             logger.warning("TimesFMEngine: model not available (%s) — returning rule-based fallback", e)
             return self._rule_based_fallback(ctx, curr_price, str(e), context_bars_used, events_processed)
 
-        try:
-            np_prices = np.array(context_prices, dtype=np.float32)
-            with _TIMESFM_INFER_LOCK:
-                res = model.predict(context=np_prices, horizon=self.target_horizon, return_quantiles=True)
-            lat_ms = (time.perf_counter() - t0) * 1000.0
-        except Exception as e:
-            # Inference failed — graceful fallback to rule-based
-            logger.warning("TimesFMEngine: inference failed (%s) — returning rule-based fallback", e)
-            return self._rule_based_fallback(ctx, curr_price, str(e), context_bars_used, events_processed)
+        # D-11, reverse direction: the E2E strategy runs BEFORE the advisor on
+        # the entry path (runtime._decide), so it may have already inferred this
+        # bar and recorded it via record_forecast(). Reuse that exact forecast
+        # instead of a second predict. Guarded on exact bar_index equality —
+        # strict monotonic bar semantics forbid serving another bar's forecast.
+        bar_index_for_reuse = int(getattr(ctx, "bar_index", -1) or -1)
+        reused: Optional[Any] = None
+        if bar_index_for_reuse >= 0:
+            candidate = self.last_forecast_for(symbol)
+            if candidate is not None and int(getattr(candidate, "asof_bar", -1)) == bar_index_for_reuse:
+                reused = candidate
 
-        # Quantile shape: (32, 9) where index 4 is p50, 0 is p10, 8 is p90
-        quantiles = res.quantiles if hasattr(res, "quantiles") else None
-        if quantiles is None or len(quantiles) == 0:
-            p50_path = np.full(self.target_horizon, curr_price)
-            p10_path = np.full(self.target_horizon, curr_price * 0.998)
-            p90_path = np.full(self.target_horizon, curr_price * 1.002)
-            q_spread = 0.0
+        if reused is not None:
+            forecast = reused
         else:
-            p50_path = quantiles[:, 4]
-            p10_path = quantiles[:, 0]
-            p90_path = quantiles[:, 8]
-            q_spread = float(np.mean(p90_path - p10_path))
+            try:
+                np_prices = np.array(context_prices, dtype=np.float32)
+                with _TIMESFM_INFER_LOCK:
+                    res = model.predict(context=np_prices, horizon=self.target_horizon, return_quantiles=True)
+                lat_ms = (time.perf_counter() - t0) * 1000.0
+            except Exception as e:
+                # Inference failed — graceful fallback to rule-based
+                logger.warning("TimesFMEngine: inference failed (%s) — returning rule-based fallback", e)
+                return self._rule_based_fallback(ctx, curr_price, str(e), context_bars_used, events_processed)
 
-        mean_forecast = float(p50_path[-1])
-        pct_change = (mean_forecast - curr_price) / max(curr_price, 1e-4)
-
-        # Build step-by-step horizon trajectory
-        vah = float(ctx.vah or (ctx.state.vah if ctx.state else curr_price))
-        val = float(ctx.val or (ctx.state.val if ctx.state else curr_price))
-        forecast_steps = []
-        for p in p50_path:
-            if p > vah:
-                forecast_steps.append("LONG")
-            elif p < val:
-                forecast_steps.append("SHORT")
+            # Quantile shape: (32, 9) where index 4 is p50, 0 is p10, 8 is p90
+            quantiles = res.quantiles if hasattr(res, "quantiles") else None
+            if quantiles is None or len(quantiles) == 0:
+                p50_path = np.full(self.target_horizon, curr_price)
+                p10_path = np.full(self.target_horizon, curr_price * 0.998)
+                p90_path = np.full(self.target_horizon, curr_price * 1.002)
+                q_spread = 0.0
             else:
-                forecast_steps.append("FLAT")
+                p50_path = quantiles[:, 4]
+                p10_path = quantiles[:, 0]
+                p90_path = quantiles[:, 8]
+                q_spread = float(np.mean(p90_path - p10_path))
 
-        from quant.decision.timesfm_agents import TimesFMForecast
-        forecast = TimesFMForecast(
-            horizon=self.target_horizon,
-            p50_path=p50_path,
-            p10_path=p10_path,
-            p90_path=p90_path,
-            q_spread=q_spread,
-            mean_forecast=mean_forecast,
-            pct_change=pct_change,
-            forecast_steps=forecast_steps,
-            curr_price=curr_price,
-            lat_ms=lat_ms,
-        )
+            mean_forecast = float(p50_path[-1])
+            pct_change = (mean_forecast - curr_price) / max(curr_price, 1e-4)
+
+            # Build step-by-step horizon trajectory
+            vah = float(ctx.vah or (ctx.state.vah if ctx.state else curr_price))
+            val = float(ctx.val or (ctx.state.val if ctx.state else curr_price))
+            forecast_steps = []
+            for p in p50_path:
+                if p > vah:
+                    forecast_steps.append("LONG")
+                elif p < val:
+                    forecast_steps.append("SHORT")
+                else:
+                    forecast_steps.append("FLAT")
+
+            from quant.decision.timesfm_agents import TimesFMForecast
+            forecast = TimesFMForecast(
+                horizon=self.target_horizon,
+                p50_path=p50_path,
+                p10_path=p10_path,
+                p90_path=p90_path,
+                q_spread=q_spread,
+                mean_forecast=mean_forecast,
+                pct_change=pct_change,
+                forecast_steps=forecast_steps,
+                curr_price=curr_price,
+                lat_ms=lat_ms,
+            )
 
         # Stamp the bar this forecast was computed for and cache it per symbol.
         # The advisor and the E2E strategy share one engine and both need the
-        # forecast for the same bar; the strategy reuses this instead of running
-        # a second inference that could disagree on the very input the decision
-        # was made from. The stamp also keeps runtime._fresh_forecast working.
-        bar_index = int(getattr(ctx, "bar_index", -1) or -1)
-        forecast.asof_bar = bar_index
-        self._forecast_cache[symbol] = (bar_index, forecast)
+        # forecast for the same bar; whoever runs first records it and the other
+        # reuses it instead of running a second inference that could disagree on
+        # the very input the decision was made from. The stamp also keeps
+        # runtime._fresh_forecast working.
+        forecast.asof_bar = bar_index_for_reuse
+        self.record_forecast(symbol, bar_index_for_reuse, forecast)
 
         # 3. Dynamic Role Switch: Route to Proper Specialized Agent
         # The advisor is UI-only. In E2E mode the TimesFM model is the entry

@@ -343,7 +343,7 @@ class TimesFMTradingStrategy:
             pct_chg = (mean_fc - curr_price) / max(curr_price, 1e-4)
             steps = ["LONG" if p > curr_price else ("SHORT" if p < curr_price else "FLAT") for p in p50]
 
-            return TimesFMForecast(
+            fc = TimesFMForecast(
                 horizon=self.target_horizon,
                 p50_path=p50,
                 p10_path=p10,
@@ -356,6 +356,16 @@ class TimesFMTradingStrategy:
                 lat_ms=lat_ms,
                 asof_bar=int(getattr(ctx, "bar_index", -1)),
             )
+            # D-11 reverse direction: on the entry path runtime._decide calls
+            # should_enter (this method) BEFORE the advisor's analyze, so the
+            # strategy owns the bar's inference here. Record it on the shared
+            # engine so the later analyze reuses it instead of re-inferring.
+            self._engine.record_forecast(
+                str(ctx.symbol or "UNKNOWN"),
+                int(getattr(ctx, "bar_index", -1) or -1),
+                fc,
+            )
+            return fc
         except Exception as exc:
             logger.debug("TimesFMTradingStrategy forecast error: %s", exc)
             return None

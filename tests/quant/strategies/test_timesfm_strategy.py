@@ -179,3 +179,89 @@ def test_strategy_and_advisor_share_one_inference_per_bar(monkeypatch):
     assert fake.predict.call_count == 1, (
         f"expected one inference per bar, got {fake.predict.call_count}"
     )
+
+
+def _fake_model(horizon):
+    from unittest.mock import Mock
+    p50 = np.linspace(100.0, 103.0, horizon, dtype=np.float32)
+    q = np.zeros((horizon, 9), dtype=np.float32)
+    q[:, 0] = p50 - 0.5
+    q[:, 4] = p50
+    q[:, 8] = p50 + 0.5
+    fake = Mock()
+    fake.predict.return_value = Mock(quantiles=q)
+    return fake
+
+
+def _ctx_for_bar(bar_index, price=100.0):
+    bar = Bar("2026-09-10T10:00:00+05:30", price, price + 1, price - 1, price, 100, 100)
+    return DecisionContext(symbol="NIFTY", bar=bar, bar_index=bar_index,
+                           session_open=True, warmup_complete=True,
+                           session_phase="PRIMARY", poc=price + 1, vah=price + 1.5,
+                           val=price - 1, cvd_slope=1.0)
+
+
+def _run_engine_strategy_order(order, bar_index=7):
+    import quant.decision.timesfm_engine as eng_mod
+    from quant.decision.timesfm_engine import TimesFMEngine
+
+    horizon = 8
+    fake = _fake_model(horizon)
+    engine = TimesFMEngine(target_horizon=horizon)
+    original = eng_mod.get_timesfm_model
+    eng_mod.get_timesfm_model = lambda *a, **k: fake
+    try:
+        strategy = TimesFMTradingStrategy(target_horizon=horizon, engine=engine)
+        ctx = _ctx_for_bar(bar_index)
+        if order == "engine_then_strategy":
+            engine.analyze(ctx)
+            strategy.should_enter(ctx)
+        else:
+            strategy.should_enter(ctx)
+            engine.analyze(ctx)
+    finally:
+        eng_mod.get_timesfm_model = original
+    return engine, fake
+
+
+def test_entry_path_order_strategy_then_advisor_one_inference(monkeypatch):
+    """runtime._decide calls strategy.should_enter BEFORE advisor.on_context
+    (the entry path). The strategy's inference must be reused by analyze()."""
+    _, fake = _run_engine_strategy_order("strategy_then_engine")
+    assert fake.predict.call_count == 1, (
+        f"entry-path order should infer once, got {fake.predict.call_count}"
+    )
+
+
+def test_positioned_path_order_advisor_then_strategy_one_inference():
+    """The positioned/UI path runs analyze() first; the strategy reuses it."""
+    _, fake = _run_engine_strategy_order("engine_then_strategy")
+    assert fake.predict.call_count == 1, (
+        f"advisor-first order should infer once, got {fake.predict.call_count}"
+    )
+
+
+def test_new_bar_after_entry_order_infers_again():
+    """A forecast stamped with another bar_index must never be served."""
+    import quant.decision.timesfm_engine as eng_mod
+    from quant.decision.timesfm_engine import TimesFMEngine
+
+    horizon = 8
+    fake = _fake_model(horizon)
+    engine = TimesFMEngine(target_horizon=horizon)
+    original = eng_mod.get_timesfm_model
+    eng_mod.get_timesfm_model = lambda *a, **k: fake
+    try:
+        strategy = TimesFMTradingStrategy(target_horizon=horizon, engine=engine)
+        ctx7 = _ctx_for_bar(7)
+        strategy.should_enter(ctx7)
+        engine.analyze(ctx7)
+        assert fake.predict.call_count == 1, "first bar should infer once"
+        ctx8 = _ctx_for_bar(8, price=101.0)
+        strategy.should_enter(ctx8)
+        engine.analyze(ctx8)
+    finally:
+        eng_mod.get_timesfm_model = original
+    assert fake.predict.call_count == 2, (
+        f"new bar should infer exactly once more, got {fake.predict.call_count}"
+    )
