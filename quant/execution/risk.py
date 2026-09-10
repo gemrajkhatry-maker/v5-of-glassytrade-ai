@@ -404,7 +404,7 @@ class SessionRisk:
                         # importable standalone.
                         import quant.execution.exits as _exits_mod
                         _exits_mod.MODEL_SIZING_FAILURES += 1
-                    except Exception:  # pragma: no cover - telemetry only
+                    except Exception:  # pragma: no cover - telemetry only  # silent-except - process-level telemetry counter mirror only
                         pass
                     logger.error(
                         "TimesFM dynamic sizing failed (%s) — refusing entry "

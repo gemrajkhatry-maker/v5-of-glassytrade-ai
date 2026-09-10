@@ -290,7 +290,7 @@ class DhanOrderUpdateFeed:
             self._ws = None
             try:
                 await ws.close()
-            except Exception:
+            except Exception:  # silent-except - websocket close in teardown is best-effort
                 pass
 
     def _set_connected(self, value: bool) -> None:

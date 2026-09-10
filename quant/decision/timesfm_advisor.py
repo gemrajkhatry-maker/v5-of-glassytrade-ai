@@ -179,10 +179,10 @@ class TimesFMAdvisor:
             if self._queue.full():
                 try:
                     self._queue.get_nowait()
-                except queue.Empty:
+                except queue.Empty:  # silent-except - queue.Empty when draining a full queue
                     pass
             self._queue.put_nowait(ctx)
-        except Exception:
+        except Exception:  # silent-except - advisor enqueue is best-effort and must never block decisions
             pass
 
     def _emit_decision(self, ctx: DecisionContext, decision: Dict[str, Any]) -> None:
@@ -249,5 +249,5 @@ class TimesFMAdvisor:
         self._running = False
         try:
             self._worker_thread.join(timeout=2.0)
-        except Exception:
+        except Exception:  # silent-except - worker thread join on shutdown is best-effort
             pass

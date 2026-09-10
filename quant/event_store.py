@@ -55,7 +55,7 @@ def _time_epoch(text: str) -> float | None:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=IST)
         return dt.timestamp()
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # silent-except - non-ISO timestamp returned as unparseable epoch
         pass
     try:
         epoch = float(text)

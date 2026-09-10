@@ -82,5 +82,5 @@ class Journal:
     def close(self) -> None:
         try:
             self._file.close()
-        except Exception:
+        except Exception:  # silent-except - closing an already-closed/absent replay file
             pass

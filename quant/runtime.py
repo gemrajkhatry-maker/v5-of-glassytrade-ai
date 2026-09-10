@@ -673,13 +673,13 @@ class QuantEngine:
             try:
                 advisor.shutdown()
             except Exception:
-                pass
+                logger.warning("advisor shutdown failed; continuing runtime close", exc_info=True)
         journal = getattr(self, "_journal", None)
         if journal is not None and callable(getattr(journal, "close", None)):
             try:
                 journal.close()
             except Exception:
-                pass
+                logger.warning("journal close failed; continuing runtime close", exc_info=True)
 
     def _cert_trace(self, bar=None, stage: str = "", **fields) -> None:
         """S1 decision traceability: append a certification record for this
@@ -694,7 +694,7 @@ class QuantEngine:
                 rec["bar_index"] = self._bar_index
                 rec["position_open"] = self.state.position is not None
             self.cert_records.append(rec)
-        except Exception:
+        except Exception:  # silent-except - certification record append must never break trading
             pass  # certification must never break trading
 
     def _run_inner(self, max_steps: int | None = None) -> list[Event]:
@@ -1103,7 +1103,7 @@ class QuantEngine:
                 } if decision.signal else None,
                 "position_size": None,
             })
-        except Exception:
+        except Exception:  # silent-except - certification decision record must never break trading
             pass
         self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
         if hasattr(self, "_advisor") and self._advisor is not None:
@@ -1281,7 +1281,7 @@ class QuantEngine:
                         recent_decisions=list(self._recent_decisions),
                     )
                     self._advisor.on_context(pos_ctx)
-                except Exception:
+                except Exception:  # silent-except - advisor context notify is best-effort
                     pass
         else:
             # Market state changed — all open blocking episodes are stale.
@@ -1463,7 +1463,7 @@ class QuantEngine:
                 if curr_bar is not None:
                     close_ctx = self._build_context(curr_bar, self._amt_engine.last_amt_dto or {}, cooldown_sec)
                     self._advisor.on_context(close_ctx)
-            except Exception:
+            except Exception:  # silent-except - advisor context notify is best-effort
                 pass
 
     def _get_position_manager(self) -> PositionManager:
@@ -1628,7 +1628,7 @@ class QuantEngine:
                         recent_decisions=list(self._recent_decisions),
                     )
                     self._advisor.on_context(advisor_ctx)
-            except Exception:
+            except Exception:  # silent-except - advisor context notify is best-effort
                 pass
 
         # Thesis invalidation: normal exits ran first and the position

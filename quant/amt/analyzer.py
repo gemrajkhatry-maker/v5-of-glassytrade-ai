@@ -179,7 +179,7 @@ class AMTConfig:
                 exchange_config.balance_ratio_threshold
             )
         except (TypeError, ValueError):
-            pass  # Use defaults
+            logger.warning("non-numeric exchange config override ignored; using defaults: %r", exchange_config, exc_info=True)
         return instance
 
 
@@ -452,7 +452,7 @@ class AMTAnalyzer:
             if spec is not None:
                 self._session_market = spec.session_profile
         except Exception:
-            pass
+            logger.warning("session-market resolution failed for %r; keeping prior session profile", self._last_resolve_key, exc_info=True)
 
         # 1. Volume Profile — use incremental if available, else full rebuild
         if incremental_profile is not None:
@@ -1045,7 +1045,7 @@ class AMTAnalyzer:
             if spec is not None:
                 self._session_market = spec.session_profile
         except Exception:
-            pass
+            logger.warning("session-market resolution failed for %r; keeping prior session profile", self._last_resolve_key, exc_info=True)
 
         session_info = get_session_info(
             timestamp=current.time,

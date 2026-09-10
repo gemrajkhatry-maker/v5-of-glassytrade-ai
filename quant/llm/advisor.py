@@ -79,10 +79,10 @@ class LLMAdvisor:
             if self._queue.full():
                 try:
                     self._queue.get_nowait()
-                except queue.Empty:
+                except queue.Empty:  # silent-except - queue.Empty when draining a full queue
                     pass
             self._queue.put_nowait(ctx)
-        except Exception:
+        except Exception:  # silent-except - advisor enqueue is best-effort and must never block decisions
             pass
 
     def _emit_decision(self, ctx: DecisionContext, decision: Dict[str, Any] | None) -> None:

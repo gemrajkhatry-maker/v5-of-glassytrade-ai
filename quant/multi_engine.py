@@ -126,14 +126,14 @@ def extract_option_strike(symbol: str) -> float | None:
     if m:
         try:
             return float(m.group(1))
-        except ValueError:
+        except ValueError:  # silent-except - non-numeric regex strike group
             pass
 
     m = _MONTH_STRIKE_RE.search(clean)
     if m:
         try:
             return float(m.group(1))
-        except ValueError:
+        except ValueError:  # silent-except - non-numeric regex strike group
             pass
 
     root = _canonical_root(clean)
@@ -145,14 +145,14 @@ def extract_option_strike(symbol: str) -> float | None:
     if m:
         try:
             return float(m.group(1))
-        except ValueError:
+        except ValueError:  # silent-except - non-numeric regex strike group
             pass
 
     m = _TRAILING_DIGITS_RE.search(rem if rem else clean)
     if m:
         try:
             return float(m.group(1))
-        except ValueError:
+        except ValueError:  # silent-except - non-numeric regex strike group
             pass
 
     return None
@@ -590,7 +590,7 @@ class QuantCoordinator:
                     q = self.market_data.get_quote(futures_symbol or root)
                     spot = float(getattr(q, "ltp", 0.0) or getattr(q, "price", 0.0) or 0.0)
                 except Exception:
-                    pass
+                    logger.warning("spot quote fallback failed for %s; spot stays at prior/zero", futures_symbol or root, exc_info=True)
 
             if spot <= 0:
                 continue
@@ -663,7 +663,7 @@ class QuantCoordinator:
                     q = self.market_data.get_quote(futures_symbol or root)
                     spot = float(getattr(q, "ltp", 0.0) or getattr(q, "price", 0.0) or 0.0)
                 except Exception:
-                    pass
+                    logger.warning("spot quote fallback failed for %s; spot stays at prior/zero", futures_symbol or root, exc_info=True)
 
             is_drifted = False
             drift_val = 0.0
@@ -1437,7 +1437,7 @@ class QuantCoordinator:
                                 closes = [float(getattr(c, "close", 0.0) or getattr(c, "c", 0.0) or 0.0) for c in candles]
                                 prices = [c for c in closes if c > 0]
                         except Exception:
-                            pass
+                            logger.warning("market-data candle seed for %s failed", root, exc_info=True)
                     if len(prices) < 32 and hasattr(self.market_data, "get_broker") and hasattr(self.market_data, "_make_instrument"):
                         try:
                             raw_b = self.market_data.get_broker()
@@ -1449,7 +1449,7 @@ class QuantCoordinator:
                                 if df is not None and not df.empty and "close" in df.columns:
                                     prices = [float(c) for c in df["close"].tail(32)]
                         except Exception:
-                            pass
+                            logger.warning("raw-broker historical seed for %s failed", root, exc_info=True)
 
                 if prices:
                     if len(prices) < 32:
@@ -1524,7 +1524,7 @@ class QuantCoordinator:
                         if inst and getattr(inst, "expiry_date", None):
                             expiry_text = inst.expiry_date.isoformat()
                 except Exception:
-                    pass
+                    logger.warning("contract expiry lookup failed; expiry left unset", exc_info=True)
 
             # 2. Fallback: derive month date from symbol (e.g. "CRUDEOIL SEP FUT")
             if not expiry_text:
@@ -1579,7 +1579,7 @@ class QuantCoordinator:
             if lot_size > 1:
                 return lot_size
         except Exception:
-            pass
+            logger.warning("lot-size lookup failed for %s; using default", symbol, exc_info=True)
         if spec is not None:
             return float(spec.lot_size)
         return float(DEFAULT_REGISTRY.resolve(symbol).lot_size)
@@ -1630,7 +1630,7 @@ class QuantCoordinator:
         if callable(join):
             try:
                 join(timeout=1.0)
-            except RuntimeError:
+            except RuntimeError:  # silent-except - thread join timeout is best-effort on shutdown
                 pass
             return
         # Pool Future: exception(timeout) both waits and retrieves the stored
@@ -1744,7 +1744,7 @@ class QuantCoordinator:
                     for s_fn in seed_targets:
                         try:
                             s_fn(sym, prices)
-                        except Exception:
+                        except Exception:  # silent-except - timesfm seed callback is best-effort
                             pass
                 engine._amt_engine._timesfm_seed_fn = _seed_all_timesfm
 
@@ -1869,7 +1869,7 @@ class QuantCoordinator:
             try:
                 engine.persist_prior_profile()
             except Exception:
-                pass
+                logger.warning("persist_prior_profile failed for %s on shutdown", symbol, exc_info=True)
             # F3: the advisor's daemon worker spins on a 1s poll loop for as
             # long as _running is True — and nothing ever called shutdown()
             # on the coordinator path, so every rescan cycle leaked one

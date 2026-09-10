@@ -340,7 +340,7 @@ class AMTEngine:
                                 self.symbol, last_date, prev_res.poc, prev_res.value_area_high, prev_res.value_area_low
                             )
                     except Exception:
-                        pass
+                        logger.warning("%s: cold-start seed of prior session levels failed", self.symbol, exc_info=True)
 
         scoped = session_scope(candles)
         with self._amt_lock:

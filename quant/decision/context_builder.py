@@ -353,11 +353,19 @@ class DecisionContextBuilder:
         session_info = None
         if is_epoch or is_iso:
             try: session_info = get_session_info(effective_time, market=market)
-            except Exception: pass
+            except Exception:
+                logger.warning(
+                    "session-info resolution failed for %r (market=%s); falling back to PRIMARY phase",
+                    effective_time, market, exc_info=True,
+                )
         elif not effective_time:
             # Fallback for live contexts where bar is not yet assembled
             try: session_info = get_session_info(market=market)
-            except Exception: pass
+            except Exception:
+                logger.warning(
+                    "session-info resolution failed (market=%s); falling back to PRIMARY phase",
+                    market, exc_info=True,
+                )
 
         session_phase = session_info.session if session_info else "PRIMARY"
         bar_dt = ist_dt(effective_time) if (effective_time and (is_epoch or is_iso)) else None

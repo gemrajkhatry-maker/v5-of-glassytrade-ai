@@ -34,7 +34,7 @@ class BarAggregator:
         try:
             epoch = float(text)
             return int(epoch)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # silent-except - unparseable tick time falls back to ISO/fallback counter
             pass
         try:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))

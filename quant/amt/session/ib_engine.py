@@ -123,7 +123,7 @@ class InitialBalanceEngine:
                 self._ib_poc = prof[poc_idx].price
                 self._ib_vah, self._ib_val = compute_value_area(prof, poc_idx, VALUE_AREA_PCT)
         except Exception:
-            pass
+            logger.warning("IB value-area/POC computation failed; IB levels stay unset", exc_info=True)
 
     def update(self, candle: OHLC, session_open: str | None = None) -> IBState:
         """Update IB with new candle. Returns current IB state.
@@ -166,7 +166,7 @@ class InitialBalanceEngine:
                         self.ib_val,
                     )
             except (ValueError, TypeError):
-                pass
+                logger.warning("IB profile publish failed; consumers keep last IB levels", exc_info=True)
 
         # Classify price location
         c_price = float(candle.close)

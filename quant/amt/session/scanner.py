@@ -164,7 +164,7 @@ class OptionScannerService:
                     score += (sim.composite_score * 0.5)
                     try:
                         setattr(opt, "_timesfm_sim", sim)
-                    except Exception:
+                    except Exception:  # silent-except - timesfm sim is an optional attribute on the option contract
                         pass
             except Exception as e:
                 logger.debug("TimesFM payoff simulation scoring error: %s", e)
@@ -455,7 +455,7 @@ class OptionScannerService:
                                 if p > 0:
                                     prices = [p] * 32
                             except Exception:
-                                pass
+                                logger.warning("%s: broker.get_quote fallback for seed prices failed", u, exc_info=True)
                         if not prices and hasattr(chain, "spot_price") and chain.spot_price:
                             prices = [float(chain.spot_price)] * 32
 

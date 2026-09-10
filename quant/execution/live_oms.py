@@ -137,7 +137,7 @@ class LiveOMS:
                     fill_price=fill_price, filled_qty=filled_qty, reason="ENTRY",
                 ))
             except Exception:
-                pass  # audit must never break trading
+                logger.warning("entry audit emit failed; trading unaffected", exc_info=True)
 
         return Position(
             order=Order(signal=signal, quantity=abs(filled_qty)),
@@ -221,7 +221,7 @@ class LiveOMS:
                     fill_price=fill_price, filled_qty=filled_qty, reason=reason,
                 ))
             except Exception:
-                pass
+                logger.warning("exit audit emit failed; trading unaffected", exc_info=True)
 
         # PnL = (close_price - entry_price) * signed_size
         pnl = (fill_price - position.open_price) * position.size
@@ -445,7 +445,7 @@ class LiveOMS:
                     fill_price=fill_price, filled_qty=filled_qty, reason=f"PYRAMID_{pyramid_level}",
                 ))
             except Exception:
-                pass  # audit must never break trading
+                logger.warning("pyramid audit emit failed; trading unaffected", exc_info=True)
 
         return Position(
             order=Order(signal=pyramid_signal, quantity=abs(filled_qty)),

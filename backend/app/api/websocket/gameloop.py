@@ -158,20 +158,20 @@ async def gameloop_ws(ws: WebSocket):
         try:
             await ws.send_json({"error": "Invalid JSON format"})
             await ws.close(code=1003)  # Unsupported Data
-        except Exception:
+        except Exception:  # silent-except - client already disconnected; nothing to do
             pass  # Client already disconnected, nothing to do
     except OSError as e:
         # Network errors, pipe errors, etc.
         logger.warning("OS error in WS handler: %s", e)
         try:
             await ws.close(code=1006)  # Abnormal closure
-        except Exception:
+        except Exception:  # silent-except - socket may already be closed
             pass  # Socket may already be closed
     except Exception:
         logger.error("Unexpected error in WS handler", exc_info=True)
         try:
             await ws.close(code=1011)  # Internal error
-        except Exception:
+        except Exception:  # silent-except - socket may already be closed
             pass  # Socket may already be closed
 
 
@@ -400,5 +400,5 @@ async def _coordinator_viewer_loop(
         listener.cancel()
         try:
             await listener
-        except (asyncio.CancelledError, Exception):
+        except (asyncio.CancelledError, Exception):  # silent-except - cancelled listener task cleanup on disconnect
             pass

@@ -893,7 +893,7 @@ class TradeJournal:
                 computed = (exit_dt - entry_dt).total_seconds()
                 if computed > 0:
                     duration = computed
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # silent-except - unparseable trade timestamps fall back to stored duration
                 pass
         return max(round(duration, 1), 0.0)
 

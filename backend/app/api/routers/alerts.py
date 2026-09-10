@@ -15,7 +15,7 @@ async def alerts_websocket(websocket: WebSocket):
     async def on_alert(alert: dict):
         try:
             await websocket.send_json(alert)
-        except Exception:
+        except Exception:  # silent-except - dead websocket subscriber must not break alert fan-out
             pass
     
     subscribe_alerts(on_alert)

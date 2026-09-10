@@ -388,7 +388,7 @@ class MultiplexedMarketFeed:
     async def _aclose_quietly(stream) -> None:
         try:
             await stream.aclose()
-        except Exception:
+        except Exception:  # silent-except - best-effort stream close in shutdown
             pass
 
     # ------------------------------------------------------------------

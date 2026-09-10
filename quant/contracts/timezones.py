@@ -46,7 +46,7 @@ def epoch_to_iso(time_str: str | float | int | None) -> str:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=IST)
         return dt.astimezone(IST).isoformat()
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # silent-except - non-ISO text falls through to epoch parse then returned as-is
         pass
     try:
         epoch = float(text)

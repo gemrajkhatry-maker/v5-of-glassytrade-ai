@@ -36,7 +36,7 @@ def bar_epoch_ms(bar_time: str) -> int:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=_IST)
         return int(dt.timestamp() * 1000)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # silent-except - unparseable bar time yields no session gate
         pass
     try:
         return int(float(bar_time) * 1000)

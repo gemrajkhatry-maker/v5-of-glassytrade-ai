@@ -91,7 +91,7 @@ def extract_llm_json(raw_text: str, prime: str = '{\n  "rationale": "') -> Dict[
         end = full_text.rfind("}")
         if start >= 0 and end > start:
             return json.loads(full_text[start : end + 1])
-    except Exception:
+    except Exception:  # silent-except - JSON parse is best-effort; caller falls back to regex extraction
         pass
 
     # 2. Balanced bracket walk + repair

@@ -191,6 +191,6 @@ class SessionLevelStore:
             logger.warning("Failed to persist session levels to %s", self._path, exc_info=True)
             try:
                 os.unlink(tmp)
-            except OSError:
+            except OSError:  # silent-except - temp-file cleanup after an already-logged persist failure
                 pass
             return False

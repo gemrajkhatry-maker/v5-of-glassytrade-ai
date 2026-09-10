@@ -51,7 +51,7 @@ def send_alert(
     for callback in _alert_subscribers:
         try:
             callback(alert)
-        except Exception:
+        except Exception:  # silent-except - subscriber callback error must not break alert fan-out
             pass  # Don't let subscriber errors break the system
     
     return alert

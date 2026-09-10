@@ -92,7 +92,7 @@ class AcceptanceRejectionEngine:
                     duration = 0.0
                 elif 0 < dt < 600:
                     duration = dt
-            except (ValueError, TypeError):
+            except (ValueError, TypeError):  # silent-except - non-numeric bar gap treated as zero duration
                 pass
         self._last_time = candle.time
 
