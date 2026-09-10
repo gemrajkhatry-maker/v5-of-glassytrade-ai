@@ -409,7 +409,10 @@ class OptionScannerService:
             )
             if tfm_enabled:
                 try:
-                    from quant.decision.timesfm_engine import get_timesfm_model
+                    from quant.decision.timesfm_engine import (
+                        _TIMESFM_INFER_LOCK,
+                        get_timesfm_model,
+                    )
                     from quant.decision.timesfm_agents import TimesFMForecast
                     import numpy as np
 
@@ -460,7 +463,8 @@ class OptionScannerService:
                             if len(prices) < 32:
                                 prices = [prices[0]] * (32 - len(prices)) + prices
                             np_prices = np.array(prices[-32:], dtype=np.float32)
-                            res = model.predict(context=np_prices, horizon=32, return_quantiles=True)
+                            with _TIMESFM_INFER_LOCK:
+                                res = model.predict(context=np_prices, horizon=32, return_quantiles=True)
                             quantiles = getattr(res, "quantiles", None)
                             curr_price = float(np_prices[-1])
                             if quantiles is not None and len(quantiles) > 0:

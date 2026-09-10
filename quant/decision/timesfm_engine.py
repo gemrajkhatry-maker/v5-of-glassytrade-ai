@@ -169,16 +169,34 @@ class TimesFMEngine:
         Returns:
             Number of prices loaded into the buffer.
         """
-        buf = self._price_buffers[symbol]
         valid = [float(p) for p in prices if p and p > 0]
-        for p in valid:
-            buf.append(p)
-        seeded = len(valid)
-        logger.info(
-            "TimesFMEngine: seeded %d historical bars for %s (buffer=%d)",
-            seeded, symbol, len(buf),
-        )
-        return seeded
+        with self._buffer_lock:
+            # Seeding supplies HISTORICAL closes with no bar index. If a live
+            # stamped bar has already been recorded for this symbol, those
+            # closes are strictly older than data already in the window, so
+            # appending them would put out-of-order prices *after* live bars.
+            # Drop the late seed rather than corrupting the window. The same
+            # lock also serialises this mutation against add_context's append.
+            if symbol in self._last_context_bar:
+                logger.warning(
+                    "TimesFMEngine: ignoring late seed for %s (%d bars) — live context already recorded",
+                    symbol, len(valid),
+                )
+                return 0
+            buf = self._price_buffers[symbol]
+            for p in valid:
+                buf.append(p)
+            # Deliberately NOT setting self._last_context_bar[symbol] here:
+            # a seed carries no bar_index, so any value we stored would be a
+            # guess that could suppress a legitimate later live bar under the
+            # strict `bar_index <= last` rule. The monotonic guard must only be
+            # driven by stamped live bars.
+            seeded = len(valid)
+            logger.info(
+                "TimesFMEngine: seeded %d historical bars for %s (buffer=%d)",
+                seeded, symbol, len(buf),
+            )
+            return seeded
 
     def add_context(self, ctx: DecisionContext) -> Tuple[List[float], int]:
         """Record the latest live price/close.

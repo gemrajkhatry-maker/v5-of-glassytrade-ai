@@ -425,3 +425,57 @@ def test_add_context_still_accepts_unstamped_callers():
     engine.add_context(ctx)
     engine.add_context(ctx)
     assert len(engine._price_buffers["NIFTY"]) == 2
+
+
+def test_seed_history_holds_the_buffer_lock():
+    """D-10 follow-up: seeding mutates the shared buffer and must serialise
+    against add_context's append. Prove the mutation happens under the lock."""
+    engine = TimesFMEngine(target_horizon=8)
+
+    class _RecordingLock:
+        def __init__(self, inner):
+            self._inner = inner
+            self.entered = False
+            self.exited = False
+
+        def __enter__(self):
+            self.entered = True
+            return self._inner.__enter__()
+
+        def __exit__(self, *exc):
+            self.exited = True
+            return self._inner.__exit__(*exc)
+
+    recorder = _RecordingLock(engine._buffer_lock)
+    engine._buffer_lock = recorder
+
+    loaded = engine.seed_history("NIFTY", [100.0, 101.0, 102.0])
+
+    assert loaded == 3
+    assert recorder.entered and recorder.exited, "seed_history mutated the buffer without the lock"
+    assert list(engine._price_buffers["NIFTY"]) == [100.0, 101.0, 102.0]
+
+
+def test_seed_history_ignores_a_late_seed_after_live_bars():
+    """A seed that arrives after a stamped live bar carries strictly older
+    prices; appending it would put out-of-order closes after live data."""
+    engine = TimesFMEngine(target_horizon=8)
+    bar = Bar("2026-09-10T10:00:00", 200, 201, 199, 200.0, 1000, 100)
+    engine.add_context(DecisionContext(symbol="NIFTY", bar=bar, bar_index=7))
+
+    loaded = engine.seed_history("NIFTY", [100.0, 101.0, 102.0])
+
+    assert loaded == 0
+    assert list(engine._price_buffers["NIFTY"]) == [200.0]
+
+
+def test_seed_history_does_not_suppress_a_later_live_bar():
+    """Seeding must not stamp _last_context_bar, or the monotonic rule would
+    drop the next legitimate live bar."""
+    engine = TimesFMEngine(target_horizon=8)
+    engine.seed_history("NIFTY", [100.0, 101.0, 102.0])
+    assert "NIFTY" not in engine._last_context_bar
+
+    bar = Bar("2026-09-10T10:00:00", 103, 104, 102, 103.0, 1000, 100)
+    engine.add_context(DecisionContext(symbol="NIFTY", bar=bar, bar_index=1))
+    assert list(engine._price_buffers["NIFTY"]) == [100.0, 101.0, 102.0, 103.0]
