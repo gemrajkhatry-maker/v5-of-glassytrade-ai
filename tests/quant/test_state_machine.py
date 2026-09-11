@@ -364,6 +364,22 @@ class TestStateTransitions:
         assert new_state.risk.daily_pnl == -500.0  # Risk updated
 
 
+
+
+def test_position_specific_stop_moved_ignores_non_base_leg():
+    from quant.events import StopMoved
+    from quant.state_machine import EngineState, PositionState
+    from quant.transitions import apply_event
+
+    base = PositionState(id="base", entry=100.0, size=10.0, sl=99.0, tp=103.0, side="LONG")
+    leg = PositionState(id="leg", entry=101.0, size=2.0, sl=99.5, tp=103.0, side="LONG", is_pyramid=True)
+    state = EngineState(symbol="SYM", position=base, pyramids=(leg,))
+
+    changed = apply_event(state, StopMoved(
+        symbol="SYM", time="t", old_sl=99.0, new_sl=100.5,
+        reason="TRAIL_RATCHET", position_id="leg", stop_kind="TRAIL"))
+    assert changed.position.sl == 99.0
+    assert changed.pyramids[0].sl == 99.5
 def test_stop_moved_folds_into_the_projected_stop():
     """D-7: StopMoved was journaled but never folded, so the UI showed the
     submitted stop while ExitEngine enforced the ratcheted one."""
@@ -385,6 +401,7 @@ def test_stop_moved_folds_into_the_projected_stop():
     state = apply_event(state, StopMoved(symbol="SYM", time="t2", old_sl=100.5,
                                          new_sl=98.0, reason="TRAIL_RATCHET"))
     assert state.position.sl == 100.5
+
 
 
 def test_stop_moved_folds_into_the_base_only_not_the_pyramids():

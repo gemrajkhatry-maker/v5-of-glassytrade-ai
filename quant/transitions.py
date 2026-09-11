@@ -299,6 +299,9 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
         pos = state.position
         if pos is None:
             return state
+        # Empty position_id is a legacy event; replay it as a base move.
+        if event.position_id and event.position_id != pos.id:
+            return state
         new_sl = float(event.new_sl)
         if new_sl <= 0:
             return state

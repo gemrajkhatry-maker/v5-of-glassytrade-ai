@@ -124,6 +124,10 @@ class StopMoved(Event):
     old_sl: float = 0.0
     new_sl: float = 0.0
     reason: str = ""
+    # Added for position-specific folding. Empty means legacy event; replay
+    # treats legacy StopMoved as a base-position move for compatibility.
+    position_id: str = ""
+    stop_kind: str = "TRAIL"
 
 
 @dataclass(frozen=True)

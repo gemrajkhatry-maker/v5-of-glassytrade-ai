@@ -105,7 +105,8 @@ class PositionManager:
             # the partial-exit branch.
             self._emit(StopMoved(symbol=self.symbol, time=bar.time,
                                  old_sl=sig_sl, new_sl=float(be_floor),
-                                 reason="BREAKEVEN_ARMED"))
+                                 reason="BREAKEVEN_ARMED",
+                                 position_id=str(position._id), stop_kind="BREAKEVEN"))
         tightened = (
             trail_stop is not None
             and (prev_trail is None
@@ -115,7 +116,8 @@ class PositionManager:
             self._emit(StopMoved(symbol=self.symbol, time=bar.time,
                                  old_sl=float(prev_trail if prev_trail is not None else sig_sl),
                                  new_sl=float(trail_stop),
-                                 reason="TRAIL_RATCHET"))
+                                 reason="TRAIL_RATCHET",
+                                 position_id=str(position._id), stop_kind="TRAIL"))
 
     def manage_exit(
         self,
@@ -641,7 +643,9 @@ class PositionManager:
                 order=_dc_replace(position.order, signal=_dc_replace(position.order.signal, sl=new_base_sl)),
             )
             self.base_override = ratcheted
-            self._emit(StopMoved(symbol=self.symbol, time=bar.time, old_sl=cur_sl, new_sl=float(new_sl), reason="PYRAMID_RATCHET"))
+            self._emit(StopMoved(symbol=self.symbol, time=bar.time, old_sl=cur_sl,
+                                 new_sl=float(new_sl), reason="PYRAMID_RATCHET",
+                                 position_id=str(position._id), stop_kind="PYRAMID_BASE"))
 
         logger.info(
             "⚡ [PYRAMID ADD] %s P%d @ %.2f size=%.0f SL=%.2f LVN=%.2f | base SL ratcheted %.2f -> %.2f",
