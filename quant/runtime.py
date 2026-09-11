@@ -376,6 +376,8 @@ class QuantEngine:
         self.event_store = EventStore()
         # State is derived from events (cached for performance)
         self.state = EngineState(symbol=symbol)
+        from quant.execution.exposure import ExposureState
+        self.exposure_state = ExposureState.none()
 
         if self._underlying_gateway is not None:
             underlying_symbol = (
@@ -1049,6 +1051,15 @@ class QuantEngine:
         Returns ``(blocked, cooldown_remaining_sec)``; the halt and cooldown
         branches emit their DecisionProduced, the debounce branch emits nothing.
         """
+        # Broker may hold partial exposure after a timeout/cancel race. Until
+        # reconciled, this engine must stay flat and reject new entries.
+        exposure = getattr(self, "exposure_state", None)
+        if exposure is not None and not exposure.can_open_new_position:
+            logger.error(
+                "[BLOCKED] %s: broker exposure requires reconciliation (%s)",
+                self.symbol, exposure.status,
+            )
+            return True, 0.0
         # ponytail: debounce repeated rejected entries to avoid 60-second log flood
         if (self._bar_index - getattr(self, "_last_rejected_bar_index", -999)) < 2:
             return True, 0.0
