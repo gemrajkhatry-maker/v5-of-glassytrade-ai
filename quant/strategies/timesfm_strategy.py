@@ -163,13 +163,10 @@ class TimesFMTradingStrategy:
 
         if is_entry and (all_gates_passed or allow_positioned):
             curr_price = float(ctx.bar.close)
-            sizing = scan_res.get("dynamicSizing")
-            if sizing and sizing.get("varStop") and sizing.get("targetPrice"):
-                var_stop = float(sizing["varStop"])
-                target = float(sizing["targetPrice"])
-                payoff = float(sizing["payoffRatio"])
-            else:
-                var_stop, target, payoff = self._size_entry(curr_price, direction, forecast, setup, ctx)
+            # Single sizing authority is SessionRisk.position_size() at runtime.
+            # The scanner emits ranking only (no sizing payload); the
+            # strategy qualifies the entry with model-derived SL/TP here.
+            var_stop, target, payoff = self._size_entry(curr_price, direction, forecast, setup, ctx)
 
             var_stop = round(var_stop, 2)
             target = round(target, 2)

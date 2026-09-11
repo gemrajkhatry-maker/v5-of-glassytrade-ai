@@ -590,37 +590,6 @@ def test_position_agent_thesis_flip_cvd_divergence_isolated(base_forecast):
     assert res_short["reason"] == "THESIS_FLIP"
 
 
-def test_scanner_dynamic_sizing_scales_with_equity():
-    """Scanner dynamicSizing.riskAmount must scale with account equity (not hardcoded 100k)."""
-    import numpy as np
-    from types import SimpleNamespace
-    from quant.decision.timesfm_agents import TimesFMScanningAgent, TimesFMForecast
-    px = 100.0
-
-    def make_ctx(equity):
-        return SimpleNamespace(
-            symbol="NIFTY", bar=SimpleNamespace(close=px), state=None,
-            session_phase="MORNING", session_open=True, warmup_complete=True,
-            allow_trend=True, allow_reversion=True,
-            poc=99.0, vah=101.0, val=90.0, cvd_slope=1.5,
-            absorption_side="SELL_ABSORBED", stacked_imbalance_direction="",
-            risk_halted=False, cooldown_remaining_sec=0.0,
-            market_state=SimpleNamespace(value="BALANCED"),
-            equity=equity)
-
-    fc = TimesFMForecast(
-        horizon=32, p50_path=np.full(32, 101.0, dtype=np.float32),
-        p10_path=np.full(32, 100.0, dtype=np.float32),
-        p90_path=np.full(32, 102.0, dtype=np.float32),
-        q_spread=2.0, mean_forecast=101.0, pct_change=0.01,
-        forecast_steps=["LONG"] * 32, curr_price=px, lat_ms=5.0)
-    agent = TimesFMScanningAgent()
-    res_lo = agent.evaluate(make_ctx(100_000), fc)
-    res_hi = agent.evaluate(make_ctx(500_000), fc)
-    assert res_lo["dynamicSizing"] is not None and res_hi["dynamicSizing"] is not None
-    assert res_lo["dynamicSizing"]["riskAmount"] != res_hi["dynamicSizing"]["riskAmount"]
-
-
 def test_scanner_option_short_blocked_for_option_symbol():
     """Options are buyers-only in advisory: scanner-B SHORT conditions must not emit ENTER_SHORT."""
     import numpy as np

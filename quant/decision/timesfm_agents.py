@@ -25,7 +25,6 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from quant.contracts.constants import FALLBACK_EQUITY
 from quant.contracts.instrument_registry import is_option_contract
 from quant.contracts.vocabulary import (
     absorption_direction,
@@ -166,7 +165,6 @@ class TimesFMScanningAgent:
                 ],
                 "activePosition": None,
                 "dynamicTrailStop": None,
-                "dynamicSizing": None,
                 "recommendedOption": None,
                 "source": "TIMESFM_3.0_NATIVE",
                 "latencyMs": round(float(forecast.lat_ms), 1),
@@ -192,62 +190,8 @@ class TimesFMScanningAgent:
 
         # 4-Gate Evaluations (gate 1 already computed above the profile guard)
 
-        # Fabio AMT Structural Target Identification
-        def _valid_target(t: float) -> bool:
-            if not t or t <= 0:
-                return False
-            # Scale check: structural target must be within 20% of curr_price
-            return abs(t - curr_price) / curr_price <= 0.20
-
-        structural_target = None
-        if direction == "LONG":
-            if setup == "VA_FADE" and poc > curr_price and _valid_target(poc):
-                structural_target = poc
-            elif setup in ("BREAKOUT", "MODEL_MOMENTUM"):
-                npoc_a = getattr(ctx, "npoc_above", 0.0)
-                prior_p = getattr(ctx, "prior_poc", 0.0)
-                if npoc_a > curr_price and _valid_target(npoc_a):
-                    structural_target = npoc_a
-                elif prior_p > curr_price and _valid_target(prior_p):
-                    structural_target = prior_p
-                elif vah > curr_price and _valid_target(vah):
-                    structural_target = vah
-            elif setup == "TRIPLE_A":
-                prior_p = getattr(ctx, "prior_poc", 0.0)
-                if vah > curr_price and _valid_target(vah):
-                    structural_target = vah
-                elif prior_p > curr_price and _valid_target(prior_p):
-                    structural_target = prior_p
-        elif direction == "SHORT":
-            if setup == "VA_FADE" and 0 < poc < curr_price and _valid_target(poc):
-                structural_target = poc
-            elif setup in ("BREAKOUT", "MODEL_MOMENTUM"):
-                npoc_b = getattr(ctx, "npoc_below", 0.0)
-                prior_p = getattr(ctx, "prior_poc", 0.0)
-                if 0 < npoc_b < curr_price and _valid_target(npoc_b):
-                    structural_target = npoc_b
-                elif 0 < prior_p < curr_price and _valid_target(prior_p):
-                    structural_target = prior_p
-                elif 0 < val < curr_price and _valid_target(val):
-                    structural_target = val
-            elif setup == "TRIPLE_A":
-                prior_p = getattr(ctx, "prior_poc", 0.0)
-                if 0 < val < curr_price and _valid_target(val):
-                    structural_target = val
-                elif 0 < prior_p < curr_price and _valid_target(prior_p):
-                    structural_target = prior_p
-
-        is_high_conviction = bool(confidence_score >= 0.80)
-
-        dynamic_sizing = self._dynamic_sizing(
-            ctx, forecast, direction, structural_target, curr_price, is_high_conviction,
-        )
-
         g3 = bool(direction != "FLAT")
-        g4 = bool(
-            abs(forecast.mean_forecast - curr_price) >= (curr_price * 0.001)
-            or (dynamic_sizing and float(dynamic_sizing.get("payoffRatio", 0.0)) >= 1.4)
-        )
+        g4 = bool(abs(forecast.mean_forecast - curr_price) >= (curr_price * 0.001))
 
         gate_results = [
             {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": g1, "message": g1_msg},
@@ -301,7 +245,6 @@ class TimesFMScanningAgent:
             "gateResults": gate_results,
             "activePosition": None,
             "dynamicTrailStop": None,
-            "dynamicSizing": dynamic_sizing,
             "recommendedOption": rec_opt,
             "source": "TIMESFM_3.0_NATIVE",
             "latencyMs": round(forecast.lat_ms, 1),
@@ -458,39 +401,6 @@ class TimesFMScanningAgent:
                 )
 
         return action, direction, setup, confidence, confidence_score, rationale
-
-    def _dynamic_sizing(self, ctx, forecast, direction, structural_target, curr_price, is_high_conviction):
-        """Return the dynamicSizing payload dict, or None when direction is FLAT."""
-        dynamic_sizing = None
-        if direction != "FLAT":
-            try:
-                from quant.decision.timesfm_sizing import TimesFMPositionSizer
-                sizer = TimesFMPositionSizer()
-                sizing_res = sizer.compute_size(
-                    equity=float(getattr(ctx, "equity", None) or FALLBACK_EQUITY),
-                    entry=curr_price,
-                    side=direction,
-                    forecast=forecast,
-                    override_tp=structural_target,
-                    is_aggressive=is_high_conviction,
-                )
-                dynamic_sizing = {
-                    "lots": sizing_res.lots,
-                    "quantity": sizing_res.quantity,
-                    "riskPct": sizing_res.risk_pct,
-                    "riskAmount": sizing_res.risk_amount,
-                    "varStop": sizing_res.var_stop,
-                    "targetPrice": sizing_res.target_price,
-                    "winProb": sizing_res.win_prob,
-                    "payoffRatio": sizing_res.payoff_ratio,
-                    "dispersionMultiplier": sizing_res.dispersion_multiplier,
-                    "velocityMultiplier": sizing_res.velocity_multiplier,
-                    "expectedPeakStep": sizing_res.expected_peak_step,
-                    "rationale": sizing_res.rationale,
-                }
-            except Exception as e:
-                logger.debug("Failed computing dynamic sizing in TimesFMScanningAgent: %s", e)
-        return dynamic_sizing
 
 class TimesFMPositionAgent:
     """Agent 2: Manages active positions according to Fabio AMT rules and TimesFM quantiles."""
