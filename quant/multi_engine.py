@@ -385,6 +385,9 @@ class QuantCoordinator:
         self._stop = threading.Event()
         self._gex_by_root: dict[str, object] = {}
         self._eod_thread: threading.Thread | None = None
+        # Dead-man hook for the EOD watchdog: invoked as (where, exc) on
+        # every swallowed per-pass exception. None by default; never raises.
+        self._on_watchdog_error = None
         self._lock = threading.Lock()
         # Paper position reconciliation: classify persisted positions against
         # the active universe so stale contracts are quarantined, not restored.
@@ -1150,6 +1153,15 @@ class QuantCoordinator:
                     "periodic_reconcile FAILED for %s", eng.symbol, exc_info=True
                 )
 
+    def _notify_watchdog(self, where: str, exc: Exception) -> None:
+        """Safely invoke the dead-man hook (never raises)."""
+        cb = getattr(self, "_on_watchdog_error", None)
+        if callable(cb):
+            try:
+                cb(where, exc)
+            except Exception:
+                pass
+
     def _eod_watchdog_loop(self, poll_sec: float = 30.0) -> None:
         """Background EOD square-off and dynamic symbol rotation watchdog.
 
@@ -1168,8 +1180,9 @@ class QuantCoordinator:
         while not self._stop.is_set():
             try:
                 self.eod_square_off()
-            except Exception:
+            except Exception as exc:
                 logger.exception("EOD watchdog: square-off pass failed")
+                self._notify_watchdog("square-off", exc)
 
             # Dynamic Contract Rotation: runs every ~60s (every 2nd pass)
             rotation_counter += 1
@@ -1177,8 +1190,9 @@ class QuantCoordinator:
                 rotation_counter = 0
                 try:
                     self.check_and_rotate_dead_symbols()
-                except Exception:
+                except Exception as exc:
                     logger.exception("Dynamic rotation watchdog: pass failed")
+                    self._notify_watchdog("rotation", exc)
 
             # C4: intraday broker-vs-engine book reconciliation, every ~60s.
             # Detect-and-alert only (no auto-action) — see _intraday_reconcile.
@@ -1187,8 +1201,9 @@ class QuantCoordinator:
                 recon_counter = 0
                 try:
                     self._intraday_reconcile()
-                except Exception:
+                except Exception as exc:
                     logger.exception("Intraday reconcile watchdog: pass failed")
+                    self._notify_watchdog("intraday", exc)
 
             # Periodic state-vs-event-store reconciliation, every ~120s (every 4th pass).
             periodic_recon_counter += 1
@@ -1196,8 +1211,9 @@ class QuantCoordinator:
                 periodic_recon_counter = 0
                 try:
                     self._periodic_state_reconcile()
-                except Exception:
+                except Exception as exc:
                     logger.exception("Periodic state reconcile watchdog: pass failed")
+                    self._notify_watchdog("periodic", exc)
 
             self._stop.wait(poll_sec)
         logger.info("Coordinator watchdog stopped")

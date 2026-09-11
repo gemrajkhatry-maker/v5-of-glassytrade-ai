@@ -337,3 +337,19 @@ def test_stop_joins_and_clears_watchdog():
     assert coord._eod_thread is None
     assert coord._stop.is_set()
     assert coord.started is False
+
+
+def test_watchdog_survives_squareoff_exception():
+    coord = _make_coord()
+    calls = []
+    coord._on_watchdog_error = lambda where, exc: calls.append((where, exc))
+    coord.eod_square_off = MagicMock(side_effect=RuntimeError("boom"))
+    # Single pass: flip the stop flag on the first wait so the loop exits.
+    orig_wait = coord._stop.wait
+    coord._stop.wait = lambda *a, **k: coord._stop.set()
+    try:
+        coord._eod_watchdog_loop(poll_sec=0.01)
+    finally:
+        coord._stop.wait = orig_wait
+    assert calls and calls[0][0] == "square-off"
+    assert isinstance(calls[0][1], RuntimeError)
