@@ -192,6 +192,9 @@ class AMTResult:
     # Displacement leg profile
     leg_profile: tuple[VolumeProfileLevel, ...] = ()
     leg_lvns: tuple[float, ...] = ()
+    leg_profile_source: str = ""
+    leg_bucket_count: int = 0
+    leg_lvn_unavailable_reason: str = "NO_LVN"
     leg_poc: float = 0.0
     leg_vah: float = 0.0
     leg_val: float = 0.0

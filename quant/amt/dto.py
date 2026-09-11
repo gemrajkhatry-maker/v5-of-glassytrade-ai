@@ -86,6 +86,10 @@ def amt_result_to_dto(r) -> dict:
             for p in r.leg_profile
         ],
         "legLvns": list(r.leg_lvns),
+        "legProfileSource": r.leg_profile_source,
+        "legBucketCount": r.leg_bucket_count,
+        "legLvnAvailable": bool(r.leg_lvns),
+        "legLvnUnavailableReason": r.leg_lvn_unavailable_reason,
         "legPoc": r.leg_poc,
         "legVah": r.leg_vah,
         "legVal": r.leg_val,

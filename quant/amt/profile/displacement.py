@@ -48,7 +48,7 @@ def detect_displacement_leg(
     """
     def _leg_result(*, has_displacement: bool, profile: list,
                     lvns: list, poc: float, vah: float, val: float,
-                    swing_delta: float) -> dict:
+                    swing_delta: float, unavailable_reason: str = "NO_LVN") -> dict:
         return {
             "has_displacement": has_displacement,
             "profile": profile,
@@ -57,6 +57,9 @@ def detect_displacement_leg(
             "vah": vah,
             "val": val,
             "swing_delta": swing_delta,
+            "profile_source": "CANDLE_DISTRIBUTED",
+            "bucket_count": len(profile),
+            "lvn_unavailable_reason": unavailable_reason if not lvns else "",
         }
 
     empty = _leg_result(has_displacement=False, profile=[], lvns=[],
