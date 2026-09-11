@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from app.api.dependencies import get_market_data
 from quant.contracts.ports.market_data import IMarketData
 from app.infrastructure.serialization.schemas import ohlc_to_dto
+from app.application.services.market_analysis_service import MarketAnalysisService
 
 router = APIRouter(prefix="/market", tags=["market"])
 
@@ -41,10 +42,8 @@ async def get_halftrend(
     Backend-computed (everget HalfTrend port) so the frontend only renders.
     Rows align bar-for-bar with /market/history/{symbol}.
     """
-    from quant.amt.market.half_trend import compute_half_trend_series
-
     candles = await market_data.fetch_history(symbol, interval, limit)
-    rows = compute_half_trend_series(candles)
+    rows = MarketAnalysisService.halftrend(candles)
     return {
         "data": [
             {
