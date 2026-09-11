@@ -51,6 +51,7 @@ class TimesFMForecast:
     curr_price: float           # latest bar close price
     lat_ms: float               # inference latency in milliseconds
     asof_bar: int = -1          # bar index the forecast was computed at (-1 = unknown)
+    observation: object | None = None  # ForecastObservationIdentity when available
 
 
 def _format_scanning_rationale(
