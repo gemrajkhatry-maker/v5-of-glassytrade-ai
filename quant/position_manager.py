@@ -347,11 +347,10 @@ class PositionManager:
         sig_tp = float(position.order.signal.tp) if position.order and position.order.signal and position.order.signal.tp else 0.0
         
         is_long = position.size > 0
-        effective_sl = sig_sl
-        if trail_stop is not None:
-            effective_sl = max(effective_sl, float(trail_stop)) if is_long else min(effective_sl, float(trail_stop))
-        elif be_floor is not None:
-            effective_sl = max(effective_sl, float(be_floor)) if is_long else min(effective_sl, float(be_floor))
+        from quant.execution.protective_stop import resolve_protective_stop
+        effective_sl, effective_reason = resolve_protective_stop(
+            sig_sl, be_floor, trail_stop, "LONG" if is_long else "SHORT",
+        )
 
         # Tier-aware tick targets: T1 tags at sig_tp; tier==1 waits for TP2
         # via the shared Rule-4 geometry (exit_checks.tp2_level); tier>=2 has
@@ -369,12 +368,7 @@ class PositionManager:
         terminal_tp = sig_tp > 0 and is_terminal_tp_only(position)
         if is_long:
             if effective_sl > 0 and tick_price <= effective_sl:
-                if trail_stop is not None and effective_sl == float(trail_stop):
-                    reason = "TRAIL"
-                elif be_floor is not None and effective_sl == float(be_floor):
-                    reason = "BREAKEVEN"     # journal truth: scratch, not a stop-out
-                else:
-                    reason = "SL"
+                reason = effective_reason
             elif sig_tp > 0 and tick_price >= sig_tp:
                 if terminal_tp:
                     # VA_FADE regime: first TP touch = terminal full close
@@ -397,12 +391,7 @@ class PositionManager:
                 return self._tick_tp_touch(position, float(tick_price), tick_time)
         else:
             if effective_sl > 0 and tick_price >= effective_sl:
-                if trail_stop is not None and effective_sl == float(trail_stop):
-                    reason = "TRAIL"
-                elif be_floor is not None and effective_sl == float(be_floor):
-                    reason = "BREAKEVEN"     # journal truth: scratch, not a stop-out
-                else:
-                    reason = "SL"
+                reason = effective_reason
             elif sig_tp > 0 and tick_price <= sig_tp:
                 if terminal_tp:
                     # Short mirror: fade terminal full close at first TP tag.

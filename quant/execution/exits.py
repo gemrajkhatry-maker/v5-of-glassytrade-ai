@@ -167,6 +167,7 @@ class ExitEngine:
             return ExitDecision(True, "DEAD_MARKET", close)
 
         long = position.size > 0
+        side = "LONG" if long else "SHORT"
         sl = float(position.order.signal.sl)
         entry = float(position.order.signal.entry)
         low = close if bar_low is None else bar_low
@@ -242,19 +243,10 @@ class ExitEngine:
         be_floor = self._breakeven.get(position._id)
         tr = self._trail.get(position._id)
         trail_stop = tr.stop if (tr and tr.active) else None
-        protective = float(sl)
-        protective_reason = "SL"
-        # Tie-break is deterministic: strict `> <` keeps the EARLIER candidate,
-        # so trail beats an exactly-equal breakeven. The tick counterpart
-        # (quant/position_manager.py, manage_tick_exit: `if trail_stop is not
-        # None: ... elif be_floor is not None`) resolves the same tie the same
-        # way — trail first — so both paths label a tie TRAIL.
-        if trail_stop is not None:
-            if (long and trail_stop > protective) or (not long and trail_stop < protective):
-                protective, protective_reason = float(trail_stop), "TRAIL"
-        if be_floor is not None:
-            if (long and be_floor > protective) or (not long and be_floor < protective):
-                protective, protective_reason = float(be_floor), "BREAKEVEN"
+        from quant.execution.protective_stop import resolve_protective_stop
+        protective, protective_reason = resolve_protective_stop(
+            sl, be_floor, trail_stop, side,
+        )
 
         breached = (long and low <= protective) or (not long and high >= protective)
         if breached and protective_reason != "SL":

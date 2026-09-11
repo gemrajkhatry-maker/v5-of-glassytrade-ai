@@ -30,3 +30,12 @@ def test_invalid_or_non_tightening_candidates_are_ignored():
     state = ProtectiveStopState(submitted_sl=95.0)
     assert state.tighten(0.0, kind="TRAIL", bar_index=1) == state
     assert state.tighten(94.0, kind="TRAIL", bar_index=2) == state
+
+from quant.execution.protective_stop import resolve_protective_stop
+
+
+def test_resolve_protective_stop_matches_bar_and_tick_precedence():
+    assert resolve_protective_stop(95.0, 100.0, 99.0, "LONG") == (100.0, "BREAKEVEN")
+    assert resolve_protective_stop(105.0, 100.0, 101.0, "SHORT") == (100.0, "BREAKEVEN")
+    assert resolve_protective_stop(95.0, None, 99.0, "LONG") == (99.0, "TRAIL")
+    assert resolve_protective_stop(95.0, 99.0, 99.0, "LONG") == (99.0, "TRAIL")
