@@ -97,6 +97,7 @@ from quant.persistence import Journal
 from quant.state import LiveQuoteCache, _decision_to_view, _epoch_to_iso
 from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.event_store import EventStore
+from quant.persistence_boundary import EventAppender, PersistenceHealth
 from quant.state_machine import EngineState
 from quant.reconciliation_service import PeriodicReconciliationResult
 from quant.transitions import apply_event, _position_to_state
@@ -374,6 +375,8 @@ class QuantEngine:
         
         # Event sourcing: EventStore is the source of truth
         self.event_store = EventStore()
+        self.persistence_health = PersistenceHealth()
+        self.event_appender = EventAppender(self.event_store, self.persistence_health)
         # Paper execution must stop pretending persistence is healthy after a
         # side effect has escaped the event store. These markers are deliberately
         # runtime-local and do not alter broker-facing behavior.
@@ -1769,9 +1772,10 @@ class QuantEngine:
             # skew) must never kill the caller mid-bookkeeping — the journal
             # and storage bridge already received the event via the bus, and
             # the reconcile layer re-syncs event-sourced drift on startup.
-            try:
-                self.event_store.append(event)
-            except Exception as exc:
+            if self.event_appender.append(event) is None:
+                exc = self.persistence_health.failure
+                if exc is None:
+                    exc = RuntimeError("event append failed without an error")
                 if self._is_paper_runtime:
                     self.persistence_degraded = True
                     self.reconciliation_required = True
