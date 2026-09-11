@@ -453,3 +453,20 @@ PYTHONPATH=. .venv/bin/python scripts/pre_release_decision_check.py
 ```
 
 Then work through `docs/PRE_RELEASE_READINESS_CHECKLIST.md`.
+
+## Residual remediation update (2026-09-11)
+
+D-5 and D-16 remediation progressed beyond the original audit:
+
+- D-5 now has one LVN resolver, explicit AMT provenance (`source`, bucket count,
+  availability and unavailable reason), and a bounded instrument-aware retest tolerance.
+  The remaining producer limitation is measurable sparsity: the current candle-derived
+  displacement profile still has no LVN on most 1m windows. A representative tick/footprint
+  corpus is required before changing the producer granularity further; no synthetic level is
+  permitted.
+- D-16 now has `ProtectiveStopState`, a stateless `TimesFMRiskAuthority`, position-specific
+  `StopMoved` events, monotonic partial-fill preservation, and one pure bar/tick protective-stop
+  resolver. Existing replay/state/display lifecycle suites remain green.
+- Remote TimesFM has a `use_native_engine=False` contract test.
+- Model-sizing failure counters reset per session and are exposed through metrics; frontend
+  runtime-audit fixtures are now tracked under `frontend/tests/fixtures/`.
