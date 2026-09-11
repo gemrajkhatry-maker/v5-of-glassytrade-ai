@@ -1299,6 +1299,27 @@ class QuantEngine:
                     self._portfolio_risk.release(reserved, symbol=self.symbol)
                 self._open_trade_risk = 0.0
             return
+        paper_fill = getattr(self._oms, "last_fill", None)
+        if (
+            paper_fill is not None
+            and paper_fill.filled_quantity < paper_fill.requested_quantity
+        ):
+            from quant.execution.exposure import ExposureState
+            self.exposure_state = self.exposure_state.partial_entry(
+                symbol=self.symbol,
+                order_id=paper_fill.order_id,
+                requested_qty=paper_fill.requested_quantity,
+                filled_qty=paper_fill.filled_quantity,
+                fill_price=paper_fill.fill_price,
+            )
+            logger.error(
+                "[RECONCILIATION REQUIRED] %s: paper order %s partially filled "
+                "(%s/%s)",
+                self.symbol,
+                paper_fill.order_id,
+                paper_fill.filled_quantity,
+                paper_fill.requested_quantity,
+            )
         logger.info(
             "⚡ [SIGNAL EXECUTED] %s: %s %s @ %.2f (SL=%.2f, TP=%.2f, RR=%.2f) — %s | trades_today=%d equity=₹%.0f",
             self.symbol,
