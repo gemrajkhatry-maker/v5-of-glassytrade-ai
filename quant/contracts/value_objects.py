@@ -11,6 +11,54 @@ from decimal import Decimal
 
 
 # ---------------------------------------------------------------------------
+# Core v6.0 Immutable Contracts
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Tick:
+    symbol: str
+    price: Decimal
+    volume: int
+    timestamp_ms: int        # Exchange epoch milliseconds
+    bid: Decimal
+    ask: Decimal
+    bid_vol: int
+    ask_vol: int
+    oi: int
+
+
+@dataclass(frozen=True, slots=True)
+class Bar:
+    symbol: str
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: int
+    taker_buy_volume: int
+    ticks_count: int
+    start_epoch_ms: int
+    end_epoch_ms: int
+    is_closed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Signal:
+    signal_id: str
+    symbol: str
+    underlying_symbol: str
+    side: str                # "LONG" or "SHORT"
+    entry_price: Decimal
+    structural_stop: Decimal
+    target_price: Decimal
+    quantity: int
+    lots: int
+    setup_name: str          # "TRIPLE_A", "LVN_SNIPER", "VA_FADE"
+    generated_epoch_ms: int
+
+
+# ---------------------------------------------------------------------------
 # Market Data
 # ---------------------------------------------------------------------------
 

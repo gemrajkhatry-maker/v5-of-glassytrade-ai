@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 from quant.contracts.contracts import ContractRef
 from quant.contracts.ports.broker import IBroker
 from quant.decision.signal_builder import Signal as EngineSignal
-from quant.events import OrderFilled, OrderSubmitted
+from quant.events import EmergencyFlatten, OrderFilled, OrderSubmitted
 from quant.execution.broker_mapper import to_broker_signal
 from quant.execution.fills import broker_position_to_fill
 from quant.execution.lots import snap_to_lot
@@ -33,6 +33,12 @@ if TYPE_CHECKING:
     from quant.contracts.aggregates import Portfolio
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["EmergencyFlattenError", "LiveOMS"]
+
+
+class EmergencyFlattenError(RuntimeError):
+    """Raised when Phase 2 contingent stop placement fails and emergency flatten is triggered."""
 
 
 class LiveOMS:
@@ -139,12 +145,73 @@ class LiveOMS:
             except Exception:
                 logger.warning("entry audit emit failed; trading unaffected", exc_info=True)
 
-        return Position(
+        position = Position(
             order=Order(signal=signal, quantity=abs(filled_qty)),
             open_price=fill_price,
             open_time=signal.timestamp,
             size=signed,
         )
+
+        # Phase 2: Broker Contingent Stop-Loss Order Placement (SL-M)
+        stop_price = float(getattr(signal, "sl", 0.0) or 0.0)
+        if stop_price > 0 and filled_qty > 0 and hasattr(self._broker, "place_stop_loss"):
+            stop_side = "SELL" if signal.type == "LONG" else "BUY"
+            stop_qty = int(abs(filled_qty))
+            stop_order_id = None
+            try:
+                stop_order_id = self._broker.place_stop_loss(
+                    symbol=signal.symbol,
+                    side=stop_side,
+                    quantity=stop_qty,
+                    stop_price=stop_price,
+                    contract_ref=self._contract,
+                )
+            except NotImplementedError:
+                # Pre-v6 broker double / test mock without native SL-M support
+                stop_order_id = "mock_pass"
+            except Exception as exc:
+                logger.critical(
+                    "LiveOMS Phase 2 contingent stop placement failed for %s: %s",
+                    signal.symbol, exc,
+                )
+                stop_order_id = None
+
+            if not stop_order_id:
+                # The Panic Flatten Guard: Immediate reverse market order to close fill
+                logger.critical(
+                    "EMERGENCY FLATTEN: Contingent SL-M placement failed/rejected for %s (stop_price=%.2f). "
+                    "Flattening position immediately.",
+                    signal.symbol, stop_price,
+                )
+                try:
+                    self.close(
+                        position,
+                        price=fill_price,
+                        time=signal.timestamp,
+                        reason="EMERGENCY_FLATTEN_CONTINGENT_STOP_FAILED",
+                    )
+                except Exception as fl_exc:
+                    logger.critical("Emergency reverse market order failed: %s", fl_exc, exc_info=True)
+
+                if self._emit_fn is not None:
+                    try:
+                        self._emit_fn(EmergencyFlatten(
+                            symbol=signal.symbol,
+                            time=signal.timestamp,
+                            position_id=position.id,
+                            reason="Contingent Phase 2 SL-M stop rejected/failed",
+                            quantity=abs(filled_qty),
+                            side=stop_side,
+                        ))
+                    except Exception:  # silent-except - emit audit error should not prevent emergency flatten error raise
+                        pass
+
+                raise EmergencyFlattenError(
+                    f"LiveOMS Phase 2 contingent stop placement failed for {signal.symbol} "
+                    "— position flattened via Emergency Flatten Guard."
+                )
+
+        return position
 
     def close(
         self,

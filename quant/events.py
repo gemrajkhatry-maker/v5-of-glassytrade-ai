@@ -131,6 +131,31 @@ class StopMoved(Event):
 
 
 @dataclass(frozen=True)
+class SignalProduced(Event):
+    """Emitted when Strategy Gates 1-4 produce a candidate execution signal."""
+    signal: Any = None
+    setup_name: str = ""
+
+
+@dataclass(frozen=True)
+class StopLossRatchet(Event):
+    """Emitted on monotonic stop adjustment."""
+    old_sl: float = 0.0
+    new_sl: float = 0.0
+    reason: str = ""
+    position_id: str = ""
+
+
+@dataclass(frozen=True)
+class EmergencyFlatten(Event):
+    """Emitted on contingent stop placement failure or emergency circuit breaker."""
+    position_id: str = ""
+    reason: str = ""
+    quantity: float = 0.0
+    side: str = ""
+
+
+@dataclass(frozen=True)
 class AgentDecisionProduced(Event):
     decision: dict
 

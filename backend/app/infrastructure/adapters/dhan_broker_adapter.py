@@ -546,6 +546,66 @@ class DhanBrokerAdapter(IBroker):
             logger.exception("Unexpected error closing position for %s: %s", symbol, exc)
             return None
 
+    def place_stop_loss(
+        self,
+        symbol: str,
+        side: str,
+        quantity: int,
+        stop_price: float,
+        contract_ref=None,
+    ) -> str | None:
+        """Place exchange-side Stop-Loss Market (SL-M) order for filled position."""
+        broker = self._ensure_connected()
+        clean_symbol = symbol.strip()
+        side_norm = side.upper().strip()
+        is_buy = side_norm == "BUY"
+        qty = int(quantity)
+        if qty <= 0:
+            return None
+
+        meta: dict[str, Any] = {}
+        if contract_ref is not None:
+            clean_symbol = getattr(contract_ref, "symbol", clean_symbol)
+            meta = {
+                "security_id": getattr(contract_ref, "security_id", ""),
+                "exchange": getattr(contract_ref, "exchange", ""),
+                "option_type": getattr(contract_ref, "option_type", ""),
+            }
+
+        temp_signal = Signal(
+            symbol=clean_symbol,
+            signal_id=f"slm-{clean_symbol}-{int(time.time() * 1000)}"[:36],
+            side=Side.BUY if is_buy else Side.SELL,
+            source=Source.INTERNAL,
+            metadata=meta,
+        )
+        instrument = self._make_instrument(temp_signal, clean_symbol)
+        order = Order(
+            instrument=instrument,
+            side="BUY" if is_buy else "SELL",
+            quantity=qty,
+            order_type=OrderType.SLM,
+            price=0.0,
+            trigger_price=round(float(stop_price), 2),
+            product_type=self._resolve_product_type(meta),
+        )
+        setattr(order, "user_order_id", str(temp_signal.signal_id))
+
+        try:
+            placed_order = broker.place_order(order)
+            placed_order_id = str(getattr(placed_order, "order_id", "") or "")
+            if not placed_order_id:
+                logger.error("Dhan place_order (SL-M) did not return order_id for %s", clean_symbol)
+                return None
+            logger.info(
+                "Contingent SL-M placed for %s: order_id=%s, side=%s, qty=%d, trigger=%.2f",
+                clean_symbol, placed_order_id, side_norm, qty, stop_price,
+            )
+            return placed_order_id
+        except Exception as exc:
+            logger.error("Dhan place_order (SL-M) failed for %s: %s", clean_symbol, exc)
+            return None
+
     def cancel_order(self, order_id: str) -> bool:
         broker = self._broker
         if broker is None:

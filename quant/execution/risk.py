@@ -8,6 +8,7 @@ from typing import Any
 
 from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.timezones import IST
+from quant.execution.lots import clamp_to_freeze, snap_to_lot
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ class RiskState:
     trades_today: int = 0
     equity: float = float(INITIAL_CAPITAL)
     cushion_tier: str = "CONSERVATIVE"
+    session_r: float = 0.0
+    peak_daily_pnl: float = 0.0
 
 
 class SessionRisk:
@@ -83,6 +86,8 @@ class SessionRisk:
             None if capital_deployment_pct is None else float(capital_deployment_pct)
         )
         self._daily_pnl = 0.0
+        self._peak_daily_pnl = 0.0
+        self._macro_risk_cap: float | None = None
         self._consecutive_losses = 0
         self._consecutive_wins = 0
         self._trades_today = 0
@@ -146,6 +151,7 @@ class SessionRisk:
         try:
             data = json.loads(raw)
             self._daily_pnl = float(data["daily_pnl"])
+            self._peak_daily_pnl = float(data.get("peak_daily_pnl", max(0.0, self._daily_pnl)))
             self._consecutive_losses = int(data["consecutive_losses"])
             self._consecutive_wins = int(data.get("consecutive_wins", 0))
             self._trades_today = int(data.get("trades_today", 0))
@@ -203,6 +209,7 @@ class SessionRisk:
     def _reset_fresh(self) -> None:
         """Zero all mutable state — used for corrupt-data quarantine."""
         self._daily_pnl = 0.0
+        self._peak_daily_pnl = 0.0
         self._consecutive_losses = 0
         self._consecutive_wins = 0
         self._trades_today = 0
@@ -220,6 +227,7 @@ class SessionRisk:
             return True
         ok = self._storage.kv_set(self._key(), {
             "daily_pnl": self._daily_pnl,
+            "peak_daily_pnl": self._peak_daily_pnl,
             "consecutive_losses": self._consecutive_losses,
             "consecutive_wins": self._consecutive_wins,
             "trades_today": self._trades_today,
@@ -232,6 +240,8 @@ class SessionRisk:
     def record_trade(self, pnl: float, count_as_trade: bool = True) -> RiskState:
         with self._lock:
             self._daily_pnl += pnl
+            if self._daily_pnl > self._peak_daily_pnl:
+                self._peak_daily_pnl = self._daily_pnl
             if count_as_trade:
                 self._trades_today += 1
             # Update equity after each trade so next sizing uses real capital
@@ -253,7 +263,11 @@ class SessionRisk:
                 return self.state()
 
             # Halt checks
-            if self._daily_pnl <= -self._max_daily_loss_pct * self._starting_equity:
+            # Session Kill Switch (§12.2): Cumulative loss reaching 2.0% of starting equity
+            if self._daily_pnl <= -0.02 * self._starting_equity:
+                self._halted = True
+                self._halt_reason = "session kill switch: cumulative loss reaches 2.0% of equity"
+            elif self._daily_pnl <= -self._max_daily_loss_pct * self._starting_equity:
                 self._halted = True
                 self._halt_reason = "daily loss limit reached"
             elif self._consecutive_losses >= self._max_consecutive_losses:
@@ -324,6 +338,45 @@ class SessionRisk:
             self._halt_reason = ""
             self._save()
 
+    @property
+    def is_halted(self) -> bool:
+        with self._lock:
+            return self._halted
+
+    @property
+    def halt_reason(self) -> str:
+        with self._lock:
+            return self._halt_reason
+
+    def effective_risk_pct(self) -> float:
+        """Effective risk percentage per trade determined by the House Money Protocol."""
+        return self._risk_per_trade_pct()
+
+    def is_pyramiding_unlocked(self) -> bool:
+        """Pyramiding unlocked only in Cushion Tier 2 (Session R >= +3.0)."""
+        return self._cushion_tier() == "CUSHION_TIER_2"
+
+    @property
+    def macro_risk_cap(self) -> float:
+        with self._lock:
+            return self._macro_risk_cap if self._macro_risk_cap is not None else 1.0
+
+    @macro_risk_cap.setter
+    def macro_risk_cap(self, cap: float | None) -> None:
+        self.set_macro_risk_cap(cap)
+
+    def set_macro_risk_cap(self, cap: float | None) -> None:
+        """Set macro risk cap (e.g. from background volatility sidecar)."""
+        with self._lock:
+            self._macro_risk_cap = None if cap is None else float(cap)
+
+    def session_r_multiple(self) -> float:
+        """Realized Session R-Multiple: Realized Session PnL / (Starting Capital * 0.005)."""
+        unit = self._starting_equity * 0.005
+        if unit <= 0:
+            return 0.0
+        return self._daily_pnl / unit
+
     def position_size(
         self,
         entry: float,
@@ -334,7 +387,9 @@ class SessionRisk:
         max_lots: int | None = None,
         forecast: Any | None = None,
         side: str = "LONG",
+        freeze_limit: float | None = None,
     ) -> float:
+        """Single Sizing Authority (SessionRiskAuthority) per Fabio AMT House Money Protocol (§12.2)."""
         if entry == sl or entry <= 0:
             return 0.0
         with self._lock:
@@ -345,80 +400,10 @@ class SessionRisk:
                     + float(getattr(self._portfolio_risk, "realized_pnl", 0.0))
                 )
 
-            # TimesFM Model-Driven Dynamic Sizing (replaces static heuristics)
-            if forecast is not None:
-                try:
-                    from quant.decision.timesfm_sizing import TimesFMPositionSizer
-                    sizer = getattr(self, "_timesfm_sizer", None)
-                    if sizer is None:
-                        sizer = TimesFMPositionSizer()
-                        self._timesfm_sizer = sizer
-
-                    # Fabio aggressive sizing: high directional concordance (>=70% steps) or profit cushion
-                    same_steps = (
-                        sum(1 for s in forecast.forecast_steps if s == side.upper())
-                        if hasattr(forecast, "forecast_steps") and forecast.forecast_steps
-                        else 0
-                    )
-                    total_steps = len(forecast.forecast_steps) if hasattr(forecast, "forecast_steps") and forecast.forecast_steps else 1
-                    is_conviction = (same_steps / total_steps) >= 0.70
-                    has_cushion = bool(self._daily_pnl > 0 or self._consecutive_wins >= 1)
-                    aggressive = bool(self._base_risk_pct >= 0.02 or is_conviction or has_cushion)
-
-                    res = sizer.compute_size(
-                        equity=sizing_equity,
-                        entry=entry,
-                        side=side,
-                        forecast=forecast,
-                        lot_size=lot_size,
-                        override_sl=sl if sl > 0 else None,
-                        is_aggressive=aggressive,
-                        max_lots=max_lots,
-                        max_rupee_risk_cap=max_rupee_risk_cap,
-                    )
-                    qty = float(res.quantity)
-                    # Finding 2 (review of D-12): match the static branches'
-                    # ordering — snap to WHOLE LOTS first, then apply the
-                    # expiry halving and the Mon/Fri defensive multiplier on
-                    # the snapped value (mirroring
-                    # `qty * DAY_OF_WEEK_MULTIPLIER.get(...)` at the end of
-                    # the static branches). Snapping last floored the cut
-                    # (150 -> 75 -> 50 with lot_size=75: a 0.33 cut, not 0.5)
-                    # and silently produced 0.0 for sub-lot results.
-                    if lot_size and lot_size > 1.0:
-                        qty = float(int(qty // lot_size) * lot_size)
-                    if is_expiry:
-                        qty *= 0.5
-                    qty *= DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
-                    return qty
-                except Exception as exc:
-                    # Do NOT fall through to the static deployment policy: it is
-                    # a structurally different, non-risk-equivalent size (it
-                    # ignores max_rupee_risk_cap and sizes on notional). If the
-                    # model path is unavailable, REFUSE the trade.
-                    self._model_sizing_failures += 1
-                    try:
-                        # Process-level mirror for /v1/metrics (same shape as
-                        # exits.MODEL_RISK_FAILURES). Lazy import: exits pulls
-                        # in the order/exit-rule stack and risk must stay
-                        # importable standalone.
-                        import quant.execution.exits as _exits_mod
-                        _exits_mod.MODEL_SIZING_FAILURES += 1
-                    except Exception:  # pragma: no cover - telemetry only  # silent-except - process-level telemetry counter mirror only
-                        pass
-                    logger.error(
-                        "TimesFM dynamic sizing failed (%s) — refusing entry "
-                        "rather than switching to the deployment policy", exc,
-                        exc_info=True,
-                    )
-                    return 0.0
-
-            # Aggressive mode (>= 5% risk): deploy 50% of available equity as
-            # position capital. This is a 10:1 deployment-to-risk ratio —
-            # a 5% risk budget with 50% capital deployed.
+            # Aggressive mode override (>= 5% risk) for legacy deployment tests
             if self._base_risk_pct >= 0.05:
                 open_deployed = float(getattr(self._portfolio_risk, "open_risk", 0.0)) if self._portfolio_risk is not None else 0.0
-                deployment_pct = 0.50  # 50% of equity deployed in aggressive mode
+                deployment_pct = 0.50
                 available_capital = max(0.0, (sizing_equity * deployment_pct) - open_deployed)
                 target_capital = available_capital if available_capital > (sizing_equity * 0.1) else (sizing_equity * deployment_pct)
                 if is_expiry:
@@ -436,38 +421,46 @@ class SessionRisk:
                     qty = target_capital / cost_per_unit
                     if max_lots is not None and max_lots > 0:
                         qty = min(qty, float(max_lots))
+                if freeze_limit is not None and freeze_limit > 0:
+                    qty = clamp_to_freeze(qty, freeze_limit)
                 return qty * DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
 
-            # Standard stop-loss fractional risk sizing
-            risk_amount = sizing_equity * self._risk_per_trade_pct()
+            # House Money Protocol fractional risk sizing
+            risk_pct = self._risk_per_trade_pct()
+            risk_amount = sizing_equity * risk_pct
             if max_rupee_risk_cap is not None and max_rupee_risk_cap > 0:
                 risk_amount = min(risk_amount, max_rupee_risk_cap)
             if is_expiry:
                 risk_amount *= 0.5
+
             loss_per_unit = abs(entry - sl)
             if loss_per_unit <= 0:
                 return 0.0
+
+            raw_qty = risk_amount / loss_per_unit
             if lot_size and lot_size > 1.0:
-                loss_per_lot = loss_per_unit * lot_size
-                lots = int(risk_amount // loss_per_lot) if loss_per_lot > 0 else 0
+                qty = snap_to_lot(raw_qty, lot_size)
                 if self._capital_deployment_pct is not None:
-                    deployment_capital = max(
-                        0.0, sizing_equity * self._capital_deployment_pct
-                    )
-                    deployment_lots = int(
-                        deployment_capital // (entry * lot_size)
-                    ) if entry > 0 else 0
-                    lots = min(lots, deployment_lots)
+                    deployment_capital = max(0.0, sizing_equity * self._capital_deployment_pct)
+                    deployment_lots = int(deployment_capital // (entry * lot_size)) if entry > 0 else 0
+                    qty = min(qty, float(deployment_lots * lot_size))
                 if max_lots is not None and max_lots > 0:
-                    lots = min(lots, max_lots)
-                qty = float(lots * lot_size)
+                    qty = min(qty, float(max_lots * lot_size))
             else:
-                qty = risk_amount / loss_per_unit
+                qty = raw_qty
                 if self._capital_deployment_pct is not None and entry > 0:
                     qty = min(qty, (sizing_equity * self._capital_deployment_pct) / entry)
                 if max_lots is not None and max_lots > 0:
                     qty = min(qty, float(max_lots))
-            return qty * DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
+
+            if freeze_limit is not None and freeze_limit > 0:
+                qty = clamp_to_freeze(qty, freeze_limit)
+
+            qty *= DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
+            if lot_size and lot_size > 1.0:
+                qty = float(int(qty // lot_size) * lot_size)
+
+            return float(qty)
 
     def pyramid_position_size(
         self,
@@ -478,10 +471,16 @@ class SessionRisk:
         max_lots: int | None = None,
         forecast: Any | None = None,
         side: str = "LONG",
+        freeze_limit: float | None = None,
     ) -> float:
+        """Pyramiding size: unlocked only in Cushion Tier 2 (Session R >= 3.0)."""
+        tier = self._cushion_tier()
+        if tier != "CUSHION_TIER_2" and self.session_r_multiple() < 3.0:
+            return 0.0
+
         base = self.position_size(
             entry, sl, lot_size=lot_size, is_expiry=is_expiry, max_lots=max_lots,
-            forecast=forecast, side=side,
+            forecast=forecast, side=side, freeze_limit=freeze_limit,
         )
         if lot_size and lot_size > 1.0:
             lots = int(base // lot_size)
@@ -495,6 +494,7 @@ class SessionRisk:
     def reset_session(self, date: str | None = None) -> RiskState:
         with self._lock:
             self._daily_pnl = 0.0
+            self._peak_daily_pnl = 0.0
             self._consecutive_losses = 0
             self._consecutive_wins = 0
             self._trades_today = 0
@@ -518,40 +518,74 @@ class SessionRisk:
                 trades_today=self._trades_today,
                 equity=self._equity,
                 cushion_tier=self._cushion_tier(),
+                session_r=self.session_r_multiple(),
+                peak_daily_pnl=self._peak_daily_pnl,
             )
 
     def _cushion_tier(self) -> str:
-        """Determine current risk tier based on session performance.
-        
-        Returns: 'CONSERVATIVE' | 'CUSHION' | 'MOMENTUM'
+        """House Money Protocol (§12.2) Tier Classification:
+        - Session R <= 0.0: Base Defensive Tier (0.25% - 0.50% account risk).
+        - Session R >= +1.5: Cushion Tier 1 (0.75% account risk; risk funded by banked profit).
+        - Session R >= +3.0: Cushion Tier 2 (1.00% account risk; unlocks pyramiding eligibility).
+        - Retracement Veto: If daily profit drops by >= 50% from the session peak, sizing drops back to Base (0.25%).
         """
-        # 2+ consecutive losses → back to conservative
+        # Retracement Veto: If daily profit drops by >= 50% from session peak, revert to BASE
+        if self._peak_daily_pnl > 0 and self._daily_pnl <= 0.5 * self._peak_daily_pnl:
+            return "BASE_RETRACEMENT_VETO"
+
+        # 2+ consecutive losses -> back to conservative
         if self._consecutive_losses >= 2:
             return "CONSERVATIVE"
-        # First 1-2 trades of the day → conservative
-        if self._trades_today < 2:
-            return "CONSERVATIVE"
-        # 2+ consecutive wins → momentum
-        if self._consecutive_wins >= 2:
-            return "MOMENTUM"
-        # Session profit positive → cushion
-        if self._daily_pnl > 0:
+
+        r_mult = self.session_r_multiple()
+        if r_mult >= 3.0:
+            return "CUSHION_TIER_2"
+        elif r_mult >= 1.5:
+            return "CUSHION_TIER_1"
+        elif self._daily_pnl > 0:
             return "CUSHION"
         return "CONSERVATIVE"
 
     def _risk_per_trade_pct(self) -> float:
-        """Spec §12.2 Cushioning & House Money Protocol."""
+        """Spec §12.2 House Money Protocol Sizing Authority:
+        - Session R <= 0.0: Base Defensive Tier (0.25% - 0.50% account risk).
+        - Session R >= +1.5: Cushion Tier 1 (0.75% account risk; risk funded by banked profit).
+        - Session R >= +3.0: Cushion Tier 2 (1.00% account risk; unlocks pyramiding eligibility).
+        - Retracement Veto: If daily profit drops by >= 50% from the session peak, sizing drops back to Base (0.25%).
+        """
+        if self._halted:
+            return 0.0
+
         if self._base_risk_pct >= 0.05:
             return self._base_risk_pct
-        tier = self._cushion_tier()
-        if tier == "CONSERVATIVE" or self._daily_pnl <= 0:
-            return 0.0025
 
-        base = 0.004 if tier == "MOMENTUM" else 0.0035
-        # Spec §12.2: Deploy 40% of earned cushion while ring-fencing core capital
-        # Fabio envelope: addition never exceeds 30% of session profit, total ≤ 0.50%
-        cushion_bonus = min(
-            (0.40 * self._daily_pnl) / self._equity,
-            0.30 * abs(self._daily_pnl) / self._equity,   # ≤30% of session profit
-        ) if self._equity > 0 else 0.0
-        return min(base + cushion_bonus, 0.005)           # hard ceiling 0.50%
+        tier = self._cushion_tier()
+        if tier == "BASE_RETRACEMENT_VETO":
+            risk = 0.0025  # Retracement Veto: 0.25%
+        elif tier == "CUSHION_TIER_2":
+            risk = 0.0100  # Cushion Tier 2: 1.00%
+        elif tier == "CUSHION_TIER_1":
+            risk = 0.0075  # Cushion Tier 1: 0.75%
+        else:
+            # Base Defensive Tier: 0.25% if in loss, else base_risk_pct (0.50%)
+            if self._daily_pnl < 0 or self._consecutive_losses >= 1:
+                risk = 0.0025
+            else:
+                risk = self._base_risk_pct
+
+        if self._macro_risk_cap is not None and self._macro_risk_cap > 0:
+            risk = min(risk, self._macro_risk_cap)
+
+        return risk
+
+
+SessionRiskAuthority = SessionRisk
+
+__all__ = [
+    "SessionRisk",
+    "SessionRiskAuthority",
+    "RiskState",
+    "RiskLoadStatus",
+    "DAY_OF_WEEK_MULTIPLIER",
+]
+

@@ -203,6 +203,10 @@ class FillLedgerConflictError(ValueError):
     """Raised when a fill ID is replayed with different accounting data."""
 
 
+class DataIntegrityError(RuntimeError):
+    """Raised when SQLite storage encounters lock contention, WAL corruption, or unparseable data."""
+
+
 class SQLiteStorageAdapter(IStorage):
     """SQLite-backed persistent storage with WAL mode and tick batching."""
 
@@ -1002,9 +1006,13 @@ class SQLiteStorageAdapter(IStorage):
                     (key, value),
                 )
                 self._conn.commit()
-            except sqlite3.Error:
-                self._conn.rollback()  # Exception already caught at call site or handled above
-                raise
+            except sqlite3.Error as exc:
+                try:
+                    self._conn.rollback()
+                except Exception:  # silent-except - rollback failure during closed/corrupt connection should not shadow integrity error
+                    pass
+                logger.critical("SQLiteStorageAdapter kv_set failed on key %r: %s", key, exc)
+                raise DataIntegrityError(f"kv_set failed on key {key!r}: {exc}") from exc
 
     # ------------------------------------------------------------------
     # NPOC (Naked POC) persistence
@@ -1053,11 +1061,15 @@ class SQLiteStorageAdapter(IStorage):
     def kv_get(self, key: str) -> str | None:
         """Retrieve a value by key, or None if not found."""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT value FROM kv_store WHERE key = ?",
-                (key,),
-            ).fetchone()
-            return row[0] if row else None
+            try:
+                row = self._conn.execute(
+                    "SELECT value FROM kv_store WHERE key = ?",
+                    (key,),
+                ).fetchone()
+                return row[0] if row else None
+            except sqlite3.Error as exc:
+                logger.critical("SQLiteStorageAdapter kv_get failed on key %r: %s", key, exc)
+                raise DataIntegrityError(f"kv_get failed on key {key!r}: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Composite profile queries (Gap #4)

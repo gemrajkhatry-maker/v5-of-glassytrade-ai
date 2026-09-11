@@ -8,11 +8,11 @@ The LLM advisory never gates an entry — it feeds the journal and overseer.
 """
 
 from quant.decision.context import DecisionContext
-from quant.decision.gates_edge import gate_triple_a_edge
-from quant.decision.gates_rr import gate_risk_reward
-from quant.decision.gates_session_position import (
+from quant.decision.gates import (
     gate_position_cooldown,
+    gate_risk_reward,
     gate_session_phase,
+    gate_triple_a_edge,
 )
 from quant.decision.result import GateResult
 
@@ -36,3 +36,8 @@ class GatePipeline:
             except Exception as exc:
                 results.append(GateResult(gate_no, False, f"error: {exc}"))
         return results
+
+
+__all__ = [
+    "GatePipeline",
+]

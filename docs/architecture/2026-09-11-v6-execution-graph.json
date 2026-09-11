@@ -1,8 +1,7 @@
 {
   "version": 1,
   "generated": "2026-09-11",
-  "source_plan": "docs/architecture/2026-09-11-v6-findings-reconciliation-and-workplan.md",
-  "conventions": {
+  "source_plan": "docs/architecture/2026-09-11-v6-findings-reconciliation-and-workplan.md",    "conventions": {
     "worktree_root": ".worktrees",
     "branch_pattern": "agent/{id_lower}",
     "test_baseline": "365 passed, 1 skipped (tests/architecture + tests/quant/execution + tests/quant/chaos)",
@@ -16,9 +15,32 @@
       "one git worktree + branch per node, never two nodes in one worktree",
       "a node may not edit a file owned by another node in the same wave",
       "RED test precedes implementation for every behaviour change",
-      "nodes declare whether they move paper readiness, live readiness, or neither"
+      "nodes declare whether they move paper readiness, live readiness, or neither",
+      "if a node touches a file not listed here, stop and add the file to the footprint before continuing"
     ]
   },
+  "edges": [
+    {"from": "DEC-2", "to": "A1", "kind": "dependency", "note": "D-2 must exist before A1 can wire native stop placement into LiveOMS"},
+    {"from": "DEC-2", "to": "D1", "kind": "dependency", "note": "D-1 option to strip TimesFM from hot path requires the decision gate answer"},
+    {"from": "DEC-2", "to": "D2", "kind": "dependency", "note": "D-2 narrative sidecar scope depends on hot-path AI boundary"},
+    {"from": "DEC-2", "to": "C1", "kind": "dependency", "note": "signed aggression plus 1-min candle acceptance are the new Gate 3 evidence contract"},
+    {"from": "C1", "to": "A1", "kind": "dependency", "note": "atomic LiveOMS contract consumes the corrected aggression direction"},
+    {"from": "C1", "to": "A2", "kind": "dependency", "note": "SessionRiskAuthority sizing must be evaluated against same evidence basis"},
+    {"from": "A1", "to": "A2", "kind": "dependency", "note": "LiveOMS atomic entry + contingent stop must exist before risk authority can rely on it"},
+    {"from": "A2", "to": "A3", "kind": "dependency", "note": "risk authority in place before sizing invariants can be asserted"},
+    {"from": "A3", "to": "D1", "kind": "dependency", "note": "after hot-path size is rationalized, foundation model removal is lower-risk"},
+    {"from": "A2", "to": "D2", "kind": "dependency", "note": "post-trade narrative boundary must respect the same execution port rules"},
+    {"from": "D1", "to": "E2", "kind": "dependency", "note": "decomposition of runtime.py is materially easier after ML is off the hot path"},
+    {"from": "D2", "to": "E2", "kind": "dependency", "note": "side-car story is part of the decomposition review"},
+    {"from": "E2", "to": "H1", "kind": "dependency", "note": "refactored boundaries must be re-certified"},
+    {"from": "E2", "to": "H4", "kind": "dependency", "note": "deterministic replay must be re-run against the new core"},
+    {"from": "H4", "to": "H5", "kind": "dependency", "note": "paper shadow is the final pre-live gate"},
+    {"from": "B1", "to": "D4", "kind": "dependency", "note": "sole sizing authority must exist before macro_risk_cap intake is plugged in"},
+    {"from": "G4", "to": "E3", "kind": "dependency", "note": "EOD supervision must land before the DDD layout move rewrites multi_engine.py"},
+    {"from": "F1", "to": "E3", "kind": "dependency", "note": "feed instrumentation must be stable before layout convergence touches quant/"},
+    {"from": "D4", "to": "E3", "kind": "dependency", "note": "risk intake contract must be final before the layout move changes execution/"},
+    {"from": "A4", "to": "E1", "kind": "dependency", "note": "panic-flatten + risk circuit must be in place before QuantEngine strangler rewrites runtime.py"}
+  ],
   "nodes": [
     {
       "id": "S0-1",

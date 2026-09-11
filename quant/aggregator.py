@@ -28,12 +28,21 @@ class BarAggregator:
         self._vwap_den = 0.0
 
     def _tick_epoch(self, tick: Tick) -> int:
+        ts_ms = getattr(tick, "timestamp_ms", None)
+        if ts_ms is not None:
+            try:
+                return int(ts_ms) // 1000
+            except (TypeError, ValueError):  # silent-except - non-numeric timestamp_ms falls through to text parsing
+                pass
         text = str(getattr(tick, "time", "") or "").strip()
         if len(text) >= 2 and text[0] in "tT" and text[1:].isdigit():
             return int(text[1:])
         try:
             epoch = float(text)
-            return int(epoch)
+            int_epoch = int(epoch)
+            if int_epoch > 100_000_000_000:
+                int_epoch //= 1000
+            return int_epoch
         except (TypeError, ValueError):  # silent-except - unparseable tick time falls back to ISO/fallback counter
             pass
         try:

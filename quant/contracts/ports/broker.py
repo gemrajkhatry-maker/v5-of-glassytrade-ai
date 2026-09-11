@@ -22,5 +22,18 @@ class IBroker(ABC):
     def cancel_order(self, order_id: str) -> bool:
         ...
 
+    def place_stop_loss(
+        self,
+        symbol: str,
+        side: str,
+        quantity: int,
+        stop_price: float,
+        contract_ref=None,
+    ) -> str | None:
+        """Submit an exchange-side Stop-Loss Market (SL-M) order."""
+        raise NotImplementedError("Native SL-M placement not implemented by this broker")
+
+
+
 
 __all__ = ["IBroker"]

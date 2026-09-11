@@ -357,6 +357,16 @@ class EventStore:
             prev_checksum = expected
         return True
 
+    @property
+    def last_checksum(self) -> str | None:
+        """Return the latest SHA-256 HMAC checksum in the chain, or None if empty."""
+        return self._checksums[-1] if self._checksums else None
+
+    @property
+    def checksums(self) -> list[str]:
+        """Return a copy of the full checksum chain."""
+        return list(self._checksums)
+
     @staticmethod
     def _event_to_dict(event: Event) -> dict[str, Any]:
         """Convert an event and nested payloads to deterministic JSON data."""
