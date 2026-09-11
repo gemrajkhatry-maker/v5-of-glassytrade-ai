@@ -521,3 +521,17 @@ A second realistic P1 sequence is:
 - AMT and strategy approve on data that would not exist in a closed-candle replay.
 
 That is why the system is not live-ready even though the current release gate passes.
+
+## Remediation plan
+
+The findings in this report are addressed by the implementation plan:
+`docs/plans/2026-09-11-live-safety-adversarial-remediation.md`.
+
+Implementation is intentionally gated:
+
+- live deployment remains NO-GO while P0/P1 exposure, temporal identity,
+  persistence atomicity, and exact-flow provenance tests are incomplete;
+- paper/replay work may continue under the existing release gate;
+- each task requires a failing adversarial test before implementation;
+- broker-facing workflows require boundary/restart/reconciliation tests rather
+  than only unit mocks.
