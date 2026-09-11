@@ -99,8 +99,11 @@ class PaperOMS:
         if self._simulator is not None:
             if self._contract is None:
                 raise ValueError("PaperOMS simulator mode requires a ContractRef")
+            # The economic close identity must not include retry-varying time.
+            # Re-submitting the same position/reason returns the original fill.
+            close_order_id = f"close:{position.id}:{reason}"
             paper_fill = self._simulator.submit(
-                order_id=f"close:{position.id}:{time}:{reason}",
+                order_id=close_order_id,
                 contract=self._contract,
                 side="SELL" if position.size > 0 else "BUY",
                 quantity=int(abs(position.size)),
@@ -130,7 +133,7 @@ class PaperOMS:
                 reason=reason,
                 pnl=pnl,
                 costs=paper_fill.costs,
-                logical_id=f"close:{position.id}:{time}:{reason}",
+                logical_id=close_order_id,
             )
         pnl = (price - position.open_price) * position.size
         # Preserve the original position's _id so close events can be matched
