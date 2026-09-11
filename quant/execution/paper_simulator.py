@@ -71,6 +71,14 @@ class PaperExecutionSimulator:
     def fills(self) -> tuple[PaperFill, ...]:
         return tuple(self._fills.values())
 
+    @property
+    def unresolved_fills(self) -> tuple[PaperFill, ...]:
+        """Partial fills requiring caller-side exposure reconciliation."""
+        return tuple(
+            fill for fill in self._fills.values()
+            if fill.status is PaperOrderStatus.PARTIALLY_FILLED
+        )
+
     def export_records(self) -> list[dict]:
         """Return broker-neutral, JSON-safe fill records for persistence."""
         return [

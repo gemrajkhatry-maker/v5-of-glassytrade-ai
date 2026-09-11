@@ -42,3 +42,9 @@ class ExposureState:
             filled_qty=float(filled_qty),
             fill_price=float(fill_price),
         )
+
+    def reconciled(self) -> "ExposureState":
+        """Clear an exposure after an external paper/restart reconciliation."""
+        if self.status is not ExposureStatus.RECONCILIATION_REQUIRED:
+            raise ValueError("only reconciliation-required exposure can be cleared")
+        return type(self).none()
