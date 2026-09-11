@@ -100,7 +100,7 @@ class StreamingService(BaseDhanService):
                 try:
                     await ws.disconnect()
                 except Exception:
-                    pass
+                    logger.warning("Failed to disconnect persistent quote WebSocket", exc_info=True)
 
             ws = self._make_ws_client()
             await ws.connect()
@@ -119,7 +119,7 @@ class StreamingService(BaseDhanService):
                 try:
                     await ws.disconnect()
                 except Exception:
-                    pass
+                    logger.warning("Failed to disconnect persistent depth WebSocket", exc_info=True)
 
             ws = self._make_depth_client(20)
             await ws.connect()
@@ -133,7 +133,7 @@ class StreamingService(BaseDhanService):
             try:
                 await self._persistent_ws.disconnect()
             except Exception:
-                pass
+                logger.warning("Failed to close persistent quote WebSocket", exc_info=True)
             self._persistent_ws = None
             logger.info("Persistent WS closed")
 
@@ -141,7 +141,7 @@ class StreamingService(BaseDhanService):
             try:
                 await self._persistent_depth_ws.disconnect()
             except Exception:
-                pass
+                logger.warning("Failed to close persistent depth WebSocket", exc_info=True)
             self._persistent_depth_ws = None
             logger.info("Persistent depth WS closed")
 

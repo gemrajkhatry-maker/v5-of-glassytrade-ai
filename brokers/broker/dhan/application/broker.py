@@ -371,7 +371,7 @@ class DhanBroker(IBrokerPort):
             try:
                 self.close_sync()
             except Exception:
-                pass
+                logger.warning("Best-effort broker cleanup failed", exc_info=True)
 
     # =========================================================================
     # Internal Helpers
@@ -957,7 +957,7 @@ class DhanExchangeConfig:
             if instrument.lot_size > 0:
                 return instrument.lot_size
         except Exception:
-            pass
+            logger.warning("Direct lot-size resolution failed for %s", clean, exc_info=True)
 
         # 3) Underlying root: find any current NFO or MCX contract of it.
         mapper = self._broker._symbol_mapper
@@ -998,7 +998,7 @@ class DhanExchangeConfig:
                 cfg = ExchangeConfig.for_exchange(ex)
                 return int(cfg.get_lot_size(underlying))
             except Exception:
-                pass
+                logger.warning("ExchangeConfig lot-size resolution failed for %s on %s", underlying, ex, exc_info=True)
 
         raise DhanSymbolNotFoundError(
             message=f"Cannot determine lot size for {underlying}",
