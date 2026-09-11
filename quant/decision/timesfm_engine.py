@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import os
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -36,6 +37,13 @@ _TIMESFM_MODEL_LOAD_ERROR: Optional[str] = None
 
 def get_timesfm_model(device: str = "cpu") -> Any:
     """Load and cache the TimesFM 3.0 PyTorch model singleton."""
+    ack = os.getenv("TIMESFM_COMMERCIAL_ACK", "0").strip().lower() in ("1", "true", "yes")
+    if not ack:
+        raise RuntimeError(
+            "TimesFM 3.0 weights require TIMESFM_COMMERCIAL_ACK=1 "
+            "(google/timesfm-3.0-pytorch is non-commercial licensed; "
+            "research-only unless you hold a commercial grant)."
+        )
     global _TIMESFM_MODEL
     if _TIMESFM_MODEL is not None:
         return _TIMESFM_MODEL
