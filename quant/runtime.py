@@ -1830,6 +1830,23 @@ class QuantEngine:
             last_close_bar=rebuilt.last_close_bar,
         )
 
+    def reconcile_paper_fills(self, simulator) -> None:
+        """Restore unresolved paper fills into the entry safety state."""
+        unresolved = simulator.unresolved_fills
+        if not unresolved:
+            return
+        fill = unresolved[0]
+        if self.exposure_state.status.name != "NONE":
+            return
+        from quant.execution.exposure import ExposureState
+        self.exposure_state = ExposureState.none().partial_entry(
+            symbol=self.symbol,
+            order_id=fill.order_id,
+            requested_qty=fill.requested_quantity,
+            filled_qty=fill.filled_quantity,
+            fill_price=fill.fill_price,
+        )
+
     def periodic_reconcile(self) -> PeriodicReconciliationResult:
         """Periodic reconciliation between cached state and event store.
 
