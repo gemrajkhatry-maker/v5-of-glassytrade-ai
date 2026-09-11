@@ -35,6 +35,8 @@ class PortfolioRiskAuthority:
         self._starting_equity = starting_equity
         self._max_open_risk = starting_equity * max_portfolio_risk_pct
         self._max_daily_loss = starting_equity * max_portfolio_daily_loss_pct
+        self._hard_notional_cap = starting_equity * 0.50
+        self._open_notional = 0.0
         self._separate_by = separate_by
         self._lock = threading.RLock()
         self._open_risk = 0.0          # sum of (entry - sl) * qty for open positions
@@ -111,6 +113,8 @@ class PortfolioRiskAuthority:
         with self._lock:
             if self._realized_pnl <= -self._max_daily_loss:
                 return False
+            if self._open_notional + max(0.0, risk_rupees) > self._hard_notional_cap:
+                return False
             if self._open_risk + max(0.0, risk_rupees) > self._max_open_risk:
                 return False
             if not self._budget_available(risk_rupees, symbol):
@@ -122,6 +126,7 @@ class PortfolioRiskAuthority:
                 if key:
                     self._active_roots[key] = symbol
             self._open_risk += max(0.0, risk_rupees)
+            self._open_notional += max(0.0, risk_rupees)
             self._add_budget(risk_rupees, symbol)
             return True
 
@@ -129,6 +134,7 @@ class PortfolioRiskAuthority:
         """Release a closed position's reserved risk and record realized P&L."""
         with self._lock:
             self._open_risk = max(0.0, self._open_risk - max(0.0, risk_rupees))
+            self._open_notional = max(0.0, self._open_notional - max(0.0, risk_rupees))
             self._release_budget(risk_rupees, symbol)
             self._realized_pnl += pnl
             if symbol and is_full_close:
@@ -146,6 +152,7 @@ class PortfolioRiskAuthority:
         """
         with self._lock:
             self._open_risk = max(0.0, self._open_risk - max(0.0, risk_rupees))
+            self._open_notional = max(0.0, self._open_notional - max(0.0, risk_rupees))
             self._release_budget(risk_rupees, symbol)
             if symbol:
                 key = self._lock_key(symbol)
@@ -154,6 +161,11 @@ class PortfolioRiskAuthority:
 
     def can_accept(self, risk_rupees: float, symbol: str = "", is_pyramid: bool = False) -> tuple[bool, str]:
         with self._lock:
+            if self._open_notional + max(0.0, risk_rupees) > self._hard_notional_cap:
+                return False, (
+                    f"hard equity cap 50%: aggregate open {self._open_notional:.0f}+{risk_rupees:.0f} "
+                    f"> {self._hard_notional_cap:.0f}"
+                )
             if self._open_risk + max(0.0, risk_rupees) > self._max_open_risk:
                 return False, (
                     f"portfolio open-risk limit: {self._open_risk:.0f}+{risk_rupees:.0f} "
