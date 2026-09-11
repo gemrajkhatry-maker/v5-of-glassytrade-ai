@@ -237,10 +237,8 @@ Every audit defect is now either fixed or explicitly recorded as an accepted res
     its value is a contract that a second store cannot silently widen a live stop.
   - No gap-through-stop modelling: a gap fills exactly at the stop on every exit path.
   - `snap_to_lot` rounds rather than floors, so an expiry half-cut lands ~0.15% over intent.
-  - `quant/decision/timesfm_client.py` is reachable only when `TIMESFM_NATIVE=false` (default
-    true); recommendation on record is to keep it and add a `use_native_engine=False` test.
-  - `frontend/tests/runtime-audit/harness.tsx` imports a payload fixture that has never been
-    tracked or on disk (pre-existing).
+  - Resolved: the remote TimesFM path now has a `use_native_engine=False` contract test; the client remains intentionally supported.
+  - Resolved: the frontend runtime-audit fixture is now tracked at `frontend/tests/fixtures/ws_payloads.json`; the harness no longer depends on an untracked root fixture.
 
 Two process lessons from this run are recorded in the ledger: a subagent's uncommitted working
 tree can revert prior tasks (verify a "pre-existing failure" claim against git), and combined
