@@ -100,3 +100,29 @@ def test_timesfm_advisor_offline_fallback():
     assert latest["source"] == "AMT_LOCAL"
     assert "direction" in latest
     assert "forecastSteps" in latest
+
+
+def test_remote_advisor_path_processes_fast_response(monkeypatch):
+    import time
+    from quant.decision.context import DecisionContext
+    from quant.decision.timesfm_advisor import TimesFMAdvisor
+
+    emitted = []
+    advisor = TimesFMAdvisor(
+        emit_fn=emitted.append,
+        service_url="http://127.0.0.1:59999",
+        enable_llm_narrative=False,
+        use_native_engine=False,
+    )
+    advisor._client.predict = lambda snapshots, invoke_llm=False, timeout=3.0: {
+        "direction": "LONG",
+        "action": "ENTER_LONG",
+        "confidenceScore": 0.8,
+        "forecastSteps": ["LONG"] * 32,
+        "gateResults": [],
+        "latencyMs": 1.0,
+    }
+    advisor.on_context(DecisionContext(symbol="NIFTY"))
+    time.sleep(0.2)
+    advisor.shutdown()
+    assert any(event.decision.get("source") == "TIMESFM_3.0" for event in emitted)
