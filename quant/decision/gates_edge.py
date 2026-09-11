@@ -1,5 +1,6 @@
 """Gate 3 — the Triple-A edge (Fabio: absorption -> accumulation -> aggression)."""
 
+from quant.amt.orderflow.aggression import canonical_absorption_direction
 from quant.contracts.enums import MarketState
 
 from quant.decision.context import DecisionContext
@@ -15,11 +16,101 @@ _ABSORPTION_MAX_AGE_BARS = 5
 # from the Dhan 5-level depth snapshot.
 _OBI_AGGRESSION_THRESHOLD = 0.20
 
+# Fabio's 1-minute acceptance rule: an entry must be a full-body candle close in
+# the trade direction, NOT a wick probe or a mid-candle entry. Entry signals fire
+# mid-bar on the live tape, which is exactly when a probe looks like a breakout
+# and then rejects back through the range — putting the structural stop on the
+# wrong side of the sweep.
+#
+#   * the body must be at least _FULL_BODY_MIN_RATIO of the bar's range;
+#   * the close must sit in the outer (1 - _CLOSE_NEAR_EXTREME_MIN) of the range.
+#
+# A bar with no range is INDETERMINATE and is NOT blocked: synthetic fixtures,
+# halted instruments and thin contracts all legitimately print zero-range bars,
+# and refusing them would disable trading rather than filter probes.
+_FULL_BODY_MIN_RATIO = 0.6
+_CLOSE_NEAR_EXTREME_MIN = 0.75
+
+
+def _opposing_absorption(ctx: DecisionContext) -> bool:
+    """True when the absorption reading contradicts the trade direction.
+
+    Review finding P0-5: the aggregate aggression score counts activity, not
+    agreement, and ``compute.py`` marks ``cvd_confirmed``/``footprint_confirmed``
+    without regard to sign. The absorption side IS directional, so a setup whose
+    own footprint says the opposite (hidden seller absorbing buys while going
+    LONG) must not be actionable. Unknown sides do not block here — the scorer
+    already refuses them credit.
+    """
+    direction = str(getattr(ctx, "agent_direction", "") or "").upper()
+    if direction not in ("LONG", "SHORT"):
+        return False
+    canonical = canonical_absorption_direction(getattr(ctx, "absorption_side", ""))
+    return canonical is not None and canonical != direction
+
+
+def _candle_acceptance(ctx: DecisionContext) -> GateResult | None:
+    """Reject wick probes and mid-candle entries (1-minute acceptance rule).
+
+    Returns ``None`` when the bar is an acceptable full-body close in the trade
+    direction, or when the bar carries no range (indeterminate).
+    """
+    bar = ctx.bar
+    if bar is None:
+        return None
+    open_px = float(bar.open)
+    high = float(bar.high)
+    low = float(bar.low)
+    close = float(bar.close)
+    span = high - low
+    if span <= 0:
+        return None  # indeterminate: cannot judge a zero-range bar
+
+    direction = str(getattr(ctx, "agent_direction", "") or "").upper()
+    body = close - open_px
+    body_ratio = abs(body) / span
+
+    if direction == "LONG":
+        if body <= 0:
+            return GateResult(3, False, "1-min candle closed down — no bullish body")
+        if (close - low) / span < _CLOSE_NEAR_EXTREME_MIN:
+            return GateResult(
+                3, False,
+                f"Wick probe rejected: close not near the high "
+                f"({(close - low) / span:.0%} of range < {_CLOSE_NEAR_EXTREME_MIN:.0%})",
+            )
+    elif direction == "SHORT":
+        if body >= 0:
+            return GateResult(3, False, "1-min candle closed up — no bearish body")
+        if (high - close) / span < _CLOSE_NEAR_EXTREME_MIN:
+            return GateResult(
+                3, False,
+                f"Wick probe rejected: close not near the low "
+                f"({(high - close) / span:.0%} of range < {_CLOSE_NEAR_EXTREME_MIN:.0%})",
+            )
+    else:
+        return None
+
+    if body_ratio < _FULL_BODY_MIN_RATIO:
+        return GateResult(
+            3, False,
+            f"Mid-candle probe rejected: body {body_ratio:.0%} of range "
+            f"< {_FULL_BODY_MIN_RATIO:.0%}",
+        )
+    return None
+
 
 def _check_guards(ctx: DecisionContext) -> GateResult | None:
     """Pre-check guards that veto entry before setup evaluation."""
     if ctx.bar is None:
         return GateResult(3, False, "No bar")
+    if _opposing_absorption(ctx):
+        return GateResult(
+            3,
+            False,
+            f"Opposing absorption: {ctx.absorption_side} is {canonical_absorption_direction(ctx.absorption_side)} "
+            f"evidence, not {ctx.agent_direction}",
+        )
     si_dir = getattr(ctx, "stacked_imbalance_direction", "")
     if si_dir and ctx.agent_direction:
         if (ctx.agent_direction == "LONG" and si_dir == "SELL") or (ctx.agent_direction == "SHORT" and si_dir == "BUY"):
@@ -39,6 +130,9 @@ def _check_guards(ctx: DecisionContext) -> GateResult | None:
         return GateResult(3, False, f"Anti-Climax: LONG rejected at +{abs(ctx.vwap_std):.1f}σ extension")
     if ctx.agent_direction == "SHORT" and ctx.vwap_lower_2 > 0 and close_px < ctx.vwap_lower_2:
         return GateResult(3, False, f"Anti-Climax: SHORT rejected at -{abs(ctx.vwap_std):.1f}σ extension")
+    acceptance = _candle_acceptance(ctx)
+    if acceptance:
+        return acceptance
     if getattr(ctx, "drive_number", 0) >= 3 and not getattr(ctx, "drive_entry_valid", False):
         return GateResult(3, False, f"Drive count exhausted ({ctx.drive_number})")
     cvd_slope = ctx.cvd_slope
@@ -74,11 +168,14 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
         price = float(ctx.bar.close)
         if abs(price - leg_lvn) <= 2.0 * tick:
-            if ctx.absorption_side == "SELL_ABSORBED" and ctx.agent_direction == "LONG" and cvd_slope >= -0.2:
+            # Canonical absorption mapping (SELL_ABSORBED->LONG, BUY_ABSORBED->SHORT).
+            # Opposing sides are already vetoed in _check_guards.
+            absorbed = canonical_absorption_direction(ctx.absorption_side)
+            if absorbed == "LONG" and ctx.agent_direction == "LONG" and cvd_slope >= -0.2:
                 if not getattr(ctx, "allow_trend", True):
                     return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
                 return GateResult(3, True, f"LVN Sniper LONG @ {leg_lvn:.2f}")
-            if ctx.absorption_side == "BUY_ABSORBED" and ctx.agent_direction == "SHORT" and cvd_slope <= 0.2:
+            if absorbed == "SHORT" and ctx.agent_direction == "SHORT" and cvd_slope <= 0.2:
                 if not getattr(ctx, "allow_trend", True):
                     return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
                 return GateResult(3, True, f"LVN Sniper SHORT @ {leg_lvn:.2f}")

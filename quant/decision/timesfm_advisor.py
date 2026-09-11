@@ -169,10 +169,13 @@ class TimesFMAdvisor:
         """Enqueue DecisionContext for async TimesFM analysis.
         Emits instant baseline rule narrative (0ms) so UI is never blank.
         """
-        # 1. Instant baseline emission (0ms)
-        rule_decision = build_rule_based_narrative(ctx)
-        baseline = build_decision_payload(ctx, None, rule_decision, fallback_source="AMT_LOCAL")
-        self._emit_decision(ctx, baseline)
+        # 1. Instant baseline emission (0ms) - guarded so advisory never crashes caller
+        try:
+            rule_decision = build_rule_based_narrative(ctx)
+            baseline = build_decision_payload(ctx, None, rule_decision, fallback_source="AMT_LOCAL")
+            self._emit_decision(ctx, baseline)
+        except Exception:
+            logger.exception("Failed to build/emit rule-based narrative in on_context for %s", getattr(ctx, "symbol", "UNKNOWN"))
 
         # 2. Queue for TimesFM worker thread
         try:

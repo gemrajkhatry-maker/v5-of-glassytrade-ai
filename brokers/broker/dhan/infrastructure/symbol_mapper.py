@@ -448,7 +448,7 @@ class DhanSymbolMapper(ISymbolMapper):
                 # Check symbol match
                 inst_sym = (instrument.symbol or "").upper()
                 inst_ts = (instrument.trading_symbol or "").upper()
-                if inst_sym == symbol or inst_ts.startswith(f"{symbol}-") or inst_ts.startswith(f"{symbol} "):
+                if inst_sym == symbol or inst_ts == symbol or inst_ts.startswith(f"{symbol}-") or inst_ts.startswith(f"{symbol} "):
                     futures_instruments.append(instrument)
 
             if not futures_instruments:
@@ -628,6 +628,31 @@ class DhanSymbolMapper(ISymbolMapper):
                 raw_ts = str(row.get("SEM_TRADING_SYMBOL", ""))
                 _add_to_cache(instrument, raw_trading_symbol=raw_ts)
 
+    @staticmethod
+    def _should_replace(existing: DhanInstrument, new_inst: DhanInstrument) -> bool:
+        """Determine whether new_inst should replace existing on key collision.
+
+        For instruments sharing the same symbol/trading_symbol (such as multi-year
+        forward futures like CRUDEOIL SEP FUT 2026 vs 2027), always prioritize
+        the active contract with the nearest expiry date.
+        """
+        if not existing.expiry_date:
+            return bool(new_inst.expiry_date)
+        if not new_inst.expiry_date:
+            return False
+
+        today = date.today()
+        existing_active = existing.expiry_date >= today
+        new_active = new_inst.expiry_date >= today
+
+        if new_active and not existing_active:
+            return True
+        if existing_active and not new_active:
+            return False
+        if existing_active and new_active:
+            return new_inst.expiry_date < existing.expiry_date
+        return new_inst.expiry_date > existing.expiry_date
+
     def _add_to_cache(
         self, instrument: DhanInstrument, raw_trading_symbol: str = ""
     ) -> None:
@@ -637,6 +662,7 @@ class DhanSymbolMapper(ISymbolMapper):
         Also indexes by raw SEM_TRADING_SYMBOL when it differs from the
         custom symbol (e.g., raw="NIFTY" vs custom="Nifty 50") so both
         lookup forms resolve to the same instrument.
+        Prioritizes nearest active expiry on symbol collisions.
 
         Args:
             instrument: The instrument to cache.
@@ -646,7 +672,16 @@ class DhanSymbolMapper(ISymbolMapper):
         self._by_security_id[instrument.security_id] = instrument
 
         # By trading symbol (may overwrite across exchanges, used only as fallback)
-        self._by_trading_symbol[instrument.trading_symbol] = instrument
+        if instrument.trading_symbol not in self._by_trading_symbol or self._should_replace(
+            self._by_trading_symbol[instrument.trading_symbol], instrument
+        ):
+            self._by_trading_symbol[instrument.trading_symbol] = instrument
+
+        if raw_trading_symbol:
+            if raw_trading_symbol not in self._by_trading_symbol or self._should_replace(
+                self._by_trading_symbol[raw_trading_symbol], instrument
+            ):
+                self._by_trading_symbol[raw_trading_symbol] = instrument
 
         # Exchange-aware indexes (skip if exchange_segment missing)
         if instrument.exchange_segment:
@@ -654,18 +689,44 @@ class DhanSymbolMapper(ISymbolMapper):
             # By symbol:exchange (SM_SYMBOL_NAME based)
             if instrument.symbol:
                 key = f"{instrument.symbol}:{code}"
-                self._by_symbol[key] = instrument
+                if key not in self._by_symbol or self._should_replace(
+                    self._by_symbol[key], instrument
+                ):
+                    self._by_symbol[key] = instrument
                 # Case-insensitive symbol index
-                self._by_symbol_lower[f"{instrument.symbol.lower()}:{code}"] = instrument
+                sym_lower_key = f"{instrument.symbol.lower()}:{code}"
+                if sym_lower_key not in self._by_symbol_lower or self._should_replace(
+                    self._by_symbol_lower[sym_lower_key], instrument
+                ):
+                    self._by_symbol_lower[sym_lower_key] = instrument
+
             # By trading_symbol:exchange (composite, no collisions across exchanges)
             ts_key = f"{instrument.trading_symbol}:{code}"
-            self._by_trading_symbol_exchange[ts_key] = instrument
+            if ts_key not in self._by_trading_symbol_exchange or self._should_replace(
+                self._by_trading_symbol_exchange[ts_key], instrument
+            ):
+                self._by_trading_symbol_exchange[ts_key] = instrument
+
             # Case-insensitive trading_symbol index
-            self._by_trading_symbol_lower[f"{instrument.trading_symbol.lower()}:{code}"] = instrument
+            ts_lower_key = f"{instrument.trading_symbol.lower()}:{code}"
+            if ts_lower_key not in self._by_trading_symbol_lower or self._should_replace(
+                self._by_trading_symbol_lower[ts_lower_key], instrument
+            ):
+                self._by_trading_symbol_lower[ts_lower_key] = instrument
+
             # Also index by raw SEM_TRADING_SYMBOL if it differs from custom
             if raw_trading_symbol and raw_trading_symbol != instrument.trading_symbol:
                 raw_key = f"{raw_trading_symbol}:{code}"
-                self._by_trading_symbol_exchange[raw_key] = instrument
+                if raw_key not in self._by_trading_symbol_exchange or self._should_replace(
+                    self._by_trading_symbol_exchange[raw_key], instrument
+                ):
+                    self._by_trading_symbol_exchange[raw_key] = instrument
+
+                raw_lower_key = f"{raw_trading_symbol.lower()}:{code}"
+                if raw_lower_key not in self._by_trading_symbol_lower or self._should_replace(
+                    self._by_trading_symbol_lower[raw_lower_key], instrument
+                ):
+                    self._by_trading_symbol_lower[raw_lower_key] = instrument
 
     def _get_exchange_segment(
         self, exchange_code: str, instrument_type: str

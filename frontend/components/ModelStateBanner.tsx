@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Brain } from 'lucide-react';
+import { THREE_A_CONFIG } from '../config';
 import type { AMTAnalysis, AgentDecision, AuctionAnalysis, QuantDecisionAnalysis } from '../types';
 
 export interface ModelStateBannerProps {
@@ -16,8 +17,17 @@ export interface ModelStateBannerProps {
 const ModelStateBanner = React.memo<ModelStateBannerProps>(({ amtResult, agentDecision, auction, quantDecision, symbol }) => {
     const { title, subtitle, barClass, accentClass } = useMemo(() => {
         const isDead = amtResult?.marketState === 'DEAD';
-        const volLow = amtResult?.aggression != null && amtResult.aggression < 0.2;
-        const volMsg = volLow ? 'Low aggression — edge may be thin' : 'Aggression healthy';
+        // Single source of truth for the aggression floor: THREE_A_CONFIG is the
+        // same constant utils/threeA.ts uses to decide what counts as Action.
+        // This previously hardcoded 0.2, so a live score of 0.50 rendered as
+        // "Aggression healthy" while the Three-A module correctly withheld it.
+        const aggression = amtResult?.aggression;
+        const volMsg =
+            aggression == null
+                ? 'Aggression unknown — flow not yet scored'
+                : aggression < THREE_A_CONFIG.aggressionMin
+                ? `Aggression unconfirmed (${aggression.toFixed(1)}/${THREE_A_CONFIG.aggressionMin.toFixed(1)})`
+                : 'Aggression healthy';
         const armed = agentDecision?.timing === 'ENTER_NOW';
         const dir = agentDecision?.direction;
         const hasEntry = dir && dir !== 'FLAT';

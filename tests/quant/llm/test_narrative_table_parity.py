@@ -316,3 +316,38 @@ def test_injected_backend_overrides_baseline_emission():
     assert len(backend.calls) == 1
     assert len(emitted) == 1
     assert emitted[0].decision["action"] == "CUSTOM"
+
+
+def test_pos_take_profit_tolerance():
+    """Verify TP_TOUCH_TOLERANCE_PCT triggers take-profit narrative when price is within 0.2% of TP."""
+    from quant.llm.narrative import build_rule_based_narrative, TP_TOUCH_TOLERANCE_PCT
+
+    assert TP_TOUCH_TOLERANCE_PCT == 0.002
+
+    # LONG position: TP = 10000. Price is 9985 (within 0.2% of 10000 = 9980 threshold)
+    ctx_long = make_ctx(
+        close=9985.0,
+        position_open=True,
+        position_side="LONG",
+        position_entry_price=9800.0,
+        position_tp=10000.0,
+        position_sl=9700.0,
+        position_bars_held=5,
+    )
+    res_long = build_rule_based_narrative(ctx_long)
+    assert res_long["action"] == "TAKE_PROFIT"
+    assert res_long["direction"] == "LONG"
+
+    # SHORT position: TP = 10000. Price is 10015 (within 0.2% of 10000 = 10020 threshold)
+    ctx_short = make_ctx(
+        close=10015.0,
+        position_open=True,
+        position_side="SHORT",
+        position_entry_price=10200.0,
+        position_tp=10000.0,
+        position_sl=10300.0,
+        position_bars_held=5,
+    )
+    res_short = build_rule_based_narrative(ctx_short)
+    assert res_short["action"] == "TAKE_PROFIT"
+    assert res_short["direction"] == "SHORT"

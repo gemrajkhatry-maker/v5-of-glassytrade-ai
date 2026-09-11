@@ -22,6 +22,32 @@ from quant.contracts.constants import CVD_SLOPE_EXTENDED_WINDOW, CVD_SLOPE_PERSI
 # ---------------------------------------------------------------------------
 
 
+def direction_of_signed(value: float | None, *, epsilon: float = 0.0) -> str | None:
+    """Map a signed order-flow value to the direction it supports.
+
+    Returns ``"LONG"``/``"SHORT"``, or ``None`` when the value is absent or
+    inside ``epsilon`` of flat (indeterminate).
+
+    This exists so CVD slope, OFI, normalised delta and any future signed flow
+    metric share ONE sign convention. Before it, three call sites each tested
+    the sign themselves and disagreed about whether a flat reading was
+    supportive (see the review's P0-5 / P1-11 findings).
+    """
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric != numeric:  # NaN is indeterminate, never a direction
+        return None
+    if numeric > epsilon:
+        return "LONG"
+    if numeric < -epsilon:
+        return "SHORT"
+    return None
+
+
 @dataclass(frozen=True)
 class CVDState:
     """Snapshot of the CVD tracker at a point in time."""

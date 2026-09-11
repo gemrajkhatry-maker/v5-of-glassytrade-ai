@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GlassyTrade Complexity Audit</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-200 p-8">
+<div class="max-w-5xl mx-auto">
+<h1 class="text-3xl font-bold mb-4">GlassyTrade Complexity & Architecture Audit</h1>
+<p class="text-slate-400 mb-8">Full report saved at: <code>docs/complexity-audit.html</code></p>
+
+<div class="bg-slate-800 rounded-lg p-6 mb-6">
+<h2 class="text-xl font-bold mb-3">Key Findings</h2>
+<ul class="space-y-2">
+<li><strong>48K lines</strong> of Python across 237 source files</li>
+<li><strong>16 functions</strong> with extreme complexity (E/F rating, CC > 30)</li>
+<li><strong>30 functions</strong> with high complexity (D rating, CC 20-30)</li>
+<li><strong>Worst maintainability:</strong> trade_journal.py (MI: 0.00)</li>
+</ul>
+</div>
+
+<div class="bg-slate-800 rounded-lg p-6 mb-6">
+<h2 class="text-xl font-bold mb-3">Top Complexity Hotspots</h2>
+<ol class="space-y-2">
+<li><code>DecisionContextBuilder.build()</code> — <strong>CC=66</strong> (context_builder.py)</li>
+<li><code>AMTAnalyzer.analyze()</code> — <strong>CC=54</strong> (analyzer.py)</li>
+<li><code>OptionsService.get_option_chain_async()</code> — <strong>CC=54</strong> (options_service.py)</li>
+<li><code>compute_order_flow_metrics()</code> — <strong>CC=41</strong> (compute.py)</li>
+<li><code>detect_break()</code> — <strong>CC=40</strong> (break_detector.py)</li>
+</ol>
+</div>
+
+<div class="bg-slate-800 rounded-lg p-6 mb-6">
+<h2 class="text-xl font-bold mb-3">Over-Engineering Findings</h2>
+<ul class="space-y-2">
+<li><strong>yagni:</strong> 9 config Protocol interfaces — only 1 implementation exists</li>
+<li><strong>yagni:</strong> 4 storage sub-ports — single SQLiteStorageAdapter implements all</li>
+<li><strong>stdlib:</strong> DIContainer (158 lines) — replace with functools.lru_cache</li>
+<li><strong>shrink:</strong> SettingsAdapter (421 lines) — 50+ @property delegates</li>
+<li><strong>delete:</strong> DecisionInputs dataclass — defined but never used</li>
+<li><strong>native:</strong> Duplicate detect_displacement_leg() in 2 modules</li>
+<li><strong>shrink:</strong> TradeJournal (1031 lines) — split writer from analytics</li>
+<li><strong>yagni:</strong> FeatureFlags — 8 boolean flags, none referenced</li>
+</ul>
+</div>
+
+<div class="bg-slate-800 rounded-lg p-6 mb-6">
+<h2 class="text-xl font-bold mb-3">Top Recommendations</h2>
+<ol class="space-y-2">
+<li><strong>Immediate:</strong> Delete DecisionInputs + FeatureFlags (-100 lines)</li>
+<li><strong>High Impact:</strong> Decompose DecisionContextBuilder.build() (CC=66)</li>
+<li><strong>High Impact:</strong> Split AMTAnalyzer.analyze() (CC=54) into pipeline stages</li>
+<li><strong>Medium:</strong> Consolidate duplicate detect_displacement_leg()</li>
+<li><strong>Medium:</strong> Extract SignalExecutor from QuantEngine._decide()</li>
+</ol>
+</div>
+</div>
+</body>
+</html>

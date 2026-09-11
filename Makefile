@@ -1,4 +1,4 @@
-.PHONY: test test-backend test-quant test-brokers test-frontend test-ci lint clean parity pre-release
+.PHONY: test test-backend test-quant test-brokers test-frontend test-ci lint clean parity pre-release plan plan-json plan-mermaid
 
 # Python interpreter: override with `make PYTHON=/path/to/python`
 PYTHON ?= $(CURDIR)/.venv/bin/python
@@ -38,6 +38,17 @@ pre-release:
 lint:
 	$(PYTHON) -m ruff check quant backend/app brokers shared tests backend/tests
 	cd frontend && npx tsc --noEmit
+
+# Refactoring workstream schedule: which tasks can run in parallel and which are
+# serialized. See docs/architecture/2026-09-11-v6-parallel-execution-plan.md
+plan:
+	$(PYTHON) scripts/plan_waves.py
+
+plan-json:
+	$(PYTHON) scripts/plan_waves.py --json
+
+plan-mermaid:
+	$(PYTHON) scripts/plan_waves.py --mermaid
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +

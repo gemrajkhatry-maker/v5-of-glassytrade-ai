@@ -28,3 +28,5 @@ gymnasium>=1.0.0
 # stable-baselines3>=2.0.0
 # Config
 pyyaml>=6.0
+# JWT verification for the gameloop WebSocket (app/api/websocket/auth.py)
+PyJWT>=2.8.0

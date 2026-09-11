@@ -21,6 +21,8 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.api.websocket.auth import authenticate_websocket
+
 router = APIRouter(prefix="/trading", tags=["trading"])
 logger = logging.getLogger(__name__)
 
@@ -115,10 +117,22 @@ async def gameloop_ws(ws: WebSocket):
     logger.info("WebSocket connection attempt from %s", ws.client)
     try:
         await ws.accept()
-        logger.info("WebSocket connection accepted")
     except Exception as e:
         logger.error("Failed to accept WebSocket connection: %s", e, exc_info=True)
         raise
+
+    # P1-12: the socket is accepted first so an auth failure can be reported
+    # with a 4401 close and a JSON reason, then authentication is enforced
+    # before any coordinator state is read.
+    decision = await authenticate_websocket(ws)
+    if not decision.authenticated:
+        logger.info("WebSocket connection closed unauthenticated: %s", decision.reason)
+        return
+    logger.info(
+        "WebSocket connection accepted (subject=%s enforced=%s)",
+        decision.subject,
+        decision.enforced,
+    )
 
     app = ws.scope.get("app")
     coordinator = getattr(getattr(app, "state", None), "coordinator", None)

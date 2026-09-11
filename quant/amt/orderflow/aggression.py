@@ -13,6 +13,20 @@ Confidence labels:
   HIGH:   score ≥ 3.0 (also pyramid eligible)
   MEDIUM: score ≥ 2.0 (minimum for trade signal)
   LOW:    score < 2.0  (no trade)
+
+Directional gate (v6.0, review finding P0-5):
+  The additive score above counts ACTIVITY, not AGREEMENT — a large negative
+  delta sell climax scores exactly like a large positive one. Callers that
+  assert a trade direction pass ``direction`` plus the signed inputs they
+  already hold (``cvd_slope``, ``ofi``, ``norm_delta``, ``absorption_side``):
+
+  * each signed component scores only when it agrees with the direction;
+  * absorbed volume with an unreadable side earns no credit (fail-closed);
+  * if the net delta slope OPPOSES the direction the whole score is clamped
+    to 0.0 (max 4.5) and ``direction_opposed`` is set.
+
+  Callers that pass no ``direction`` keep the legacy additive behaviour, so
+  display/journal paths are unchanged.
 """
 
 from __future__ import annotations
@@ -20,7 +34,9 @@ from quant.contracts.enums import MarketState
 
 import logging
 from dataclasses import dataclass
+from typing import Optional
 
+from quant.amt.orderflow.cvd import direction_of_signed
 from quant.contracts.constants import (
     AGGRESSION_FOOTPRINT,
     AGGRESSION_CVD,
@@ -36,6 +52,38 @@ from quant.contracts.constants import (
 
 logger = logging.getLogger(__name__)
 
+_DIRECTIONS = ("LONG", "SHORT")
+
+# Canonical absorption -> trade direction mapping. Passive sellers absorbed
+# means a hidden BUYER is present (bullish); passive buyers absorbed means a
+# hidden SELLER is present (bearish). This is the single source of truth — the
+# same mapping was previously written inline in five places, two of which
+# contradicted each other.
+_ABSORPTION_DIRECTION = {
+    "SELL_ABSORBED": "LONG",
+    "BUY_ABSORBED": "SHORT",
+}
+
+
+def canonical_absorption_direction(absorption_side: Optional[str]) -> Optional[str]:
+    """Return the trade direction that an absorption reading supports.
+
+    ``None`` when the side is absent or unrecognised (unknown provenance).
+    """
+    if not absorption_side:
+        return None
+    return _ABSORPTION_DIRECTION.get(str(absorption_side).strip().upper())
+
+
+def _is_directional(direction: Optional[str]) -> bool:
+    return bool(direction) and str(direction).strip().upper() in _DIRECTIONS
+
+
+def _opposes_signed(value: Optional[float], direction: str) -> bool:
+    """True only when a signed value points the OPPOSITE way to ``direction``."""
+    pointed = direction_of_signed(value)
+    return pointed is not None and pointed != direction
+
 
 @dataclass
 class AggressionResult:
@@ -46,6 +94,8 @@ class AggressionResult:
     pyramid_eligible: bool  # score ≥ PYRAMID_AGGRESSION_SCORE (3.0)
     confidence: str  # "HIGH" | "MEDIUM" | "LOW"
     breakdown: dict  # Individual signal contributions
+    direction: Optional[str] = None  # asserted trade direction, if any
+    direction_opposed: bool = False  # net delta slope opposed -> score clamped
 
 
 class AggressionScorer:
@@ -74,21 +124,34 @@ class AggressionScorer:
         ofi_aligned: bool = False,
         confluence_bonus: bool = False,
         volume_bubble_near: bool = False,
+        direction: Optional[str] = None,
+        cvd_slope: Optional[float] = None,
+        ofi: Optional[float] = None,
+        norm_delta: Optional[float] = None,
+        absorption_side: Optional[str] = None,
     ) -> AggressionResult:
-        """Compute additive aggression score from individual signals.
+        """Compute the aggression score from individual signals.
 
-        Returns AggressionResult with score, confidence, and breakdown.
+        Without ``direction`` this is the legacy additive FR-06 score. With a
+        ``direction`` of LONG/SHORT, signed components must agree with it and an
+        opposing net delta slope clamps the result to 0.0.
         """
+        asserted = str(direction).strip().upper() if _is_directional(direction) else None
+        gated = asserted is not None
         total = 0.0
         breakdown = {}
 
-        if footprint_confirmed:
+        # Footprint delta (signed): opposing aggression is not credit.
+        if footprint_confirmed and not (gated and _opposes_signed(norm_delta, asserted)):
             total += AGGRESSION_FOOTPRINT
             breakdown["footprint"] = AGGRESSION_FOOTPRINT
         else:
             breakdown["footprint"] = 0.0
 
-        if cvd_confirmed:
+        # Net delta slope (signed). Opposing slope both zeroes this component
+        # and triggers the hard clamp below.
+        slope_opposed = gated and _opposes_signed(cvd_slope, asserted)
+        if cvd_confirmed and not slope_opposed:
             total += AGGRESSION_CVD
             breakdown["cvd"] = AGGRESSION_CVD
         else:
@@ -100,13 +163,23 @@ class AggressionScorer:
         else:
             breakdown["big_trade"] = 0.0
 
-        if absorption_detected:
+        # Absorption (signed via its side). Under an asserted direction an
+        # unreadable side is unknown provenance, not evidence — no credit.
+        if gated:
+            absorption_ok = (
+                absorption_detected
+                and canonical_absorption_direction(absorption_side) == asserted
+            )
+        else:
+            absorption_ok = absorption_detected
+        if absorption_ok:
             total += AGGRESSION_ABSORPTION
             breakdown["absorption"] = AGGRESSION_ABSORPTION
         else:
             breakdown["absorption"] = 0.0
 
-        if ofi_aligned:
+        # Order Flow Imbalance (signed)
+        if ofi_aligned and not (gated and _opposes_signed(ofi, asserted)):
             total += AGGRESSION_OFI
             breakdown["ofi"] = AGGRESSION_OFI
         else:
@@ -127,6 +200,11 @@ class AggressionScorer:
         # Cap at 4.5 (plan FR-06 max)
         total = min(total, 4.5)
 
+        # v6.0 hard clamp: flow pointing the other way voids the score entirely,
+        # however much activity was counted.
+        if slope_opposed:
+            total = 0.0
+
         # Confidence classification (configurable thresholds)
         if total >= self._pyramid_score:
             confidence = "HIGH"
@@ -141,6 +219,8 @@ class AggressionScorer:
             pyramid_eligible=total >= self._pyramid_score,
             confidence=confidence,
             breakdown=breakdown,
+            direction=asserted,
+            direction_opposed=slope_opposed,
         )
 
     @staticmethod
@@ -215,11 +295,17 @@ class PersistentAggressionScorer:
         ofi_aligned: bool = False,
         confluence_bonus: bool = False,
         volume_bubble_near: bool = False,
+        direction: Optional[str] = None,
+        cvd_slope: Optional[float] = None,
+        ofi: Optional[float] = None,
+        norm_delta: Optional[float] = None,
+        absorption_side: Optional[str] = None,
     ) -> AggressionResult:
         """Compute aggression score with persistence filter.
 
         Raw score is computed each bar. Confirmed/pyramid flags require
-        the raw score to be above threshold for N consecutive bars.
+        the raw score to be above threshold for N consecutive bars. Directional
+        inputs are forwarded so an opposing climax can never build a streak.
         """
         raw_result = self._scorer.score(
             footprint_confirmed=footprint_confirmed,
@@ -229,6 +315,11 @@ class PersistentAggressionScorer:
             ofi_aligned=ofi_aligned,
             confluence_bonus=confluence_bonus,
             volume_bubble_near=volume_bubble_near,
+            direction=direction,
+            cvd_slope=cvd_slope,
+            ofi=ofi,
+            norm_delta=norm_delta,
+            absorption_side=absorption_side,
         )
 
         self._raw_score_history.append(raw_result.score)
@@ -261,6 +352,8 @@ class PersistentAggressionScorer:
             pyramid_eligible=pyramid_eligible,
             confidence=confidence,
             breakdown=raw_result.breakdown,
+            direction=raw_result.direction,
+            direction_opposed=raw_result.direction_opposed,
         )
 
     @property

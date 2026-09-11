@@ -1,4 +1,4 @@
-# v5-of-glassytrade-ai — kanban digest (2026-09-09T17:37:56Z)
+# v5-of-glassytrade-ai — kanban digest (2026-09-11T09:43:01Z)
 
 ## Work in progress
 - none
@@ -13,7 +13,7 @@
 - none
 
 ## Tests
-- last pytest run: 46 failing (as of 2026-09-09T14:37:21Z)
+- last pytest run: 49 failing (as of 2026-09-11T09:42:46Z)
   - backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_balance_updates_on_close
   - backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_closes_on_stop_loss
   - backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_closes_on_take_profit
@@ -25,46 +25,26 @@
   - backend/tests/unit/domain/test_audit_fixes.py::TestSlippageModel::test_long_exit_slippage_adverse
   - brokers/broker/dhan/tests/test_integration.py::TestLiveIntegration::test_live_get_funds
   - brokers/broker/dhan/tests/test_integration.py::TestLiveIntegration::test_live_get_positions
-  - runtime_audit/backend/test_phase2_leaf.py
-  - runtime_audit/backend/test_phase2_leaf.py::test_bar_aggregator_ohlc_vwap_delta
-  - runtime_audit/backend/test_phase2_leaf.py::test_phantom_auction_state_breakage
   - tests/quant/amt/market/test_break.py::TestCheckIbBreakTick::test_sticky_down
-  - … +31 more
+  - tests/quant/amt/market/test_break.py::TestCheckIbBreakTick::test_sticky_up
+  - tests/quant/amt/session/test_scanner_timesfm.py::test_timesfm_strategy_model_momentum_entry
+  - tests/quant/amt/session/test_symbol_registry.py::TestSymbolRegistry::test_unknown_defaults_to_mcx
+  - … +34 more
 
 ## Drift since previous scan
-- added: backend/journals/2026-09-09_BANKNIFTY 29 SEP 56500 CALL.jsonl
-- added: backend/journals/2026-09-09_CRUDEOIL 17 SEP 8700 CALL.jsonl
-- added: backend/journals/2026-09-09_FINNIFTY 29 SEP 25400 CALL.jsonl
-- added: backend/journals/2026-09-09_FINNIFTY 29 SEP 25400 PUT.jsonl
-- added: backend/tests/conftest_harness.py
-- added: backend/tests/runtime_validation/test_phase1_comprehensive.py
-- added: docs/superpowers/plans/2026-09-09-golden-nondeterminism-isolation-plan.md
-- added: frontend/tests/setup_harness.ts
-- modified: backend/.active_contracts.json
-- modified: backend/.session_levels.json
 - modified: backend/backend.log
-- modified: backend/backend_e2e.log
-- modified: backend/glassytrade.db
-- modified: backend/glassytrade.db-shm
-- modified: backend/glassytrade.db-wal
-- modified: backend/journals/2026-09-09_BANKNIFTY SEP FUT.jsonl
-- modified: backend/journals/2026-09-09_CRUDEOIL 17 SEP 8750 PUT.jsonl
-- modified: backend/journals/2026-09-09_CRUDEOIL 17 SEP 8800 CALL.jsonl
-- modified: backend/journals/2026-09-09_CRUDEOIL 17 SEP 8800 PUT.jsonl
-- modified: backend/journals/2026-09-09_CRUDEOIL 17 SEP 8850 CALL.jsonl
-- … +30 more
 
 ## Recent commits
-- ef6559b2 test: isolate golden decisions from runtime mode
-- 5dcecbca docs: plan golden nondeterminism isolation
-- e37b5a37 feat: add trade intent and executable risk boundaries
-- a3740614 feat: enrich forecast snapshots for shared strategy forecasts
-- 6133e180 feat: add cached forecast provider boundary
-- 107a5d0b feat: add explicit model status and strategy mode contracts
-- fa8e954e docs: plan TimesFM compatibility facade rollout
-- 6a523567 docs: specify TimesFM compatibility facade architecture
+- 2d74fe94 refactor: isolate paper event persistence health
+- ad4c9cd7 Add versioned immutable snapshot envelope
+- d0fdfe17 feat: add canonical execution vocabulary and state machine
+- 366c1a3a docs: capture approved refactoring baseline
+- 8af8542a docs: add design-level refactoring specification
+- fe2f3065 feat: harden paper timeout and persistence recovery
+- e75fc98d Implement paper restart exposure reconciliation
+- 7db4376c test: add Indian paper trading acceptance vectors
 
-(49 uncommitted changes in working tree)
+(10 uncommitted changes in working tree)
 
 ## Architecture & components
 - none
@@ -73,18 +53,18 @@
 - none
 
 ## Knowledge graph (graphify)
-- 13424 nodes · 30539 edges · 511 communities (built 2026-09-07T03:37:04Z)
-- STALE (102 modified, 10 deleted, 9863 new since build) — refresh with `/graphify update`
-  - modified: backend/app/api/routers/health.py
-  - modified: backend/app/application/di/composition_root.py
-  - modified: backend/app/config_models/__init__.py
-  - modified: backend/app/config_models/loader.py
-  - modified: backend/app/config_models/validator.py
-  - modified: backend/app/infrastructure/adapters/dhan_adapter.py
-  - modified: backend/app/infrastructure/adapters/dhan_broker_adapter.py
-  - modified: backend/app/infrastructure/adapters/paper_broker.py
-  - modified: backend/app/infrastructure/storage/database.py
-  - modified: backend/tests/integration/test_frontend_integration.py
+- 15223 nodes · 34414 edges · 560 communities (built 2026-09-11T06:48:32Z)
+- STALE (11 modified, 8 deleted, 9804 new since build) — refresh with `/graphify update`
+  - modified: backend/app/api/routers/market.py
+  - modified: brokers/broker/dhan/application/broker.py
+  - modified: brokers/broker/dhan/application/services/streaming_service.py
+  - modified: quant/contracts/vocabulary.py
+  - modified: quant/decision/timesfm_agents.py
+  - modified: quant/execution/oms.py
+  - modified: quant/execution/paper_simulator.py
+  - modified: quant/runtime.py
+  - modified: quant/ws_contract.py
+  - modified: start.sh
 - AUTO-REFRESH: run `/graphify update` now, then re-run `kanban.py update` to refresh this digest.
 
 ## Data / execution flows

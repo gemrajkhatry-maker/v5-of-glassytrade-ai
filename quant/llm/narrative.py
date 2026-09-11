@@ -43,6 +43,9 @@ Rule = Tuple[
     str, Callable[[DecisionContext], bool], Callable[[DecisionContext], Dict[str, Any]]
 ]
 
+# Proximity tolerance for take-profit advisory predicate (0.2%).
+TP_TOUCH_TOLERANCE_PCT: float = 0.002
+
 
 def _px(c: DecisionContext) -> float:
     return c.bar.close if c.bar else 0.0

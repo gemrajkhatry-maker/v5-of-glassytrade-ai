@@ -202,7 +202,11 @@ class PositionManager:
                                       *self._exits.stop_state(position))
 
         if exit_dec.should_exit:
-            if exit_dec.partial_fraction is not None and exit_dec.partial_fraction < 1.0:
+            if (
+                exit_dec.partial_fraction is not None
+                and exit_dec.partial_fraction < 1.0
+                and self._get_lots(position) >= 2
+            ):
                 partial_fill, remaining = self._oms.close_partial(
                     position, exit_dec.partial_fraction, exit_dec.close_price,
                     bar.time, exit_dec.reason,
@@ -384,9 +388,14 @@ class PositionManager:
                     # final TP2 touch books a partial (below); at tier>=2 raw
                     # profit ticks do nothing to the runner.
                     if tier == 1 and tp2_target > 0 and tick_price >= tp2_target:
-                        return self._book_tick_tp2_partial(
-                            position, float(tick_price), tick_time,
+                        if self._get_lots(position) >= 2:
+                            return self._book_tick_tp2_partial(
+                                position, float(tick_price), tick_time,
+                            )
+                        self._execute_full_close(
+                            position, ExitDecision(True, "TP2", float(tick_price)), tick_time,
                         )
+                        return None
                     return position          # runner keeps running
                 return self._tick_tp_touch(position, float(tick_price), tick_time)
         else:
@@ -404,9 +413,14 @@ class PositionManager:
                 if tier >= 1:
                     # Short mirror of the long-side TP2/tier>=2 handling above.
                     if tier == 1 and tp2_target > 0 and tick_price <= tp2_target:
-                        return self._book_tick_tp2_partial(
-                            position, float(tick_price), tick_time,
+                        if self._get_lots(position) >= 2:
+                            return self._book_tick_tp2_partial(
+                                position, float(tick_price), tick_time,
+                            )
+                        self._execute_full_close(
+                            position, ExitDecision(True, "TP2", float(tick_price)), tick_time,
                         )
+                        return None
                     return position          # runner keeps running
                 return self._tick_tp_touch(position, float(tick_price), tick_time)
 
@@ -424,7 +438,7 @@ class PositionManager:
         Falls through to a full close only for the size<2 degenerate case."""
         tier = self._exits._tp_tier.get(position._id, 0)
         entry = float(position.order.signal.entry)
-        if tier == 0 and abs(position.size) >= 2:
+        if tier == 0 and self._get_lots(position) >= 2:
             dec = ExitDecision(True, "TP1", px)
             partial_fill, remaining = self._oms.close_partial(
                 position, 0.5, px, ts, dec.reason,
@@ -459,6 +473,9 @@ class PositionManager:
         manage_exit's partial branch; unlike TP1 this does NOT re-arm BE (the
         bar path only arms BE at TP1, and tier==1 implies BE already armed).
         The survivor thereafter has no tick-level profit exits at all."""
+        if self._get_lots(position) < 2:
+            self._execute_full_close(position, ExitDecision(True, "TP2", px), ts)
+            return None
         dec = ExitDecision(True, "TP2", px)
         partial_fill, remaining = self._oms.close_partial(
             position, 0.5, px, ts, dec.reason,
