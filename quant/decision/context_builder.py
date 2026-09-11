@@ -155,15 +155,9 @@ class DecisionContextBuilder:
 
     @staticmethod
     def _nearest_leg_lvn(amt_dto: dict, close_px: float) -> float:
-        """Derive nearest leg LVN from legLvns list or legLvn float."""
-        leg_lvns_raw = amt_dto.get("legLvns")
-        if isinstance(leg_lvns_raw, (list, tuple)) and leg_lvns_raw:
-            valid_lvns = [float(x) for x in leg_lvns_raw if float(x) > 0]
-            if valid_lvns:
-                return min(valid_lvns, key=lambda x: abs(x - close_px))
-        if amt_dto.get("legLvn"):
-            return float(amt_dto.get("legLvn"))
-        return 0.0
+        """Compatibility wrapper around the canonical LVN resolver."""
+        from quant.amt.profile.leg_lvn import resolve_leg_lvn
+        return resolve_leg_lvn(amt_dto, close_px).level
 
     def _build_setup_evidence(self, amt_dto: dict, agent_direction: str | None,
                               nearest_leg_lvn: float) -> object | None:
