@@ -28,12 +28,17 @@ class PaperOMS:
         simulator: PaperExecutionSimulator | None = None,
         contract: ContractRef | None = None,
         quote_provider=None,
+        max_close_retries: int = 2,
     ) -> None:
         self._lot_size = lot_size
         self._simulator = simulator
         self._contract = contract
         self._quote_provider = quote_provider
         self.last_fill: PaperFill | None = None
+        if max_close_retries < 0:
+            raise ValueError("max_close_retries must be non-negative")
+        self._max_close_retries = int(max_close_retries)
+        self.close_attempts: dict[str, int] = {}
 
     def _quote(self) -> tuple[float, float]:
         """Return the current executable bid/ask, or an invalid quote.
@@ -102,15 +107,36 @@ class PaperOMS:
             # The economic close identity must not include retry-varying time.
             # Re-submitting the same position/reason returns the original fill.
             close_order_id = f"close:{position.id}:{reason}"
-            paper_fill = self._simulator.submit(
-                order_id=close_order_id,
-                contract=self._contract,
-                side="SELL" if position.size > 0 else "BUY",
-                quantity=int(abs(position.size)),
-                reference_price=price,
-                bid=self._quote()[0],
-                ask=self._quote()[1],
-            )
+            attempts = 0
+            while True:
+                attempts += 1
+                self.close_attempts[close_order_id] = max(
+                    attempts, self.close_attempts.get(close_order_id, 0)
+                )
+                try:
+                    paper_fill = self._simulator.submit(
+                        order_id=close_order_id,
+                        contract=self._contract,
+                        side="SELL" if position.size > 0 else "BUY",
+                        quantity=int(abs(position.size)),
+                        reference_price=price,
+                        bid=self._quote()[0],
+                        ask=self._quote()[1],
+                    )
+                    break
+                except TimeoutError:
+                    if attempts > self._max_close_retries:
+                        paper_fill = self._simulator.submit(
+                            order_id=close_order_id,
+                            contract=self._contract,
+                            side="SELL" if position.size > 0 else "BUY",
+                            quantity=int(abs(position.size)),
+                            reference_price=price,
+                            bid=self._quote()[0],
+                            ask=self._quote()[1],
+                            allow_timeout=False,
+                        )
+                        break
             self.last_fill = paper_fill
             gross = (paper_fill.fill_price - position.open_price) * position.size
             entry_costs = position.entry_costs.total if position.entry_costs is not None else 0.0

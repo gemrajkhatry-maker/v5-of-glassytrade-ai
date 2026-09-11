@@ -48,6 +48,7 @@ class PaperExecutionSimulator:
         sebi_pct: float = 0.000001,
         fill_ratio: float = 1.0,
         order_mode: str = "FILL",
+        timeout_attempts: int = 0,
     ) -> None:
         if fill_mode not in {"instant_mid", "bid_ask"}:
             raise ValueError(f"unsupported paper fill mode: {fill_mode}")
@@ -55,9 +56,12 @@ class PaperExecutionSimulator:
             raise ValueError("paper fill_ratio must be in (0, 1]")
         if str(order_mode).upper() not in {"FILL", "REJECT"}:
             raise ValueError("unsupported paper order mode")
+        if int(timeout_attempts) < 0:
+            raise ValueError("paper timeout_attempts must be non-negative")
         self.fill_mode = fill_mode
         self.fill_ratio = float(fill_ratio)
         self.order_mode = str(order_mode).upper()
+        self.timeout_attempts = int(timeout_attempts)
         self.slippage_bps = float(slippage_bps)
         self._stt_pct = float(stt_pct)
         self._exchange_fee_pct = float(exchange_fee_pct)
@@ -140,6 +144,7 @@ class PaperExecutionSimulator:
         reference_price: float,
         bid: float = 0.0,
         ask: float = 0.0,
+        allow_timeout: bool = True,
     ) -> PaperFill:
         if not order_id:
             raise ValueError("paper order_id is required")
@@ -152,6 +157,9 @@ class PaperExecutionSimulator:
             raise ValueError("paper reference_price must be positive")
 
         resolved = self._resolver.resolve(contract)
+        if allow_timeout and self.timeout_attempts:
+            self.timeout_attempts -= 1
+            raise TimeoutError(f"paper order timed out: {order_id}")
         if self.order_mode == "REJECT":
             raise RuntimeError(f"paper order rejected: {order_id}")
 

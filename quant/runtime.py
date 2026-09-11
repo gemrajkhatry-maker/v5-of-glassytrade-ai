@@ -374,6 +374,13 @@ class QuantEngine:
         
         # Event sourcing: EventStore is the source of truth
         self.event_store = EventStore()
+        # Paper execution must stop pretending persistence is healthy after a
+        # side effect has escaped the event store. These markers are deliberately
+        # runtime-local and do not alter broker-facing behavior.
+        self.persistence_degraded = False
+        self.reconciliation_required = False
+        self.persistence_failure: Exception | None = None
+        self._is_paper_runtime = os.environ.get("GLASSYTRADE_ENV", "paper").strip().lower() == "paper"
         # State is derived from events (cached for performance)
         self.state = EngineState(symbol=symbol)
         from quant.execution.exposure import ExposureState
@@ -1764,7 +1771,19 @@ class QuantEngine:
             # the reconcile layer re-syncs event-sourced drift on startup.
             try:
                 self.event_store.append(event)
-            except Exception:
+            except Exception as exc:
+                if self._is_paper_runtime:
+                    self.persistence_degraded = True
+                    self.reconciliation_required = True
+                    self.persistence_failure = exc
+                if self._is_paper_runtime:
+                    from quant.execution.exposure import ExposureStatus, ExposureState
+                    if self.exposure_state.status is ExposureStatus.NONE:
+                        self.exposure_state = ExposureState(
+                            status=ExposureStatus.RECONCILIATION_REQUIRED,
+                            symbol=self.symbol,
+                            order_id=f"event-store:{type(event).__name__}",
+                        )
                 logger.critical(
                     "⚠️ [EVENT SOURCING] %s: append failed for %s — event NOT "
                     "recorded in the store; state may drift (reconciliation "
