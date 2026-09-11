@@ -13,10 +13,25 @@ with this schema.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
 from quant.contracts.aggregates import INITIAL_CAPITAL
+
+
+@dataclass(frozen=True)
+class SnapshotEnvelope:
+    """Versioned, immutable transport envelope for API and WebSocket snapshots."""
+
+    snapshot: dict[str, Any]
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "snapshot", deepcopy(self.snapshot))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"version": self.version, "snapshot": deepcopy(self.snapshot)}
 
 
 @dataclass(frozen=True)

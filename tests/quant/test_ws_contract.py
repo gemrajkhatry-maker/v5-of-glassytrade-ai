@@ -16,6 +16,7 @@ from quant.ws_contract import (
     WSPortfolio,
     WSAgentDecision,
     validate_ws_snapshot,
+    SnapshotEnvelope,
 )
 from quant.ws_adapter import view_state_to_ws
 from quant.event_store import EventStore
@@ -147,3 +148,29 @@ class TestValidateWsSnapshot:
         missing = validate_ws_snapshot(snapshot)
         assert len(missing) == len(WS_SNAPSHOT_KEYS) - 1
         assert "_symbol" not in missing
+
+
+class TestSnapshotEnvelope:
+    def test_envelope_has_stable_version_and_snapshot(self):
+        snapshot = {"_symbol": "NIFTY", "ltp": 24500.0}
+
+        envelope = SnapshotEnvelope(snapshot)
+
+        assert envelope.version == 1
+        assert envelope.snapshot == snapshot
+
+    def test_envelope_is_immutable_and_defensively_copies_snapshot(self):
+        snapshot = {"_symbol": "NIFTY", "portfolio": {"positions": []}}
+        envelope = SnapshotEnvelope(snapshot)
+
+        snapshot["_symbol"] = "BANKNIFTY"
+        snapshot["portfolio"]["positions"].append({"symbol": "NIFTY"})
+
+        assert envelope.snapshot == {"_symbol": "NIFTY", "portfolio": {"positions": []}}
+        with pytest.raises(AttributeError):
+            envelope.version = 2
+
+    def test_envelope_serializes_versioned_snapshot(self):
+        envelope = SnapshotEnvelope({"_symbol": "NIFTY"})
+
+        assert envelope.to_dict() == {"version": 1, "snapshot": {"_symbol": "NIFTY"}}
