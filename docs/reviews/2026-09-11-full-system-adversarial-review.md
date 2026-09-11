@@ -535,3 +535,11 @@ Implementation is intentionally gated:
 - each task requires a failing adversarial test before implementation;
 - broker-facing workflows require boundary/restart/reconciliation tests rather
   than only unit mocks.
+
+## Live-safety implementation update (2026-09-11)
+
+Added `ExposureState` with `RECONCILIATION_REQUIRED` and an entry guard that
+blocks new decisions while unresolved broker exposure exists (`1db05744`).
+The state contract is tested, but LiveOMS/Dhan partial-fill population and
+restart reconciliation remain the next required step; the guard currently
+provides the safety boundary once a partial exposure is reported.
