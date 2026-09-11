@@ -470,3 +470,11 @@ D-5 and D-16 remediation progressed beyond the original audit:
 - Remote TimesFM has a `use_native_engine=False` contract test.
 - Model-sizing failure counters reset per session and are exposed through metrics; frontend
   runtime-audit fixtures are now tracked under `frontend/tests/fixtures/`.
+
+## Residual producer update (2026-09-11)
+
+D-5 now prefers real tick-footprint bid/ask volume buckets when the accumulator
+has sufficient levels, and falls back to candle-derived buckets with explicit
+`CANDLE_DISTRIBUTED` provenance. Insufficient profiles remain `NO_LVN`; no
+synthetic level is produced. The remaining acceptance requirement is a fresh
+representative replay measurement of LVN availability and pyramid retest rate.

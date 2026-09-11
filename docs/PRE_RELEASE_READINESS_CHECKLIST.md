@@ -230,11 +230,10 @@ Every audit defect is now either fixed or explicitly recorded as an accepted res
   D-12, D-13, D-15, D-16 (contract hardening), D-17, D-18, D-19, D-20, D-21, D-22, D-23, D-24,
   D-25, D-26, D-27, D-28.
 - **Accepted residuals (recorded, not hidden):**
-  - R-D5a: the leg-LVN key, shared resolver, provenance fields, and bounded retest tolerance are fixed;
-    the pyramid producer remains sparse (`leg_lvns` empty on ~95% of sampled windows) because 1m
-    candles rarely produce the >=3 volume buckets the displacement leg needs. The remaining fix
-    requires a representative tick/footprint replay corpus or a deliberate data-granularity change;
-    no synthetic LVN is emitted meanwhile.
+  - R-D5a: the leg-LVN key, shared resolver, provenance fields, bounded retest tolerance, and
+    tick-footprint preference are fixed. The producer now uses real tick footprint buckets when
+    available and candle-derived buckets only as an explicitly-provenanced fallback. No synthetic
+    LVN is emitted; measured availability must be re-baselined on a representative live corpus.
   - D-16 single-state migration is complete through ProtectiveStopState, stateless TimesFM risk,
     position-specific StopMoved, partial-fill preservation, and shared bar/tick resolver. The
     original outer clamp remains as defensive contract hardening; measured inputs do not trigger it.
