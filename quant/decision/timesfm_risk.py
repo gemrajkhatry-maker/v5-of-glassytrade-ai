@@ -42,19 +42,14 @@ class TimesFMRiskAuthority:
         lookback_calibration_window: int = 20,
         rmse_degradation_threshold: float = 0.015,  # 1.5% normalized price error
     ) -> None:
-        # Rolling trailing stops keyed by position ID (UUID)
-        self._trail_stops: Dict[str, float] = {}
-        # Monotonic breakeven tracker keyed by position ID
-        self._is_risk_free: Dict[str, bool] = {}
         # Forecast accuracy tracking: (predicted, actual)
         self._forecast_errors: Deque[float] = collections.deque(maxlen=lookback_calibration_window)
         self._directional_hits: Deque[int] = collections.deque(maxlen=lookback_calibration_window)
         self.rmse_degradation_threshold = rmse_degradation_threshold
 
     def clear_position(self, position_id: str) -> None:
-        """Clean up tracking state when a position is closed."""
-        self._trail_stops.pop(position_id, None)
-        self._is_risk_free.pop(position_id, None)
+        """Compatibility no-op; stop state is owned by ExitEngine."""
+        return None
 
     def update_trailing_stop(
         self,
@@ -71,7 +66,8 @@ class TimesFMRiskAuthority:
             (updated_stop, is_risk_free)
         """
         is_long = side.upper() == "LONG"
-        prior_stop = self._trail_stops.get(position_id, current_sl)
+        # Stateless calculator: ExitEngine supplies the current effective stop.
+        prior_stop = float(current_sl or 0.0)
 
         if is_long:
             # For LONG: ratchet along lower p10 quantile path
@@ -89,11 +85,7 @@ class TimesFMRiskAuthority:
                 new_stop = min(new_stop, current_sl)
             risk_free = new_stop <= entry and new_stop > 0
 
-        self._trail_stops[position_id] = round(new_stop, 2)
-        if risk_free:
-            self._is_risk_free[position_id] = True
-
-        return self._trail_stops[position_id], bool(self._is_risk_free.get(position_id, False))
+        return round(new_stop, 2), bool(risk_free)
 
     def evaluate_exit(
         self,
