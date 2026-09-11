@@ -2,7 +2,7 @@ import { renderHook, act } from '@testing-library/react';
 import { vi } from 'vitest';
 import { useServerTradingSystem } from '../../hooks/useServerTradingSystem';
 import type { ChartConfig } from '../../types';
-import fixtureFrames from '../../../runtime_audit/fixtures/ws_payloads.json';
+import fixtureFrames from '../fixtures/ws_payloads.json';
 
 export const FRAMES = fixtureFrames as Array<Record<string, any>>;
 
