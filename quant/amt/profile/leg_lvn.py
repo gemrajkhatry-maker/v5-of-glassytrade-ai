@@ -34,3 +34,13 @@ def resolve_leg_lvn(amt_dto: dict, close_px: float) -> LegLVNResolution:
     if legacy > 0:
         return LegLVNResolution(level=legacy, available=True, source="legLvn", reason="")
     return LegLVNResolution()
+
+
+def leg_lvn_retest_tolerance(tick_size: float, bucket_width: float, leg_range: float) -> float:
+    """Bounded retest tolerance for a traceable LVN."""
+    tick = max(float(tick_size or 0.0), 0.05)
+    bucket = max(float(bucket_width or 0.0), tick)
+    span = float(leg_range or 0.0)
+    if span <= 0:
+        return round(2.0 * tick, 10)
+    return round(min(max(2.0 * tick, bucket), span * 0.25), 10)

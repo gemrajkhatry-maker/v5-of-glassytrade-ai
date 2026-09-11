@@ -539,8 +539,19 @@ class PositionManager:
 
         price = float(bar.close)
         tick = self._tick_size
-        if abs(price - leg_lvn) > 2.0 * tick:
-            return  # Price not at LVN zone
+        from quant.amt.profile.leg_lvn import leg_lvn_retest_tolerance
+        profile = amt_dto.get("legProfile") or []
+        prices = []
+        for level in profile:
+            try:
+                prices.append(float(level.get("price") if isinstance(level, dict) else level.price))
+            except (AttributeError, TypeError, ValueError):
+                continue
+        bucket_width = abs(prices[1] - prices[0]) if len(prices) > 1 else tick
+        leg_range = abs(max(prices) - min(prices)) if prices else 0.0
+        tolerance = leg_lvn_retest_tolerance(tick, bucket_width, leg_range)
+        if abs(price - leg_lvn) > tolerance:
+            return  # Price not at the traceable LVN retest zone
 
         # Need fresh absorption at the LVN
         absorption_side = amt_dto.get("absorptionSide") or ""
