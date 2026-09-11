@@ -1310,10 +1310,14 @@ class QuantEngine:
                 self._open_trade_risk = 0.0
             return
         paper_fill = getattr(self._oms, "last_fill", None)
-        if (
-            paper_fill is not None
-            and paper_fill.filled_quantity < paper_fill.requested_quantity
-        ):
+        try:
+            _is_partial = (
+                paper_fill is not None
+                and float(paper_fill.filled_quantity) < float(paper_fill.requested_quantity)
+            )
+        except (TypeError, ValueError, AttributeError):
+            _is_partial = False
+        if _is_partial:
             from quant.execution.exposure import ExposureState
             self.exposure_state = self.exposure_state.partial_entry(
                 symbol=self.symbol,

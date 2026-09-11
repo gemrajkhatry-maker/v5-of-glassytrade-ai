@@ -1381,14 +1381,32 @@ class QuantCoordinator:
             logger.debug("Failed computing startup GEX", exc_info=True)
 
     def _compute_timesfm_forecasts(self, roots: list[str]) -> dict[str, Any]:
-        """Compute TimesFM 3.0 forecasts for underlying roots to guide option selection."""
+        """Compute TimesFM 3.0 forecasts for underlying roots to guide option selection.
+
+        Off-path sidecar: disabled by default (``TIMESFM_CONTRACT_SELECTION=false``).
+        When enabled, results are cached for 15 minutes so rotation/startup scans
+        never block the hot path behind a PyTorch forward pass per call.
+        """
         forecasts: dict[str, Any] = {}
         tfm_enabled = (
-            os.getenv("TIMESFM_CONTRACT_SELECTION", "true").strip().lower() in ("1", "true", "yes")
+            os.getenv("TIMESFM_CONTRACT_SELECTION", "false").strip().lower() in ("1", "true", "yes")
             or os.getenv("TIMESFM_ADVISOR_ENABLED", "false").strip().lower() in ("1", "true", "yes")
         )
         if not tfm_enabled:
             return forecasts
+
+        # 15-minute sidecar cache: rotation/startup scans reuse the last
+        # forecast instead of blocking behind one forward pass per call.
+        _now = time.time()
+        _ttl = 900.0
+        try:
+            with self._lock:
+                _cache = getattr(self, "_tfm_forecast_cache", None) or {}
+                _ts = float(getattr(self, "_tfm_forecast_cache_ts", 0.0) or 0.0)
+            if _cache and (_now - _ts) < _ttl and all(r in _cache for r in roots):
+                return {r: _cache[r] for r in roots if r in _cache}
+        except Exception:
+            pass
 
         try:
             from quant.decision.timesfm_engine import (
@@ -1464,6 +1482,15 @@ class QuantCoordinator:
         except Exception as e:
             logger.debug("Failed computing TimesFM forecasts for option selection: %s", e)
 
+        if forecasts:
+            try:
+                with self._lock:
+                    _prev = getattr(self, "_tfm_forecast_cache", None) or {}
+                    _prev.update(forecasts)
+                    self._tfm_forecast_cache = _prev
+                    self._tfm_forecast_cache_ts = time.time()
+            except Exception:
+                pass
         return forecasts
 
 

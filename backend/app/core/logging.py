@@ -2,11 +2,32 @@
 
 import json
 import logging
+import re
 import sys
 from datetime import datetime, timezone
 from typing import Any
 
 from app.core.correlation import get_correlation_id
+
+
+# P1-14: scrub broker tokens/secrets before they reach JSON log aggregators.
+_REDACT_PATTERNS = (
+    re.compile(r"(?i)(dhan_access_token['\"]?\s*[:=]\s*['\"]?)[^'\"\s,}]+"),
+    re.compile(r"(?i)(access_token['\"]?\s*[:=]\s*['\"]?)[^'\"\s,}]+"),
+    re.compile(r"(?i)(authorization['\"]?\s*[:=]\s*['\"]?bearer\s+)[^'\"\s,}]+"),
+    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9\-._~+/=]{8,}"),
+    re.compile(r"(?i)(client_secret|totp_secret|api_secret|api_key|password)['\"]?\s*[:=]\s*['\"]?[^'\"\s,}]+"),
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Replace credential values with ***REDACTED*** (idempotent, best-effort)."""
+    if not isinstance(text, str) or not text:
+        return text
+    redacted = text
+    for pat in _REDACT_PATTERNS:
+        redacted = pat.sub(r"\1***REDACTED***", redacted)
+    return redacted
 
 
 class StructuredFormatter(logging.Formatter):
@@ -18,19 +39,20 @@ class StructuredFormatter(logging.Formatter):
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": redact_secrets(record.getMessage()),
             "correlation_id": get_correlation_id(),
         }
         
         # Add exception info if present
         if record.exc_info:
-            log_data["exception"] = self.formatException(record.exc_info)
+            log_data["exception"] = redact_secrets(self.formatException(record.exc_info))
         
         # Add extra fields
         extra_fields = ["symbol", "phase", "stage", "component", "duration_ms", "error_type"]
         for field in extra_fields:
             if hasattr(record, field):
-                log_data[field] = getattr(record, field)
+                val = getattr(record, field)
+                log_data[field] = redact_secrets(val) if isinstance(val, str) else val
         
         return json.dumps(log_data, default=str)
 
