@@ -9,6 +9,7 @@ owner, one meaning.
 from __future__ import annotations
 
 from quant.contracts.instrument_registry import is_option_contract
+import re
 
 # Absorption semantics (Fabio AMT): absorbed sellers are bullish, absorbed
 # buyers are bearish.
@@ -19,6 +20,18 @@ _BUY_ABSORBED = ("BUY_ABSORBED", "BUY")
 # one must never imply the other.
 _OPENING_PHASES = ("OPENING", "PRE_OPEN", "PRE_MARKET")
 _CLOSING_PHASES = ("CLOSE", "POST_MARKET", "EOD")
+
+
+def extract_underlying(symbol: str) -> str:
+    """Return the canonical root from common futures/options symbol formats."""
+    text = str(symbol or "").upper().strip()
+    if not text:
+        return ""
+    text = re.sub(r"[-_]?(CALL|PUT|CE|PE)$", "", text)
+    text = re.sub(r"[-_]?(FUT|FUTURES)$", "", text)
+    text = re.sub(r"[-_]?(\d{2}[A-Z]{3}\d{2}|\d{6}|\d{8})$", "", text)
+    text = re.sub(r"[-_]?\d+(?:\.\d+)?$", "", text)
+    return re.sub(r"[-_]$", "", text)
 
 
 def absorption_direction(absorption_side: str) -> str | None:
