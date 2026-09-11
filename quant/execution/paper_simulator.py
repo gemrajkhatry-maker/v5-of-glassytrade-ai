@@ -16,6 +16,8 @@ from quant.execution.trade_costs import TradeCosts, compute_fill_costs
 
 class PaperOrderStatus(str, Enum):
     FILLED = "FILLED"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    REJECTED = "REJECTED"
 
 
 @dataclass(frozen=True)
@@ -44,10 +46,18 @@ class PaperExecutionSimulator:
         brokerage_per_order: float = 20.0,
         gst_pct: float = 0.18,
         sebi_pct: float = 0.000001,
+        fill_ratio: float = 1.0,
+        order_mode: str = "FILL",
     ) -> None:
         if fill_mode not in {"instant_mid", "bid_ask"}:
             raise ValueError(f"unsupported paper fill mode: {fill_mode}")
+        if not 0.0 < float(fill_ratio) <= 1.0:
+            raise ValueError("paper fill_ratio must be in (0, 1]")
+        if str(order_mode).upper() not in {"FILL", "REJECT"}:
+            raise ValueError("unsupported paper order mode")
         self.fill_mode = fill_mode
+        self.fill_ratio = float(fill_ratio)
+        self.order_mode = str(order_mode).upper()
         self.slippage_bps = float(slippage_bps)
         self._stt_pct = float(stt_pct)
         self._exchange_fee_pct = float(exchange_fee_pct)
@@ -134,6 +144,9 @@ class PaperExecutionSimulator:
             raise ValueError("paper reference_price must be positive")
 
         resolved = self._resolver.resolve(contract)
+        if self.order_mode == "REJECT":
+            raise RuntimeError(f"paper order rejected: {order_id}")
+
         if order_id in self._fills:
             previous = self._fills[order_id]
             if (
@@ -151,7 +164,11 @@ class PaperExecutionSimulator:
         else:
             fill_price = float(reference_price)
 
-        notional = float(fill_price) * int(quantity)
+        filled_quantity = max(1, int(quantity * self.fill_ratio))
+        if filled_quantity > quantity:
+            filled_quantity = int(quantity)
+        status = PaperOrderStatus.FILLED if filled_quantity == quantity else PaperOrderStatus.PARTIALLY_FILLED
+        notional = float(fill_price) * filled_quantity
         costs = compute_fill_costs(
             notional=notional,
             slippage_bps=self.slippage_bps,
@@ -169,9 +186,9 @@ class PaperExecutionSimulator:
             instrument_key=resolved.instrument_key,
             side=side,
             requested_quantity=int(quantity),
-            filled_quantity=int(quantity),
+            filled_quantity=int(filled_quantity),
             fill_price=float(fill_price),
-            status=PaperOrderStatus.FILLED,
+            status=status,
             costs=costs,
             net_cash_flow=cash_flow - costs.total,
         )
