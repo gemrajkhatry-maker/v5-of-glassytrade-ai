@@ -235,3 +235,19 @@ def test_forecast_path_snaps_to_lots_before_expiry_cut():
     monday = SessionRisk(storage=None, symbol="SYM", day_of_week=0)
     qty_monday = monday.position_size(100.0, 99.0, lot_size=75.0, forecast=fc, side="LONG")
     assert qty_monday == 12487.5
+
+
+def test_model_sizing_failures_reset_with_session():
+    from unittest.mock import patch
+    import quant.decision.timesfm_sizing as sizing
+
+    class Boom:
+        def compute_size(self, **_kwargs):
+            raise RuntimeError("test")
+
+    risk = SessionRisk(storage=None, symbol="SYM", day_of_week=1)
+    with patch.object(sizing, "TimesFMPositionSizer", lambda: Boom()):
+        assert risk.position_size(100.0, 99.0, forecast=object()) == 0.0
+    assert risk.model_sizing_failures == 1
+    risk.reset_session()
+    assert risk.model_sizing_failures == 0

@@ -498,6 +498,7 @@ class SessionRisk:
             self._consecutive_losses = 0
             self._consecutive_wins = 0
             self._trades_today = 0
+            self._model_sizing_failures = 0
             self._halted = False
             self._halt_reason = ""
             self._equity = self._starting_equity
