@@ -478,3 +478,13 @@ has sufficient levels, and falls back to candle-derived buckets with explicit
 `CANDLE_DISTRIBUTED` provenance. Insufficient profiles remain `NO_LVN`; no
 synthetic level is produced. The remaining acceptance requirement is a fresh
 representative replay measurement of LVN availability and pyramid retest rate.
+
+## Residual measurements (2026-09-11)
+
+A scan of 560 available journal files found 39,533 `AmtUpdated` rows. 2,389 rows
+contained at least one `legLvns` value, for a measured availability rate of
+6.04%. The same journal set contained 791 `PositionOpened` events and 0 pyramid
+opens. This confirms the producer remains conservative/sparse rather than
+fabricating levels. `dynamicSizing` has no frontend/API consumer beyond the
+strategy's internal stop/target qualification; its extra telemetry fields remain
+internal until a versioned UI contract is approved.

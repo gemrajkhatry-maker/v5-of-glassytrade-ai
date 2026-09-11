@@ -231,9 +231,11 @@ Every audit defect is now either fixed or explicitly recorded as an accepted res
   D-25, D-26, D-27, D-28.
 - **Accepted residuals (recorded, not hidden):**
   - R-D5a: the leg-LVN key, shared resolver, provenance fields, bounded retest tolerance, and
-    tick-footprint preference are fixed. The producer now uses real tick footprint buckets when
-    available and candle-derived buckets only as an explicitly-provenanced fallback. No synthetic
-    LVN is emitted; measured availability must be re-baselined on a representative live corpus.
+    tick-footprint preference are fixed. Measurement on 560 journals / 39,533 AmtUpdated rows
+    found 2,389 non-empty LVN payloads (6.04%) and 0 pyramid PositionOpened events. The producer
+    uses real tick footprint buckets when available and candle fallback with provenance; no
+    synthetic LVN is emitted. Pyramid approvals remain intentionally sparse until more suitable
+    tick/footprint evidence exists.
   - D-16 single-state migration is complete through ProtectiveStopState, stateless TimesFM risk,
     position-specific StopMoved, partial-fill preservation, and shared bar/tick resolver. The
     original outer clamp remains as defensive contract hardening; measured inputs do not trigger it.
@@ -241,6 +243,9 @@ Every audit defect is now either fixed or explicitly recorded as an accepted res
   - `snap_to_lot` rounds rather than floors, so an expiry half-cut lands ~0.15% over intent.
   - Resolved: the remote TimesFM path now has a `use_native_engine=False` contract test; the client remains intentionally supported.
   - Resolved: the frontend runtime-audit fixture is now tracked at `frontend/tests/fixtures/ws_payloads.json`; the harness no longer depends on an untracked root fixture.
+  - Decision: `dynamicSizing` is retained as internal strategy telemetry because only the strategy
+    consumes its stop/target subset; its nine other fields have no frontend/API consumer. Do not
+    expand this payload until a versioned UI contract is approved.
 
 Two process lessons from this run are recorded in the ledger: a subagent's uncommitted working
 tree can revert prior tasks (verify a "pre-existing failure" claim against git), and combined
