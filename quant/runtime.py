@@ -55,6 +55,7 @@ from quant.decision.decision_service import DecisionService
 from quant.decision.signal_builder import clamp_quantity
 from quant.decision.context_builder import DecisionContextBuilder
 from quant.hotpath import get_hotpath_tracer
+from quant.market_ingestion import MarketIngestionCoordinator
 from quant.position_manager import PositionManager
 from quant.session_gates import (
     bar_epoch_ms as _bar_epoch_ms,
@@ -561,6 +562,17 @@ class QuantEngine:
         # quant.wiring_advisor.build_live_advisor — so backtest/replay
         # constructions stay thread-free and reproducible.
         self._advisor = advisor
+        self._market_ingestion = MarketIngestionCoordinator(
+            gateway, symbol, underlying_gateway,
+            underlying_symbol=self._underlying() if underlying_gateway is not None else None,
+        )
+        from quant.state_projection_coordinator import StateProjectionCoordinator
+        self._state_projection = StateProjectionCoordinator(self)
+
+    @property
+    def state_projection(self):
+        """Read-only state projection facade for transport/coordinator consumers."""
+        return self._state_projection
 
     # =========================================================================
     # 2. TICK PROCESSING — tick ingestion, bar aggregation, AMT updates
@@ -711,12 +723,11 @@ class QuantEngine:
 
     def _run_inner(self, max_steps: int | None = None) -> list[Event]:
         if not self._subscribed:
-            self._gateway.subscribe(self.symbol)
-            self._subscribed = True
+            self._market_ingestion.subscribe()
         if self._underlying_gateway is not None:
             # Fabio Task 8: auction structure belongs on the underlying futures.
             # Subscribe the second feed; its ticks feed AMT via the aggregator.
-            self._underlying_gateway.subscribe(self._underlying())
+            self._market_ingestion.subscribe()
         elif not self._underlying_warned and self._contract_expiry is not None:
             # Option contract with no underlying feed — running AMT on the
             # option's own premium is a fallback, not the faithful setup.
@@ -761,7 +772,7 @@ class QuantEngine:
         while True:
             if max_steps is not None and steps >= max_steps:
                 break
-            tick = self._gateway.next_tick()
+            tick = self._market_ingestion.next_tick()
             if tick is None:
                 break
             steps += 1
@@ -829,7 +840,7 @@ class QuantEngine:
                             self._last_underlying_bar = ubar
                             self._underlying_amt_dto = self._amt_engine.analyze(ubar)
                             self._emit_merged_amt(self._underlying_amt_dto, ubar.time)
-                        utick = self._underlying_gateway.try_next_tick()
+                        utick = self._market_ingestion.try_next_tick()
             else:
                 # Direct instrument / Futures: micro-trigger evaluation
                 if self._micro_aggregator is not None:
