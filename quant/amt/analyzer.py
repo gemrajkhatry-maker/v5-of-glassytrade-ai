@@ -545,7 +545,9 @@ class AMTAnalyzer:
 
         # 2. Market State (4-state model)
         from quant.amt.profile.displacement import detect_displacement_leg as _detect_disp_leg
-        leg_data = _detect_disp_leg(recent_data, self.config)
+        leg_data = _detect_disp_leg(recent_data, self.config, footprints=(
+            footprint_accumulator.get_all() if footprint_accumulator is not None else None
+        ))
         has_displacement = leg_data["has_displacement"]
         has_acceptance = detect_acceptance(recent_data, vah, val)
 

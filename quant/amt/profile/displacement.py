@@ -39,16 +39,13 @@ logger = logging.getLogger(__name__)
 def detect_displacement_leg(
     data: list[OHLC],
     config,
+    footprints: dict | None = None,
 ) -> dict:
-    """Detect displacement and return leg profile data.
-
-    Always builds a leg profile from the most recent directional move
-    (consecutive same-direction candles from the end). The strict displacement
-    flag is set when the move also meets range expansion criteria.
-    """
+    """Detect directional leg; prefer traceable tick footprint buckets."""
     def _leg_result(*, has_displacement: bool, profile: list,
                     lvns: list, poc: float, vah: float, val: float,
-                    swing_delta: float, unavailable_reason: str = "NO_LVN") -> dict:
+                    swing_delta: float, unavailable_reason: str = "NO_LVN",
+                    profile_source: str = "CANDLE_DISTRIBUTED") -> dict:
         return {
             "has_displacement": has_displacement,
             "profile": profile,
@@ -57,7 +54,7 @@ def detect_displacement_leg(
             "vah": vah,
             "val": val,
             "swing_delta": swing_delta,
-            "profile_source": "CANDLE_DISTRIBUTED",
+            "profile_source": profile_source,
             "bucket_count": len(profile),
             "lvn_unavailable_reason": unavailable_reason if not lvns else "",
         }
@@ -89,12 +86,37 @@ def detect_displacement_leg(
         return empty
 
     is_disp = detect_displacement(data, config.DISPLACEMENT_MULTIPLIER)
-    leg_profile = create_profile(leg_candles, buckets=DELTA_PROFILE_BUCKETS)
+    footprint_levels = {}
+    if footprints:
+        for candle in leg_candles:
+            fp = footprints.get(getattr(candle, "time", ""))
+            for level in getattr(fp, "levels", ()) if fp is not None else ():
+                price = float(getattr(level, "price", 0.0) or 0.0)
+                if price <= 0:
+                    continue
+                bid = float(getattr(level, "bid", 0.0) or 0.0)
+                ask = float(getattr(level, "ask", 0.0) or 0.0)
+                current = footprint_levels.setdefault(price, [0.0, 0.0])
+                current[0] += bid
+                current[1] += ask
+    if len(footprint_levels) >= 3:
+        from quant.contracts.value_objects import VolumeProfileLevel
+        leg_profile = [
+            VolumeProfileLevel(price=price, volume=bid + ask,
+                               buy_volume=ask, sell_volume=bid)
+            for price, (bid, ask) in sorted(footprint_levels.items())
+        ]
+        profile_source = "TICK_FOOTPRINT"
+    else:
+        leg_profile = create_profile(leg_candles, buckets=DELTA_PROFILE_BUCKETS)
+        profile_source = "CANDLE_DISTRIBUTED"
     if len(leg_profile) < 3:
         return _leg_result(
             has_displacement=is_disp, profile=leg_profile, lvns=[],
             poc=0.0, vah=0.0, val=0.0,
             swing_delta=sum(c.delta for c in leg_candles),
+            unavailable_reason="INSUFFICIENT_BUCKETS",
+            profile_source=profile_source,
         )
     leg_lvns = find_lvns(leg_profile, config)
 
@@ -160,4 +182,5 @@ def detect_displacement_leg(
         vah=leg_vah,
         val=leg_val,
         swing_delta=sum(c.delta for c in leg_candles),
+        profile_source=profile_source,
     )
