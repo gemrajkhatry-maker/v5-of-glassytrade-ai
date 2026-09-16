@@ -206,6 +206,7 @@ def make_decision_loop(
     advisor: Any = None,
     forecast_fn: Any = None,
     exposure_state: ExposureState | None = None,
+    emit: Any = None,
 ) -> DecisionLoop:
     """Build a DecisionLoop with test-friendly defaults."""
     _bar_index = bar_index
@@ -258,8 +259,10 @@ def make_decision_loop(
             "set_open_trade_risk": _set_open_trade_risk,
             "get_exposure_state": lambda: _exposure_state,
             "set_exposure_state": lambda v: None,
+            "set_entry_time_epoch": lambda v: None,
+            "set_last_rejected_bar_index": lambda: None,
         },
-        emit=lambda event: None,
+        emit=emit or (lambda event: None),
         forecast_fn=forecast_fn,
         advisor=advisor,
     )
@@ -438,8 +441,7 @@ class TestSignalSubmission:
         oms = FakeOMS()
         strategy = FakeStrategy(decision=make_decision())
         emitted: list[Any] = []
-        loop = make_decision_loop(strategy=strategy, oms=oms)
-        loop._emit = emitted.append
+        loop = make_decision_loop(strategy=strategy, oms=oms, emit=emitted.append)
         bar = FakeBar()
 
         loop.evaluate({}, bar)
@@ -452,8 +454,7 @@ class TestSignalSubmission:
         oms = FakeOMS()
         strategy = FakeStrategy(decision=make_decision())
         emitted: list[Any] = []
-        loop = make_decision_loop(strategy=strategy, oms=oms)
-        loop._emit = emitted.append
+        loop = make_decision_loop(strategy=strategy, oms=oms, emit=emitted.append)
         bar = FakeBar()
 
         loop.evaluate({}, bar)
