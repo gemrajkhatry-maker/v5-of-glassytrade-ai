@@ -53,9 +53,6 @@ def detect_breaks(
     live_price: float,
     ib_complete: bool,
     current_break_direction: str,
-    *,
-    detect_break_fn=None,
-    check_ib_break_fn=None,
 ) -> tuple[dict, str]:
     """Detect initiative/responsive breaks and IB breaks.
 

@@ -19,9 +19,7 @@ from dataclasses import dataclass
 
 from quant.contracts.enums import MarketState
 from quant.contracts.constants import (
-    POC_NO_TRADE_TICKS,
     BALANCE_RATIO_THRESHOLD,
-    DISPLACEMENT_MULTIPLIER,
 )
 
 logger = logging.getLogger(__name__)

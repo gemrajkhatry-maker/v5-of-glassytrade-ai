@@ -1,4 +1,4 @@
-"""Triple-A state machine — WAITING → ABSORBING → ACCUMULATING → AGGRESSION.
+"""Triple-A state machine — WAITING ⇄ AGGRESSION.
 
 ``AbsorptionDetector`` already holds the absorb bar pending until a later
 candle closes beyond the cluster (spec §8 aggression). When it pulses
@@ -6,9 +6,10 @@ candle closes beyond the cluster (spec §8 aggression). When it pulses
 This machine records that pulse for one bar, then returns to WAITING so
 Gate 3 cannot sticky-ENTER.
 
-Conviction decays over time: each bar without progress reduces conviction.
-After _STALE_BARS bars with no advancement, conviction hits 0 and the
-machine resets to WAITING — preventing stale setups from being taken.
+``ABSORBING`` / ``ACCUMULATING`` remain part of the phase vocabulary the DTO,
+gates and narrative label against, but the machine never dwells in them: a
+detector-confirmed cluster close means absorption and accumulation have
+already happened, so the pulse *is* the aggression bar.
 """
 
 from __future__ import annotations
@@ -20,9 +21,7 @@ ABSORBING = "ABSORBING"
 ACCUMULATING = "ACCUMULATING"
 AGGRESSION = "AGGRESSION"
 
-_STALE_BARS = 15
-_ACCUM_BARS = 2
-_CONVICTION_DECAY = 0.05  # per bar without progress
+_PULSE_TO_SIGNAL = {"SELL_ABSORBED": "LONG", "BUY_ABSORBED": "SHORT"}
 
 
 @dataclass(frozen=True)
@@ -35,12 +34,11 @@ class TripleASnapshot:
 
 
 class TripleAMachine:
-    """Sequential absorption → accumulation → aggression. Never skip a phase
-    unless the detector already confirmed cluster close (aggression pulse).
+    """Detector-pulse machine: a confirmed absorption cluster close is the
+    Playbook A aggression bar, recorded for exactly one bar.
 
-    Conviction starts at 0, increases on phase advancement, and decays
-    each bar without progress. A setup with decaying conviction will
-    eventually reset to WAITING — preventing stale entries.
+    Only WAITING and AGGRESSION are reachable — the intermediate phases exist
+    as vocabulary for the DTO/gate/narrative labels, not as dwell states.
     """
 
     def __init__(self) -> None:
@@ -48,16 +46,12 @@ class TripleAMachine:
         self._signal = ""
         self._cluster_high = 0.0
         self._cluster_low = 0.0
-        self._bars = 0
-        self._conviction = 0.0
 
     def reset(self) -> None:
         self._phase = WAITING
         self._signal = ""
         self._cluster_high = 0.0
         self._cluster_low = 0.0
-        self._bars = 0
-        self._conviction = 0.0
 
     def snapshot(self) -> TripleASnapshot:
         return TripleASnapshot(
@@ -65,7 +59,7 @@ class TripleAMachine:
             signal=self._signal,
             cluster_high=self._cluster_high,
             cluster_low=self._cluster_low,
-            conviction=self._conviction,
+            conviction=1.0 if self._phase == AGGRESSION else 0.0,
         )
 
     def update(
@@ -78,55 +72,20 @@ class TripleAMachine:
         vwap: float = 0.0,
         cvd_slope: float = 0.0,
     ) -> TripleASnapshot:
+        """Process one closed bar.
+
+        ``close``, ``vwap`` and ``cvd_slope`` are accepted for call-site
+        compatibility with the AMT analyzer; a detector pulse is authoritative
+        and needs no further confirmation.
+        """
+        # A pulse lasts exactly one bar: clear the previous bar's AGGRESSION.
         if self._phase == AGGRESSION:
             self.reset()
 
-        # Detector-confirmed cluster close: this bar is Playbook A aggression.
-        if absorption_side == "SELL_ABSORBED":
+        signal = _PULSE_TO_SIGNAL.get(absorption_side)
+        if signal is not None:
             self._phase = AGGRESSION
-            self._signal = "LONG"
+            self._signal = signal
             self._cluster_high, self._cluster_low = high, low
-            self._conviction = 1.0
-            return self.snapshot()
-        if absorption_side == "BUY_ABSORBED":
-            self._phase = AGGRESSION
-            self._signal = "SHORT"
-            self._cluster_high, self._cluster_low = high, low
-            self._conviction = 1.0
-            return self.snapshot()
-
-        if self._phase == WAITING:
-            return self.snapshot()
-
-        # Unconfirmed path: absorb bar seen via some other feed, wait for close.
-        self._bars += 1
-
-        # Conviction decay: each bar without progress reduces conviction
-        self._conviction = max(0.0, self._conviction - _CONVICTION_DECAY)
-
-        if self._bars > _STALE_BARS or self._conviction <= 0.0:
-            self.reset()
-            return self.snapshot()
-
-        prev_phase = self._phase
-        if self._phase == ABSORBING and self._bars >= _ACCUM_BARS:
-            self._phase = ACCUMULATING
-            self._bars = 0
-            self._conviction = min(1.0, self._conviction + 0.3)
-            return self.snapshot()
-
-        if self._phase == ACCUMULATING:
-            if self._signal == "LONG" and close > self._cluster_high:
-                if (vwap <= 0 or close > vwap) and cvd_slope > -0.2:
-                    self._phase = AGGRESSION
-                    self._conviction = 1.0
-            elif self._signal == "SHORT" and close < self._cluster_low:
-                if (vwap <= 0 or close < vwap) and cvd_slope < 0.2:
-                    self._phase = AGGRESSION
-                    self._conviction = 1.0
-
-        # If phase didn't advance, conviction continues to decay
-        if self._phase == prev_phase:
-            self._conviction = max(0.0, self._conviction - _CONVICTION_DECAY)
 
         return self.snapshot()

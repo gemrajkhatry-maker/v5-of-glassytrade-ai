@@ -8,16 +8,7 @@ from __future__ import annotations
 from quant.contracts.enums import MarketState
 
 import logging
-import time
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-
-from quant.contracts.enums import CushionState, MarketStateCodec
-
-if TYPE_CHECKING:
-    from quant.contracts.entities import Position
-
-from quant.execution.exit_signal import ExitSignal
+from quant.contracts.enums import MarketStateCodec
 
 logger = logging.getLogger(__name__)
 

@@ -9,13 +9,11 @@ to detect acceptance above/below value area and rejection at edges.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
 
 from quant.contracts.candle_metrics import (
     body as calc_body,
-    body_pct,
 )
 
 logger = logging.getLogger(__name__)

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import copy
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
