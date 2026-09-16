@@ -108,7 +108,7 @@ class DecisionLoop:
 
         # --- Dependencies ---
         self._risk = deps["risk"]
-        self._portfolio_risk = deps.get("portfolio_risk")
+        self._get_portfolio_risk = deps.get("get_portfolio_risk", lambda: deps.get("portfolio_risk"))
         self._oms = deps["oms"]
         self._strategy = deps["strategy"]
         self._amt_engine = deps["amt_engine"]
@@ -511,10 +511,11 @@ class DecisionLoop:
                 self._symbol,
             )
             self._latch_or_signal_block(signal, "OMS submit raised — broker/OMS failure", bar.time)
-            if self._portfolio_risk is not None:
+            _pr = self._get_portfolio_risk()
+            if _pr is not None:
                 reserved = self._get_open_trade_risk()
                 if reserved > 0:
-                    self._portfolio_risk.release(reserved, symbol=self._symbol)
+                    _pr.release(reserved, symbol=self._symbol)
                 self._set_open_trade_risk(0.0)
             return
 
@@ -589,14 +590,15 @@ class DecisionLoop:
         Returns True when the trade may proceed; on refusal it latches a
         SignalBlocked and returns False.
         """
-        if self._portfolio_risk is not None:
+        portfolio_risk = self._get_portfolio_risk()
+        if portfolio_risk is not None:
             trade_risk = abs(float(signal.entry) - float(signal.sl)) * max(1.0, quantity)
-            ok, why = self._portfolio_risk.can_accept(trade_risk, symbol=self._symbol)
+            ok, why = portfolio_risk.can_accept(trade_risk, symbol=self._symbol)
             if not ok:
                 self._latch_or_signal_block(signal, why, bar.time)
                 self._set_last_rejected_bar_index()
                 return False
-            if not self._portfolio_risk.register_open(trade_risk, symbol=self._symbol):
+            if not portfolio_risk.register_open(trade_risk, symbol=self._symbol):
                 self._latch_or_signal_block(
                     signal, "portfolio cap breached between can_accept and register", bar.time,
                 )

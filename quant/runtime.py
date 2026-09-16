@@ -163,6 +163,28 @@ _OPTION_SCALE_KEYS = (
 # Safe empty shape for the option-scale keys above (built once at import).
 _EMPTY_AMT_DTO = empty_amt_dto()
 
+
+class _LateBound:
+    """Proxy that forwards attribute access to a dynamically-resolved object.
+
+    Tests (and the coordinator) sometimes replace engine attributes like
+    ``_risk``, ``_strategy``, or ``_oms`` after construction. The DecisionLoop
+    captures deps at creation time, so a direct reference would go stale.
+    This proxy resolves the target on every attribute access, keeping the
+    loop wired to whatever the engine currently holds.
+    """
+    __slots__ = ("_resolver",)
+
+    def __init__(self, resolver):
+        object.__setattr__(self, "_resolver", resolver)
+
+    def __getattr__(self, name):
+        return getattr(self._resolver(), name)
+
+    def __repr__(self):
+        return f"_LateBound({self._resolver()!r})"
+
+
 # _DETERMINISTIC_CONVICTION and _WARMUP_BARS are imported from
 # quant.config.constants (see top-of-file import).
 
@@ -809,11 +831,11 @@ class QuantEngine:
             "max_lots": self._max_lots,
         }
         deps = {
-            "risk": self._risk,
-            "portfolio_risk": self._portfolio_risk,
-            "oms": self._oms,
-            "strategy": self._strategy,
-            "amt_engine": self._amt_engine,
+            "risk": _LateBound(lambda: self._risk),
+            "get_portfolio_risk": lambda: self._portfolio_risk,
+            "oms": _LateBound(lambda: self._oms),
+            "strategy": _LateBound(lambda: self._strategy),
+            "amt_engine": _LateBound(lambda: self._amt_engine),
             "get_position_manager": self._get_position_manager,
             "execution_model": self._execution_model,
             "contract": self._contract,

@@ -17,6 +17,7 @@ Covers:
 from unittest.mock import MagicMock
 import threading
 
+from quant.engine.exit_manager import ExitManager
 from quant.multi_engine import QuantCoordinator
 from quant.runtime import QuantEngine
 
@@ -176,6 +177,27 @@ def _make_engine_stub() -> QuantEngine:
     eng._portfolio_risk = None
     eng._bar_index = 0
     eng._last_close_bar_index = -1
+    # Wire ExitManager for delegated exit methods
+    eng._exit_manager = ExitManager(
+        config={"symbol": "NIFTY SEP FUT", "market": "NSE"},
+        deps={
+            "get_position_manager": eng._get_position_manager,
+            "portfolio_risk": None,
+            "strategy": MagicMock(),
+            "amt_engine": MagicMock(),
+            "aggregator": eng._aggregator,
+            "close_lock": eng._close_lock,
+        },
+        state={
+            "get_bar_index": lambda: eng._bar_index,
+            "get_entry_bar_index": lambda: 0,
+            "get_last_close_bar_index": lambda: eng._last_close_bar_index,
+            "set_last_close_bar_index": lambda v: setattr(eng, "_last_close_bar_index", v),
+            "get_state": lambda: eng.state,
+            "set_state": lambda s: setattr(eng, "state", s),
+        },
+        emit=lambda e: None,
+    )
     return eng
 
 
