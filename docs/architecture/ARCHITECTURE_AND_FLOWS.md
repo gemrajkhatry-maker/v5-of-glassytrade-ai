@@ -303,10 +303,10 @@ Every trading decision must pass through a strict, sequential gating sequence ex
 ```
 
 ### The 4 Canonical Gates:
-1. **Gate 1: Session Phase & Spread Gate** (`quant/decision/gates_session_position.py`):
-   - Validates that the exchange clock is within the active trading session. Rejects during opening 15-minute price discovery noise (09:00–09:15 MCX) and pre-close square-off windows.
-   - Enforces bid-ask spread limits (`max_spread_pts`) to prevent executing on illiquid option strikes.
-2. **Gate 2: Position & Cooldown Gate** (`quant/decision/gates_session_position.py`):
+1. **Gate 1: Session Phase & Spread Gate** (`quant/decision/gates/gate_session_phase.py`):
+   - Validates that the exchange clock is inside the active window: NSE 09:30–15:15 IST, MCX 09:15–23:15 IST (opening blackouts included).
+   - Enforces bid-ask spread limits (`max(2× tick, 0.1% of price, ₹0.40)`) to prevent executing on illiquid option strikes.
+2. **Gate 2: Position & Cooldown Gate** (`quant/decision/gates/gate_position_cooldown.py`):
    - Enforces the rule: *One position per contract at any time*.
    - Requires a minimum bar cooldown after trade exit (default 2 bars) to prevent immediate emotional whipsaw re-entries.
    - Exception: Skipped if `allow_positioned=True` during thesis-flip emergency reversals.

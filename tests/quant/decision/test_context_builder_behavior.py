@@ -170,7 +170,7 @@ def test_context_builder_populates_bid_ask_from_order_book():
 
 def test_gate1_rejects_wide_spread():
     from quant.contracts.value_objects import OrderBook, OrderBookLevel
-    from quant.decision.gates_session_position import gate_session_phase
+    from quant.decision.gates import gate_session_phase
 
     ob = OrderBook(bids=(OrderBookLevel(100.0, 10.0),), asks=(OrderBookLevel(101.0, 10.0),))
     ctx = DecisionContextBuilder().build(

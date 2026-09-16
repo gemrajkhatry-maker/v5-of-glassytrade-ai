@@ -16,7 +16,7 @@ from quant.amt.session.context import get_session_info
 from quant.contracts.enums import MarketState
 from quant.decision.context import DecisionContext
 from quant.decision.gates_edge import gate_triple_a_edge
-from quant.decision.gates_session_position import gate_session_phase
+from quant.decision.gates import gate_session_phase
 from quant.decision.result import GateResult  # noqa: F401  (re-export check)
 from quant.decision.setup_state import SetupEvidence
 
