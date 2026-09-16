@@ -890,13 +890,13 @@ class QuantEngine:
         deps = {
             "get_position_manager": self._get_position_manager,
             "get_portfolio_risk": lambda: self._portfolio_risk,
-            "strategy": self._strategy,
-            "amt_engine": self._amt_engine,
+            "strategy": _LateBound(lambda: self._strategy),
+            "amt_engine": _LateBound(lambda: self._amt_engine),
             "aggregator": self._aggregator,
             "get_underlying_symbol": self._underlying if self._underlying_gateway is not None else None,
             "close_lock": self._close_lock,
             "underlying_gateway": self._underlying_gateway,
-            "risk": self._risk,
+            "risk": _LateBound(lambda: self._risk),
         }
         state = {
             "get_bar_index": lambda: self._bar_index,

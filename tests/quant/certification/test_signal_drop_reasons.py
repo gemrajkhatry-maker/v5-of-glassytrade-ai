@@ -10,14 +10,37 @@ from quant.decision.decision_service import DecisionService
 from quant.decision.signal_builder import SignalBuilder
 
 
-def _bar(close=100.0):
-    return Bar(time="t", open=close, high=close + 1.0, low=close - 1.0, close=close, volume=100.0)
+def _bar(close=100.0, open_offset=0.0):
+    """Create a bar with optional open offset for body.
+    
+    For LONG direction, we need close > open (bullish body).
+    Default creates a doji (open=close) which fails candle acceptance.
+    """
+    open_px = close + open_offset
+    high = max(open_px, close) + 1.0
+    low = min(open_px, close) - 1.0
+    return Bar(time="t", open=open_px, high=high, low=low, close=close, volume=100.0)
 
 
 @pytest.fixture
 def minimal_ctx_factory():
     def _factory(entry=100.0, anchor_distance_pct=None, inverted=False):
-        bar = _bar(close=entry)
+        # Create a strong bullish candle to pass Gate 3 candle acceptance:
+        # - Body must be >= 60% of range (full body min ratio)
+        # - Close must be in outer 25% of range (near the high for LONG)
+        # Example: open=98, close=100, high=100.5, low=97.5
+        #   body = 2, span = 3, body_ratio = 67% ✓
+        #   (close - low) / span = 2.5 / 3 = 83% ✓
+        bar = _bar(close=entry, open_offset=-2.0)  # open=98, close=100
+        # Adjust high/low to make close near the high
+        bar = Bar(
+            time="t",
+            open=entry - 2.0,  # 98
+            high=entry + 0.5,  # 100.5
+            low=entry - 2.5,   # 97.5
+            close=entry,       # 100
+            volume=100.0,
+        )
         if anchor_distance_pct is not None:
             # razor stop: VAL very close to entry so is_stop_too_thin triggers
             # e.g. 0.01% on 100 => val 99.99 => sl 99.95 => distance 0.05 < 0.1 => thin
