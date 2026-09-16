@@ -530,18 +530,9 @@ class QuantEngine:
             self._journal = Journal(path=journal_path)
             self._journal_subscribed = True
 
-            def _journal_subscriber(event: Event) -> None:
-                self._journal.append(
-                    {"type": event.__class__.__name__, **asdict(event)}
-                )
-
-            for evt_type in (BarClosed, DecisionProduced,
-                             SignalApproved, SignalBlocked,
-                             PositionOpened, PositionClosed,
-                             PositionReduced,
-                             RiskUpdated, DepthUpdated, AmtUpdated,
-                             OrderSubmitted, OrderFilled, StopMoved):
-                self._bus.subscribe(evt_type, _journal_subscriber,
+            journal_subscriber = self._create_journal_subscriber()
+            for evt_type in self._get_journal_event_types():
+                self._bus.subscribe(evt_type, journal_subscriber,
                                     priority=-100)
         else:
             self._pending_journal_path = None
@@ -614,6 +605,34 @@ class QuantEngine:
             self._crashed = True
             raise
 
+    def _create_journal_subscriber(self) -> callable:
+        """Create a journal subscriber closure that writes events to the journal.
+        
+        This is a single source of truth for the journal subscriber logic,
+        used by both __init__() and attach_journal() to avoid duplication.
+        
+        Returns:
+            A callable that accepts an Event and writes it to the journal.
+        """
+        def _journal_subscriber(event: Event) -> None:
+            self._journal.append(
+                {"type": event.__class__.__name__, **asdict(event)}
+            )
+        return _journal_subscriber
+
+    def _get_journal_event_types(self) -> tuple:
+        """Return the event types that should be journaled.
+        
+        Single source of truth for the list of event types that get written
+        to the journal. Used by both __init__() and attach_journal().
+        """
+        return (BarClosed, DecisionProduced,
+                SignalApproved, SignalBlocked,
+                PositionOpened, PositionClosed,
+                PositionReduced,
+                RiskUpdated, DepthUpdated, AmtUpdated,
+                OrderSubmitted, OrderFilled, StopMoved)
+
     def attach_journal(self, path: str | None = None) -> None:
         """Attach the fsync JSONL event journal and subscribe it to the bus.
 
@@ -636,18 +655,9 @@ class QuantEngine:
             return
         self._journal_subscribed = True
 
-        def _journal_subscriber(event: Event) -> None:
-            self._journal.append(
-                {"type": event.__class__.__name__, **asdict(event)}
-            )
-
-        for evt_type in (BarClosed, DecisionProduced,
-                        SignalApproved, SignalBlocked,
-                        PositionOpened, PositionClosed,
-                        PositionReduced,
-                        RiskUpdated, DepthUpdated, AmtUpdated,
-                        OrderSubmitted, OrderFilled, StopMoved):
-            self._bus.subscribe(evt_type, _journal_subscriber, priority=-100)
+        journal_subscriber = self._create_journal_subscriber()
+        for evt_type in self._get_journal_event_types():
+            self._bus.subscribe(evt_type, journal_subscriber, priority=-100)
 
     def attach_storage(self, storage) -> None:
         """Project PositionOpened/Closed onto IStorage (restart book)."""
