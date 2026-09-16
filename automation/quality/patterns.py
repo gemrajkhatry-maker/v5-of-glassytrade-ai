@@ -45,10 +45,18 @@ class PatternDetector:
     ) -> List[QualityIssue]:
         """Detect except blocks that only contain 'pass' (silent error swallowing)."""
         issues = []
+        source_lines = source.split('\n')
+
         for node in ast.walk(tree):
             if isinstance(node, ast.ExceptHandler):
                 if (len(node.body) == 1
                     and isinstance(node.body[0], ast.Pass)):
+                    # Check if there's a # silent-except comment on this line
+                    if node.lineno <= len(source_lines):
+                        line = source_lines[node.lineno - 1]
+                        if '# silent-except' in line:
+                            continue  # Intentional, documented silent except
+
                     issues.append(QualityIssue(
                         file=filepath,
                         line=node.lineno,
