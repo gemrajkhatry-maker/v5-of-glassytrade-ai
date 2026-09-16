@@ -27,6 +27,30 @@ Each area has well-separated internal methods. The class is large (1,595 lines)
 but internally cohesive — every method directly supports the per-symbol runtime.
 
 Only imports ``quant.*`` and stdlib — zero backend/ imports.
+
+Threading and Locking
+=====================
+This engine runs in a single thread (one thread per symbol, managed by
+QuantCoordinator's ThreadPoolExecutor). The single-threaded design eliminates
+most concurrency risks, but cross-engine coordination requires care.
+
+Lock Ordering Invariant
+-----------------------
+When acquiring multiple locks, always acquire in this order:
+
+1. ``_close_lock`` (per-engine, serializes position close operations)
+2. ``PortfolioRiskAuthority._lock`` (global, guards aggregate risk tracking)
+3. ``SessionRisk._lock`` (per-symbol, guards risk state)
+
+Never acquire locks in reverse order. The single-threaded-per-engine design
+prevents deadlock in practice (submit and close cannot interleave on the same
+engine), but this invariant must be preserved if the engine is ever refactored
+to multi-threaded tick processing.
+
+Cross-Engine Coordination
+-------------------------
+Engines coordinate only through ``PortfolioRiskAuthority`` (shared across all
+engines). All access is guarded by ``PortfolioRiskAuthority._lock``.
 """
 
 from __future__ import annotations

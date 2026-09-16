@@ -25,6 +25,36 @@ The coordinator is organized into these functional areas:
 6. SCHEDULERS — history seed scheduler, EOD watchdog
 
 Pure quant: imports ``quant.*`` and stdlib only — zero backend imports.
+
+Threading and Locking
+=====================
+The coordinator spawns one QuantEngine per symbol, each running in its own
+thread. Cross-engine coordination happens through shared authorities:
+
+- ``PortfolioRiskAuthority``: Aggregate risk ceiling (shared, locked)
+- ``SessionLevelStore``: Session persistence (per-symbol, locked)
+
+Lock Ordering Invariant
+-----------------------
+When acquiring multiple locks, always acquire in this order:
+
+1. ``QuantCoordinator._lifecycle_lock`` (global, guards engine spawn/stop)
+2. ``QuantCoordinator._lock`` (global, guards engine registry)
+3. ``QuantEngine._close_lock`` (per-engine, serializes position close)
+4. ``PortfolioRiskAuthority._lock`` (global, guards aggregate risk)
+5. ``SessionRisk._lock`` (per-symbol, guards risk state)
+
+Never acquire locks in reverse order. The EOD watchdog thread may call
+``force_close_position()`` on engines running in other threads — this acquires
+the engine's ``_close_lock``, which serializes with the engine thread's own
+close operations.
+
+EOD Watchdog
+------------
+The EOD watchdog runs in a separate thread and monitors for end-of-day
+conditions. It can call ``force_close_position()`` on any engine, which
+acquires the engine's ``_close_lock``. This is safe because ``_close_lock``
+serializes close operations across threads.
 """
 
 from __future__ import annotations
