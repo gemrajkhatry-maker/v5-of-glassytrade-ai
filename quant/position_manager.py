@@ -94,6 +94,18 @@ class PositionManager:
         # Double-close guard: position _ids that have already been fully closed.
         self._closed_ids: set[str] = set()
 
+    def _get_lots(self, position) -> float:
+        """Lot count of the live position.
+
+        be9609ae added the call sites for lot-aware partial exits but never
+        defined this helper — every partial-exit, BE-arm and tier decision
+        crashed with AttributeError. Uses the IOMS lot_size port (Position.size
+        is signed; lot_size > 0 is guaranteed by the port contract).
+        """
+        if position is None:
+            return 0.0
+        return abs(float(position.size)) / self._oms.lot_size
+
     def _emit_stop_moves(self, position, bar, prev_be, prev_trail,
                          be_floor, trail_stop) -> None:
         """Journal protective-stop level changes detected this bar."""
