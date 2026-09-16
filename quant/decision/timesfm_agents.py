@@ -408,167 +408,299 @@ class TimesFMPositionAgent:
     def __init__(self, target_horizon: int = 32) -> None:
         self.target_horizon = target_horizon
 
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
+
     def evaluate(self, ctx: DecisionContext, forecast: TimesFMForecast) -> Dict[str, Any]:
-        symbol = str(ctx.symbol or "UNKNOWN")
+        state = self._extract_state(ctx, forecast)
+        dyn_stop = self._compute_trailing_stop(state, forecast)
+        action, reason, confidence, confidence_score, rationale = self._default_hold(state)
+
+        # Evaluate exit/management conditions in priority order (first match wins)
+        result = self._check_stop_loss(state)
+        if result is None:
+            result = self._check_take_profit(state)
+        if result is None:
+            result = self._check_trajectory_inflection(state, forecast)
+        if result is None:
+            result = self._check_thesis_flip(state, forecast)
+        if result is None:
+            result = self._check_risk_zero_ratchet(state, forecast)
+        if result is None:
+            result = self._check_time_stop(state, forecast)
+
+        if result is not None:
+            action, reason, confidence, confidence_score, rationale, dyn_stop_override = result
+            if dyn_stop_override is not None:
+                dyn_stop = dyn_stop_override
+
+        is_risk_free = state["is_risk_free"] or (action == "TIGHTEN_SL")
+        active_pos_payload = self._build_active_position_payload(state, action, is_risk_free)
+        return self._build_result(ctx, forecast, state, action, reason, confidence,
+                                  confidence_score, rationale, active_pos_payload, dyn_stop)
+
+    # ------------------------------------------------------------------
+    # State extraction helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _bar_vals(ctx: DecisionContext, forecast: TimesFMForecast):
+        """Return (close, low, high) from ctx.bar or forecast fallback."""
+        if ctx.bar:
+            return float(ctx.bar.close), float(ctx.bar.low), float(ctx.bar.high)
+        cp = float(forecast.curr_price)
+        return cp, cp, cp
+
+    @staticmethod
+    def _extract_state(ctx: DecisionContext, forecast: TimesFMForecast) -> Dict[str, Any]:
+        """Pull all position-related values out of *ctx* / *forecast* once."""
+        bar_close, bar_low, bar_high = TimesFMPositionAgent._bar_vals(ctx, forecast)
+        _f = lambda v, d=0.0: float(v or d)  # noqa: E731
         side = str(ctx.position_side or "LONG").upper()
-        entry_price = float(ctx.position_entry_price or forecast.curr_price)
-        curr_price = float(ctx.bar.close if ctx.bar else forecast.curr_price)
-        bar_low = float(ctx.bar.low if ctx.bar else curr_price)
-        bar_high = float(ctx.bar.high if ctx.bar else curr_price)
-        sl = float(ctx.position_sl or 0.0)
-        tp = float(ctx.position_tp or 0.0)
-        pnl = float(ctx.position_unrealized_pnl or 0.0)
-        bars_held = int(ctx.position_bars_held or 0)
-        cvd_slope = float(ctx.cvd_slope or 0.0)
-        absorption = str(ctx.absorption_side or "").upper()
-        stacked_imb = str(getattr(ctx, "stacked_imbalance_direction", "") or "").upper()
-        poc = float(ctx.poc or (ctx.state.poc if ctx.state else curr_price))
-
-        risk = abs(entry_price - sl) if sl > 0 else (curr_price * 0.005)
-        profit = (curr_price - entry_price) if side == "LONG" else (entry_price - curr_price)
+        entry_price = _f(ctx.position_entry_price, forecast.curr_price)
+        poc_raw = ctx.poc or (ctx.state.poc if ctx.state else bar_close)
+        poc = float(poc_raw)
+        sl_val = _f(ctx.position_sl)
+        risk = abs(entry_price - sl_val) if sl_val > 0 else (bar_close * 0.005)
+        profit = (bar_close - entry_price) if side == "LONG" else (entry_price - bar_close)
         rr_achieved = profit / max(risk, 1e-4)
+        is_risk_free = (sl_val >= entry_price) if side == "LONG" else (sl_val > 0 and sl_val <= entry_price)
+        return {
+            "symbol": str(ctx.symbol or "UNKNOWN"), "side": side,
+            "entry_price": entry_price, "curr_price": bar_close,
+            "bar_low": bar_low, "bar_high": bar_high,
+            "sl": sl_val, "tp": _f(ctx.position_tp),
+            "pnl": _f(ctx.position_unrealized_pnl),
+            "bars_held": int(ctx.position_bars_held or 0),
+            "cvd_slope": _f(ctx.cvd_slope),
+            "absorption": str(ctx.absorption_side or "").upper(),
+            "stacked_imb": str(getattr(ctx, "stacked_imbalance_direction", "") or "").upper(),
+            "poc": poc, "risk": risk, "profit": profit,
+            "rr_achieved": rr_achieved, "is_risk_free": is_risk_free,
+        }
 
-        # Compute dynamic trailing stop peg from TimesFM quantiles
-        # Long trails behind lower quantile p10; Short trails behind upper quantile p90
+    # ------------------------------------------------------------------
+    # Trailing-stop computation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_trailing_stop(state: Dict[str, Any], forecast: TimesFMForecast) -> float:
+        """Dynamic trailing stop peg from TimesFM quantiles."""
+        side, sl = state["side"], state["sl"]
         if side == "LONG":
             dyn_candidate = float(forecast.p10_path[0])
-            dyn_stop = max(sl, dyn_candidate) if sl > 0 else dyn_candidate
-        else:
-            dyn_candidate = float(forecast.p90_path[0])
-            dyn_stop = min(sl, dyn_candidate) if sl > 0 else dyn_candidate
+            return max(sl, dyn_candidate) if sl > 0 else dyn_candidate
+        dyn_candidate = float(forecast.p90_path[0])
+        return min(sl, dyn_candidate) if sl > 0 else dyn_candidate
 
-        # Check if already at risk-free breakeven
-        is_risk_free = (sl >= entry_price) if side == "LONG" else (sl > 0 and sl <= entry_price)
+    # ------------------------------------------------------------------
+    # Default HOLD rationale
+    # ------------------------------------------------------------------
 
-        action = "HOLD"
-        reason = "TREND_INTACT"
-        confidence = "High"
-        confidence_score = 0.85
+    @staticmethod
+    def _default_hold(state: Dict[str, Any]):
+        """Return the default (action, reason, confidence, score, rationale) for HOLD."""
+        cvd_slope, symbol, side = state["cvd_slope"], state["symbol"], state["side"]
+        bars_held, pnl = state["bars_held"], state["pnl"]
         cvd_text = f"CVD confirms trend ({cvd_slope:+.1f})" if abs(cvd_slope) >= 0.5 else "Order flow steady"
         rationale = (
             f"{cvd_text} and TimesFM 32-step trajectory remains favorable — "
             f"holding {symbol} {side} ({bars_held} bars held, PnL: {pnl:+.1f})."
         )
+        return "HOLD", "TREND_INTACT", "High", 0.85, rationale
 
-        # 1. HARD STOP LOSS TRIGGERED
+    # ------------------------------------------------------------------
+    # Condition checks — each returns None or a 6-tuple
+    # (action, reason, confidence, confidence_score, rationale, dyn_stop_override)
+    # ------------------------------------------------------------------
+
+    def _check_stop_loss(self, s: Dict[str, Any]):
+        """1. HARD STOP LOSS TRIGGERED."""
+        side, sl = s["side"], s["sl"]
+        bar_low, bar_high, symbol = s["bar_low"], s["bar_high"], s["symbol"]
         if sl > 0 and ((side == "LONG" and bar_low <= sl) or (side == "SHORT" and bar_high >= sl)):
-            action = "EXIT"
-            reason = "STOP_LOSS"
-            confidence = "High"
-            confidence_score = 0.95
-            rationale = f"Stop loss triggered on {symbol} {side} at structural invalidation level ({sl:.2f})."
+            return (
+                "EXIT", "STOP_LOSS", "High", 0.95,
+                f"Stop loss triggered on {symbol} {side} at structural invalidation level ({sl:.2f}).",
+                None,
+            )
+        return None
 
-        # 2. STRUCTURAL TAKE PROFIT TARGET HIT
-        elif tp > 0 and ((side == "LONG" and bar_high >= tp) or (side == "SHORT" and bar_low <= tp)):
-            action = "TAKE_PROFIT"
-            reason = "TARGET_HIT"
-            confidence = "High"
-            confidence_score = 0.95
-            rationale = f"Structural take-profit target reached on {symbol} {side} at {tp:.2f} (RR: {rr_achieved:.1f}R)."
+    def _check_take_profit(self, s: Dict[str, Any]):
+        """2. STRUCTURAL TAKE PROFIT TARGET HIT."""
+        side, tp = s["side"], s["tp"]
+        bar_low, bar_high = s["bar_low"], s["bar_high"]
+        symbol, rr = s["symbol"], s["rr_achieved"]
+        if tp > 0 and ((side == "LONG" and bar_high >= tp) or (side == "SHORT" and bar_low <= tp)):
+            return (
+                "TAKE_PROFIT", "TARGET_HIT", "High", 0.95,
+                f"Structural take-profit target reached on {symbol} {side} at {tp:.2f} (RR: {rr:.1f}R).",
+                None,
+            )
+        return None
 
-        # 3. PREDICTIVE TRAJECTORY INFLECTION / POC FRONT-RUNNING (Fabio 1-2 ticks inside shield)
-        elif rr_achieved >= 0.9 and (
-            (side == "LONG" and np.argmax(forecast.p50_path) < 16 and forecast.p50_path[-1] < forecast.p50_path[np.argmax(forecast.p50_path)])
-            or (side == "SHORT" and np.argmin(forecast.p50_path) < 16 and forecast.p50_path[-1] > forecast.p50_path[np.argmin(forecast.p50_path)])
-        ):
-            action = "TAKE_PROFIT"
-            reason = "TARGET_HIT"
-            confidence = "High"
-            confidence_score = 0.88
-            rationale = (
+    def _check_trajectory_inflection(self, s: Dict[str, Any], forecast: TimesFMForecast):
+        """3. PREDICTIVE TRAJECTORY INFLECTION / POC FRONT-RUNNING."""
+        side, rr = s["side"], s["rr_achieved"]
+        symbol, profit, poc = s["symbol"], s["profit"], s["poc"]
+        if rr < 0.9:
+            return None
+        p50 = forecast.p50_path
+        if side == "LONG" and np.argmax(p50) < 16 and p50[-1] < p50[np.argmax(p50)]:
+            return (
+                "TAKE_PROFIT", "TARGET_HIT", "High", 0.88,
                 f"TimesFM 32-step trajectory inflects near session POC ({poc:.1f}); front-running liquidity cascade "
-                f"with partial take-profit on {symbol} {side} (+{profit:.1f} pts)."
+                f"with partial take-profit on {symbol} {side} (+{profit:.1f} pts).",
+                None,
             )
-
-        # 4. THESIS FLIP / OPPOSING ABSORPTION / ADVERSE ORDER FLOW
-        elif (
-            # Opposing absorption cluster (Fabio: institutional inventory capping the move)
-            (side == "LONG" and absorption_direction(absorption) == "SHORT")
-            or (side == "SHORT" and absorption_direction(absorption) == "LONG")
-            # Or opposing stacked imbalance with opposing CVD
-            or (side == "LONG" and stacked_imb == "SELL" and cvd_slope < -1.0)
-            or (side == "SHORT" and stacked_imb == "BUY" and cvd_slope > 1.0)
-            # Or strong opposing CVD divergence without stacked imbalance
-            or (side == "LONG" and cvd_slope <= -2.5)
-            or (side == "SHORT" and cvd_slope >= 2.5)
-            # Or TimesFM trajectory breaks down significantly against trade
-            or (side == "LONG" and forecast.mean_forecast < entry_price - (0.5 * risk))
-            or (side == "SHORT" and forecast.mean_forecast > entry_price + (0.5 * risk))
-        ):
-            action = "EXIT"
-            reason = "THESIS_FLIP"
-            confidence = "High"
-            confidence_score = 0.90
-            if side == "LONG" and absorption_direction(absorption) == "SHORT":
-                rationale = "Heavy buy absorption cluster — sellers in control."
-            elif side == "SHORT" and absorption_direction(absorption) == "LONG":
-                rationale = "Heavy sell absorption cluster — buyers in control."
-            elif (side == "LONG" and stacked_imb == "SELL" and cvd_slope < -1.0) or (side == "LONG" and cvd_slope <= -2.5):
-                rationale = (
-                    f"Thesis flip on {symbol} LONG: Opposing order flow (CVD slope {cvd_slope:+.1f}) "
-                    f"and seller pressure — exiting before stop loss hit."
-                )
-            elif (side == "SHORT" and stacked_imb == "BUY" and cvd_slope > 1.0) or (side == "SHORT" and cvd_slope >= 2.5):
-                rationale = (
-                    f"Thesis flip on {symbol} SHORT: Opposing order flow (CVD slope {cvd_slope:+.1f}) "
-                    f"and buyer pressure — exiting before stop loss hit."
-                )
-            elif side == "LONG" and forecast.mean_forecast < entry_price - (0.5 * risk):
-                rationale = (
-                    f"Thesis flip on {symbol} LONG: TimesFM 32-step trajectory breakdown "
-                    f"(projected {forecast.mean_forecast:.2f} breaches 0.5R envelope) — exiting before stop loss hit."
-                )
-            elif side == "SHORT" and forecast.mean_forecast > entry_price + (0.5 * risk):
-                rationale = (
-                    f"Thesis flip on {symbol} SHORT: TimesFM 32-step trajectory breakdown "
-                    f"(projected {forecast.mean_forecast:.2f} breaches 0.5R envelope) — exiting before stop loss hit."
-                )
-            else:
-                rationale = (
-                    f"Thesis flip on {symbol} {side}: Invalidation of market structure — "
-                    f"exiting before stop loss hit."
-                )
-
-        # 5. RISK-ZERO RATCHET (Breakeven Trailing)
-        elif not is_risk_free and (
-            rr_achieved >= 0.8
-            or (side == "LONG" and float(np.min(forecast.p10_path[:5])) > entry_price)
-            or (side == "SHORT" and float(np.max(forecast.p90_path[:5])) < entry_price)
-        ):
-            action = "TIGHTEN_SL"
-            reason = "RISK_ZERO"
-            confidence = "High"
-            confidence_score = 0.90
-            dyn_stop = entry_price
-            rationale = (
-                f"CVD confirms and TimesFM 90% confidence envelope clears cost basis on {symbol} {side} — "
-                f"moving stop to breakeven ({entry_price:.2f})."
+        if side == "SHORT" and np.argmin(p50) < 16 and p50[-1] > p50[np.argmin(p50)]:
+            return (
+                "TAKE_PROFIT", "TARGET_HIT", "High", 0.88,
+                f"TimesFM 32-step trajectory inflects near session POC ({poc:.1f}); front-running liquidity cascade "
+                f"with partial take-profit on {symbol} {side} (+{profit:.1f} pts).",
+                None,
             )
+        return None
 
-        # 6. TIME-STOP / STAGNATION DECAY
-        elif bars_held >= 5 and abs(rr_achieved) < 0.25 and abs(forecast.pct_change) < 0.0003:
-            action = "EXIT"
-            reason = "TIME_STOP"
-            confidence = "Medium"
-            confidence_score = 0.70
-            rationale = (
+    def _check_thesis_flip(self, s: Dict[str, Any], forecast: TimesFMForecast):
+        """4. THESIS FLIP / OPPOSING ABSORPTION / ADVERSE ORDER FLOW."""
+        if not self._thesis_flip_triggered(s, forecast):
+            return None
+        rationale = self._build_thesis_flip_rationale(s, forecast)
+        return "EXIT", "THESIS_FLIP", "High", 0.90, rationale, None
+
+    def _check_risk_zero_ratchet(self, s: Dict[str, Any], forecast: TimesFMForecast):
+        """5. RISK-ZERO RATCHET (Breakeven Trailing)."""
+        side, is_risk_free, rr = s["side"], s["is_risk_free"], s["rr_achieved"]
+        entry_price, symbol = s["entry_price"], s["symbol"]
+        if is_risk_free:
+            return None
+        p10_clear = side == "LONG" and float(np.min(forecast.p10_path[:5])) > entry_price
+        p90_clear = side == "SHORT" and float(np.max(forecast.p90_path[:5])) < entry_price
+        if not (rr >= 0.8 or p10_clear or p90_clear):
+            return None
+        rationale = (
+            f"CVD confirms and TimesFM 90% confidence envelope clears cost basis on {symbol} {side} — "
+            f"moving stop to breakeven ({entry_price:.2f})."
+        )
+        return "TIGHTEN_SL", "RISK_ZERO", "High", 0.90, rationale, entry_price
+
+    def _check_time_stop(self, s: Dict[str, Any], forecast: TimesFMForecast):
+        """6. TIME-STOP / STAGNATION DECAY."""
+        bars_held, rr = s["bars_held"], s["rr_achieved"]
+        symbol, side = s["symbol"], s["side"]
+        if bars_held >= 5 and abs(rr) < 0.25 and abs(forecast.pct_change) < 0.0003:
+            return (
+                "EXIT", "TIME_STOP", "Medium", 0.70,
                 f"Time stop on {symbol} {side}: Auction stagnant without directional expansion after "
-                f"{bars_held} bars — exiting flat."
+                f"{bars_held} bars — exiting flat.",
+                None,
             )
+        return None
 
-        # Active position details payload
-        active_pos_payload = {
-            "side": side,
-            "entryPrice": round(entry_price, 2),
-            "currentPrice": round(curr_price, 2),
-            "pnl": round(pnl, 2),
-            "stopLoss": round(sl, 2) if sl > 0 else None,
-            "takeProfit": round(tp, 2) if tp > 0 else None,
-            "barsHeld": bars_held,
-            "isRiskFree": is_risk_free or (action == "TIGHTEN_SL"),
-            "rrAchieved": round(rr_achieved, 2),
+    # ------------------------------------------------------------------
+    # Thesis-flip helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_absorption_opposed(side: str, absorption: str) -> bool:
+        """True when the absorption print opposes the position side."""
+        opp = absorption_direction(absorption)
+        return (side == "LONG" and opp == "SHORT") or (side == "SHORT" and opp == "LONG")
+
+    @staticmethod
+    def _thesis_flip_triggered(s: Dict[str, Any], forecast: TimesFMForecast) -> bool:
+        """Return True when any thesis-flip condition is met."""
+        side, absorption = s["side"], s["absorption"]
+        stacked_imb, cvd_slope = s["stacked_imb"], s["cvd_slope"]
+        entry_price, risk = s["entry_price"], s["risk"]
+        if TimesFMPositionAgent._is_absorption_opposed(side, absorption):
+            return True
+        if (side == "LONG" and stacked_imb == "SELL" and cvd_slope < -1.0) or (side == "SHORT" and stacked_imb == "BUY" and cvd_slope > 1.0):
+            return True
+        if (side == "LONG" and cvd_slope <= -2.5) or (side == "SHORT" and cvd_slope >= 2.5):
+            return True
+        if side == "LONG" and forecast.mean_forecast < entry_price - (0.5 * risk):
+            return True
+        if side == "SHORT" and forecast.mean_forecast > entry_price + (0.5 * risk):
+            return True
+        return False
+
+    @staticmethod
+    def _build_thesis_flip_rationale(s: Dict[str, Any], forecast: TimesFMForecast) -> str:
+        """Build the human-readable rationale for a thesis-flip exit."""
+        side, absorption = s["side"], s["absorption"]
+        stacked_imb, cvd_slope = s["stacked_imb"], s["cvd_slope"]
+        entry_price, risk = s["entry_price"], s["risk"]
+        symbol = s["symbol"]
+        if TimesFMPositionAgent._is_absorption_opposed(side, absorption):
+            if side == "LONG":
+                return "Heavy buy absorption cluster — sellers in control."
+            return "Heavy sell absorption cluster — buyers in control."
+        if side == "LONG" and ((stacked_imb == "SELL" and cvd_slope < -1.0) or cvd_slope <= -2.5):
+            return (
+                f"Thesis flip on {symbol} LONG: Opposing order flow (CVD slope {cvd_slope:+.1f}) "
+                f"and seller pressure — exiting before stop loss hit."
+            )
+        if side == "SHORT" and ((stacked_imb == "BUY" and cvd_slope > 1.0) or cvd_slope >= 2.5):
+            return (
+                f"Thesis flip on {symbol} SHORT: Opposing order flow (CVD slope {cvd_slope:+.1f}) "
+                f"and buyer pressure — exiting before stop loss hit."
+            )
+        if side == "LONG" and forecast.mean_forecast < entry_price - (0.5 * risk):
+            return (
+                f"Thesis flip on {symbol} LONG: TimesFM 32-step trajectory breakdown "
+                f"(projected {forecast.mean_forecast:.2f} breaches 0.5R envelope) — exiting before stop loss hit."
+            )
+        if side == "SHORT" and forecast.mean_forecast > entry_price + (0.5 * risk):
+            return (
+                f"Thesis flip on {symbol} SHORT: TimesFM 32-step trajectory breakdown "
+                f"(projected {forecast.mean_forecast:.2f} breaches 0.5R envelope) — exiting before stop loss hit."
+            )
+        return (
+            f"Thesis flip on {symbol} {side}: Invalidation of market structure — "
+            f"exiting before stop loss hit."
+        )
+
+    # ------------------------------------------------------------------
+    # Result builders
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_active_position_payload(
+        s: Dict[str, Any], action: str, is_risk_free: bool,
+    ) -> Dict[str, Any]:
+        """Build the ``activePosition`` sub-dict."""
+        return {
+            "side": s["side"],
+            "entryPrice": round(s["entry_price"], 2),
+            "currentPrice": round(s["curr_price"], 2),
+            "pnl": round(s["pnl"], 2),
+            "stopLoss": round(s["sl"], 2) if s["sl"] > 0 else None,
+            "takeProfit": round(s["tp"], 2) if s["tp"] > 0 else None,
+            "barsHeld": s["bars_held"],
+            "isRiskFree": is_risk_free,
+            "rrAchieved": round(s["rr_achieved"], 2),
         }
 
+    @staticmethod
+    def _build_result(
+        ctx: DecisionContext,
+        forecast: TimesFMForecast,
+        state: Dict[str, Any],
+        action: str,
+        reason: str,
+        confidence: str,
+        confidence_score: float,
+        rationale: str,
+        active_pos_payload: Dict[str, Any],
+        dyn_stop: float,
+    ) -> Dict[str, Any]:
+        """Assemble the full return dictionary."""
+        side = state["side"]
+        entry_price = state["entry_price"]
+        pnl = state["pnl"]
         return {
             "role": "POSITION_MANAGEMENT",
             "action": action,
