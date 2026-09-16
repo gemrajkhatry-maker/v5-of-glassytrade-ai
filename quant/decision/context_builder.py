@@ -106,16 +106,44 @@ class DecisionContextBuilder:
     filter, producing a fully-populated DecisionContext ready for evaluation.
     """
 
+    # ------------------------------------------------------------------
+    # DTO safe-access helpers (eliminate repeated ``or`` patterns)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _df(d: dict, key: str, default: float = 0.0) -> float:
+        """Safely read a float from a dict (None/empty -> default)."""
+        return float(d.get(key) or default)
+
+    @staticmethod
+    def _ds(d: dict, key: str, default: str = "") -> str:
+        """Safely read a string from a dict (None/empty -> default)."""
+        return str(d.get(key) or default)
+
+    @staticmethod
+    def _db(d: dict, key: str) -> bool:
+        """Safely read a bool from a dict (None/empty -> False)."""
+        return bool(d.get(key))
+
+    @staticmethod
+    def _di(d: dict, key: str, default: int = 0) -> int:
+        """Safely read an int from a dict (None/empty -> default)."""
+        return int(d.get(key) or default)
+
+    # ------------------------------------------------------------------
+    # Direction resolution
+    # ------------------------------------------------------------------
+
     def _resolve_direction(self, amt_dto: dict, close_px: float, vah: float,
                            val: float, obi: float, ofi: float,
                            vwap_upper_1: float, vwap_lower_1: float,
                            market: str = "NSE") -> str | None:
         """Determine agent direction from AMT state (hierarchy of intent)."""
-        raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
-        break_dir = str(amt_dto.get("breakDirection") or "").upper()
-        break_type = str(amt_dto.get("breakType") or "").upper()
-        triple_a_sig = str(amt_dto.get("tripleASignal") or "").upper()
-        cvd_val = float(amt_dto.get("cvdSlope") or 0.0)
+        raw_ms = self._ds(amt_dto, "marketState", "BALANCED").upper()
+        break_dir = self._ds(amt_dto, "breakDirection").upper()
+        break_type = self._ds(amt_dto, "breakType").upper()
+        triple_a_sig = self._ds(amt_dto, "tripleASignal").upper()
+        cvd_val = self._df(amt_dto, "cvdSlope")
 
         cvd_threshold = 0.3 if str(market).upper() == "MCX" else 0.5
         if break_type == "INITIATIVE" and break_dir in ("UP", "DOWN"):
@@ -159,6 +187,10 @@ class DecisionContextBuilder:
         from quant.amt.profile.leg_lvn import resolve_leg_lvn
         return resolve_leg_lvn(amt_dto, close_px).level
 
+    # ------------------------------------------------------------------
+    # Setup evidence
+    # ------------------------------------------------------------------
+
     def _build_setup_evidence(self, amt_dto: dict, agent_direction: str | None,
                               nearest_leg_lvn: float) -> object | None:
         """Construct SetupEvidence from AMT state.
@@ -175,17 +207,17 @@ class DecisionContextBuilder:
         """
         from quant.decision.setup_state import SetupEvidence
         setup_dir = str(agent_direction or "").upper()
-        cvd_val = float(amt_dto.get("cvdSlope") or 0.0)
+        cvd_val = self._df(amt_dto, "cvdSlope")
         cvd_agrees = bool(
             (setup_dir == "LONG" and cvd_val >= -0.2)
             or (setup_dir == "SHORT" and cvd_val <= 0.2)
         )
-        rejection_at_high = bool(amt_dto.get("rejectionAtHigh"))
-        rejection_at_low = bool(amt_dto.get("rejectionAtLow"))
-        is_second_drive = bool(amt_dto.get("isSecondDrive"))
-        drive_number = int(amt_dto.get("driveNumber") or 0)
-        triple_phase = str(amt_dto.get("tripleAPhase") or "")
-        triple_signal = str(amt_dto.get("tripleASignal") or "")
+        rejection_at_high = self._db(amt_dto, "rejectionAtHigh")
+        rejection_at_low = self._db(amt_dto, "rejectionAtLow")
+        is_second_drive = self._db(amt_dto, "isSecondDrive")
+        drive_number = self._di(amt_dto, "driveNumber")
+        triple_phase = self._ds(amt_dto, "tripleAPhase")
+        triple_signal = self._ds(amt_dto, "tripleASignal")
 
         if triple_phase == "AGGRESSION" and (triple_signal in ("LONG", "SHORT") or agent_direction in ("LONG", "SHORT")):
             direction = triple_signal or agent_direction
@@ -207,15 +239,15 @@ class DecisionContextBuilder:
                 setup_type="SECOND_DRIVE",
                 direction=setup_dir or ("SHORT" if rejection_at_high else "LONG"),
                 drive_number=drive_number or 2, d1_rejected=True,
-                rejection=rejection_at_high or rejection_at_low or bool(amt_dto.get("rejection")),
+                rejection=rejection_at_high or rejection_at_low or self._db(amt_dto, "rejection"),
                 cvd_agrees=cvd_agrees,
             )
         if rejection_at_high or rejection_at_low:
             direction = "SHORT" if rejection_at_high else "LONG"
             return SetupEvidence(
                 setup_type="VA_FADE", direction=direction,
-                rejection=rejection_at_high or rejection_at_low or bool(amt_dto.get("rejection")),
-                acceptance=bool(amt_dto.get("acceptanceAbove") or amt_dto.get("acceptanceBelow") or amt_dto.get("acceptance", False)),
+                rejection=rejection_at_high or rejection_at_low or self._db(amt_dto, "rejection"),
+                acceptance=self._db(amt_dto, "acceptanceAbove") or self._db(amt_dto, "acceptanceBelow") or self._db(amt_dto, "acceptance"),
                 cvd_agrees=cvd_agrees,
             )
         if nearest_leg_lvn > 0 and absorption_direction(amt_dto.get("absorptionSide")):
@@ -225,6 +257,100 @@ class DecisionContextBuilder:
                 level=nearest_leg_lvn, absorption=True, cvd_agrees=cvd_agrees,
             )
         return None
+
+    # ------------------------------------------------------------------
+    # Position extraction helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _infer_side_from_size(raw_sz: float) -> str:
+        """Infer position side from signed size when side field is absent."""
+        if raw_sz > 0:
+            return "LONG"
+        if raw_sz < 0:
+            return "SHORT"
+        return ""
+
+    @staticmethod
+    def _first_truthy_dict(d: dict, keys: tuple, default: float = 0.0) -> float:
+        """Return the first truthy value from *d* for the given *keys*."""
+        for k in keys:
+            v = d.get(k, 0.0)
+            if v:
+                return float(v)
+        return float(default)
+
+    @staticmethod
+    def _first_truthy_obj(obj, attrs: tuple, default: float = 0.0) -> float:
+        """Return the first truthy getattr value from *obj*."""
+        for a in attrs:
+            v = getattr(obj, a, 0.0)
+            if v:
+                return float(v)
+        return float(default)
+
+    def _extract_position_from_dict(self, position: dict, bar_index: int,
+                                    entry_bar_index: int) -> dict:
+        """Extract position state from a dict (frontend DTO / portfolio)."""
+        raw_sz = float(position.get("size", 0.0))
+        pos_side = self._ds(position, "side").upper() or self._infer_side_from_size(raw_sz)
+        pos_entry = self._first_truthy_dict(position, ("entryPrice", "entry", "open_price"))
+        pos_sl = self._first_truthy_dict(position, ("stopLoss", "sl", "stop_loss"))
+        pos_tp = self._first_truthy_dict(position, ("takeProfit", "tp", "take_profit"))
+        pos_pnl = self._df(position, "pnl")
+        pos_bars_held = self._di(position, "barsHeld")
+        if pos_bars_held == 0 and entry_bar_index > 0:
+            pos_bars_held = max(0, bar_index - entry_bar_index)
+        return {"pos_open": True, "pos_side": pos_side, "pos_entry": pos_entry,
+                "pos_size": raw_sz, "pos_sl": pos_sl, "pos_tp": pos_tp,
+                "pos_pnl": pos_pnl, "pos_bars_held": pos_bars_held}
+
+    @staticmethod
+    def _extract_sl_tp_from_object(position) -> tuple[float, float]:
+        """Extract stop-loss and take-profit from a position object."""
+        order = getattr(position, "order", None)
+        signal = getattr(order, "signal", None) if order is not None else None
+        if signal is not None:
+            return float(signal.sl or 0.0), float(signal.tp or 0.0)
+        pos_sl = DecisionContextBuilder._first_truthy_obj(
+            position, ("sl", "stop_loss", "stopLoss"))
+        pos_tp = DecisionContextBuilder._first_truthy_obj(
+            position, ("tp", "take_profit", "takeProfit"))
+        return pos_sl, pos_tp
+
+    @staticmethod
+    def _compute_position_pnl(position, close_px: float, pos_entry: float,
+                              raw_sz: float, pos_side: str) -> float:
+        """Compute unrealized PnL for an object-based position."""
+        can_compute = close_px > 0 and pos_entry > 0 and raw_sz != 0
+        if not can_compute:
+            return float(getattr(position, "pnl", 0.0) or 0.0)
+        mult = 1.0 if pos_side == "LONG" else -1.0 if pos_side == "SHORT" else 1.0
+        return (close_px - pos_entry) * abs(raw_sz) * mult
+
+    @staticmethod
+    def _compute_bars_held(position, bar_index: int, entry_bar_index: int) -> int:
+        """Compute bars-held for an object-based position."""
+        if entry_bar_index > 0:
+            return max(0, bar_index - entry_bar_index)
+        return int(getattr(position, "bars_held", 0) or 0)
+
+    def _extract_position_from_object(self, position, close_px: float,
+                                      bar_index: int,
+                                      entry_bar_index: int) -> dict:
+        """Extract position state from a Position / PositionState object."""
+        raw_sz = float(getattr(position, "size", 0.0))
+        pos_side = (str(getattr(position, "side", "") or "").upper()
+                    or self._infer_side_from_size(raw_sz))
+        pos_entry = self._first_truthy_obj(
+            position, ("entry", "open_price", "entry_price", "entryPrice"))
+        pos_sl, pos_tp = self._extract_sl_tp_from_object(position)
+        pos_pnl = self._compute_position_pnl(
+            position, close_px, pos_entry, raw_sz, pos_side)
+        pos_bars_held = self._compute_bars_held(position, bar_index, entry_bar_index)
+        return {"pos_open": True, "pos_side": pos_side, "pos_entry": pos_entry,
+                "pos_size": raw_sz, "pos_sl": pos_sl, "pos_tp": pos_tp,
+                "pos_pnl": pos_pnl, "pos_bars_held": pos_bars_held}
 
     def _extract_position(self, position, close_px: float, bar_index: int,
                           entry_bar_index: int) -> dict:
@@ -237,52 +363,226 @@ class DecisionContextBuilder:
             return {"pos_open": False, "pos_side": "", "pos_entry": 0.0,
                     "pos_size": 0.0, "pos_sl": 0.0, "pos_tp": 0.0,
                     "pos_pnl": 0.0, "pos_bars_held": 0}
-
         if isinstance(position, dict):
-            raw_sz = float(position.get("size", 0.0))
-            pos_side = str(position.get("side", "")).upper() or ("LONG" if raw_sz > 0 else ("SHORT" if raw_sz < 0 else ""))
-            pos_entry = float(position.get("entryPrice", 0.0) or position.get("entry", 0.0) or position.get("open_price", 0.0) or 0.0)
-            pos_sl = float(position.get("stopLoss", 0.0) or position.get("sl", 0.0) or position.get("stop_loss", 0.0) or 0.0)
-            pos_tp = float(position.get("takeProfit", 0.0) or position.get("tp", 0.0) or position.get("take_profit", 0.0) or 0.0)
-            pos_pnl = float(position.get("pnl", 0.0))
-            pos_bars_held = int(position.get("barsHeld", 0) or 0)
-            if pos_bars_held == 0 and entry_bar_index > 0:
-                pos_bars_held = max(0, bar_index - entry_bar_index)
-            return {"pos_open": True, "pos_side": pos_side, "pos_entry": pos_entry,
-                    "pos_size": raw_sz, "pos_sl": pos_sl, "pos_tp": pos_tp,
-                    "pos_pnl": pos_pnl, "pos_bars_held": pos_bars_held}
+            return self._extract_position_from_dict(position, bar_index, entry_bar_index)
+        return self._extract_position_from_object(position, close_px, bar_index, entry_bar_index)
 
-        raw_sz = float(getattr(position, "size", 0.0))
-        pos_side = str(getattr(position, "side", "") or "").upper() or ("LONG" if raw_sz > 0 else ("SHORT" if raw_sz < 0 else ""))
-        pos_entry = float(
-            getattr(position, "entry", 0.0)
-            or getattr(position, "open_price", 0.0)
-            or getattr(position, "entry_price", 0.0)
-            or getattr(position, "entryPrice", 0.0)
-            or 0.0
+    # ------------------------------------------------------------------
+    # Build helpers — session, squeeze, market state, data quality
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_best_bid_ask(order_book) -> tuple[float, float]:
+        """Extract best bid/ask from an order book (or 0.0 if absent)."""
+        if order_book is None:
+            return 0.0, 0.0
+        bids = getattr(order_book, "bids", ()) or ()
+        asks = getattr(order_book, "asks", ()) or ()
+        best_bid = float(bids[0].price) if bids else 0.0
+        best_ask = float(asks[0].price) if asks else 0.0
+        return best_bid, best_ask
+
+    @staticmethod
+    def _parse_effective_time(bar, amt_dto: dict) -> tuple[str, bool, bool]:
+        """Determine the effective time string and its format flags."""
+        effective_time = str((bar.time if bar else None) or amt_dto.get("time") or "").strip()
+        is_epoch = (
+            effective_time.replace(".", "", 1).lstrip("-").isdigit()
+            and len(effective_time) >= 9
+            and "T" not in effective_time
         )
-        if hasattr(position, "order") and hasattr(position.order, "signal") and position.order.signal is not None:
-            pos_sl = float(position.order.signal.sl or 0.0)
-            pos_tp = float(position.order.signal.tp or 0.0)
-        else:
-            pos_sl = float(
-                getattr(position, "sl", 0.0)
-                or getattr(position, "stop_loss", 0.0)
-                or getattr(position, "stopLoss", 0.0)
-                or 0.0
+        is_iso = "T" in effective_time or "+" in effective_time or ":" in effective_time
+        return effective_time, is_epoch, is_iso
+
+    @staticmethod
+    def _fetch_session_info(effective_time: str, is_epoch: bool, is_iso: bool,
+                            market: str):
+        """Resolve session info, returning None on failure or empty time."""
+        if is_epoch or is_iso:
+            try:
+                return get_session_info(effective_time, market=market)
+            except Exception:
+                logger.warning(
+                    "session-info resolution failed for %r (market=%s); falling back to PRIMARY phase",
+                    effective_time, market, exc_info=True,
+                )
+                return None
+        if not effective_time:
+            try:
+                return get_session_info(market=market)
+            except Exception:
+                logger.warning(
+                    "session-info resolution failed (market=%s); falling back to PRIMARY phase",
+                    market, exc_info=True,
+                )
+                return None
+        return None
+
+    @staticmethod
+    def _resolve_expiry(effective_time: str, is_epoch: bool, is_iso: bool,
+                        contract_expiry):
+        """Compute bar_dt and is_expiry from the effective time."""
+        bar_dt = ist_dt(effective_time) if (effective_time and (is_epoch or is_iso)) else None
+        is_expiry = (bar_dt.date() == contract_expiry) if (contract_expiry and bar_dt) else False
+        return is_expiry
+
+    @staticmethod
+    def _resolve_squeeze(amt_dto: dict, bar, tick_size: float) -> tuple[bool, str, float, bool]:
+        """Resolve squeeze detection fields from AMT state."""
+        squeeze_dir = str(amt_dto.get("squeezeDirection", ""))
+        trapped_lvl = float(amt_dto.get("squeezeTrappedLevel", 0.0))
+        squeeze_detected = bool(squeeze_dir and trapped_lvl > 0)
+        pullback = False
+        if squeeze_detected and bar is not None:
+            tick = tick_size or 0.05
+            pullback = abs(float(bar.close) - trapped_lvl) <= 3.0 * tick  # ponytail: retest proxy
+        return squeeze_detected, squeeze_dir, trapped_lvl, pullback
+
+    @staticmethod
+    def _resolve_market_state_enum(amt_dto: dict) -> MarketState:
+        """Map the raw AMT marketState string to a MarketState enum."""
+        raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
+        if raw_ms == "DEAD":
+            return MarketState.DEAD
+        if raw_ms == "IMBALANCED":
+            return MarketState.IMBALANCED
+        return MarketState.BALANCED
+
+    @staticmethod
+    def _resolve_data_quality(amt_dto: dict):
+        """Normalize data quality from AMT DTO, or None if absent."""
+        has_dq = "dataQuality" in amt_dto or "data_quality" in amt_dto
+        if not has_dq:
+            return None
+        return normalize_data_quality(
+            amt_dto.get("dataQuality") or amt_dto.get("data_quality")
+        )
+
+    @staticmethod
+    def _resolve_session_open(effective_time: str, market: str,
+                              contract_expiry, session_info) -> bool:
+        """Determine whether the session allows entry."""
+        if effective_time:
+            return session_allow_entry(
+                effective_time, market=market, contract_expiry=contract_expiry
             )
-            pos_tp = float(
-                getattr(position, "tp", 0.0)
-                or getattr(position, "take_profit", 0.0)
-                or getattr(position, "takeProfit", 0.0)
-                or 0.0
-            )
-        mult = 1.0 if pos_side == "LONG" else (-1.0 if pos_side == "SHORT" else 1.0)
-        pos_pnl = (close_px - pos_entry) * abs(raw_sz) * mult if close_px > 0 and pos_entry > 0 and raw_sz != 0 else float(getattr(position, "pnl", 0.0) or 0.0)
-        pos_bars_held = max(0, bar_index - entry_bar_index) if entry_bar_index > 0 else int(getattr(position, "bars_held", 0) or 0)
-        return {"pos_open": True, "pos_side": pos_side, "pos_entry": pos_entry,
-                "pos_size": raw_sz, "pos_sl": pos_sl, "pos_tp": pos_tp,
-                "pos_pnl": pos_pnl, "pos_bars_held": pos_bars_held}
+        if session_info:
+            return session_info.allow_entry
+        return True
+
+    @staticmethod
+    def _apply_setup_direction(agent_direction, setup_evidence) -> str | None:
+        """Override agent_direction when a complete setup evidence exists."""
+        if setup_evidence is None:
+            return agent_direction
+        ev_dir = getattr(setup_evidence, "direction", None)
+        is_complete = getattr(setup_evidence, "is_complete", lambda: False)()
+        if ev_dir and is_complete:
+            return ev_dir
+        return agent_direction
+
+    @staticmethod
+    def _apply_option_short_suppression(symbol: str, agent_direction) -> str | None:
+        """Suppress SHORT direction for option contracts (retail scalpers are buyers)."""
+        if is_option_contract(symbol) and agent_direction == "SHORT":
+            return None
+        return agent_direction
+
+    # ------------------------------------------------------------------
+    # Context construction
+    # ------------------------------------------------------------------
+
+    def _build_context_kwargs(
+        self, *, bar, symbol, market, bar_index, effective_time, contract_expiry,
+        warm_bars, warmup_bars, cooldown_remaining_sec, risk_state,
+        agent_direction, setup_evidence, pos, amt_dto, best_bid, best_ask,
+        session_phase, is_expiry, allow_trend, allow_reversion,
+        amt_market_state, obi, vah, val, nearest_leg_lvn, tick_size,
+        squeeze_detected, squeeze_dir, trapped_lvl, pullback,
+        break_dir, break_type, si_dir, si_mag, si_low, si_high,
+        buy_wall_below, sell_wall_above, recent_decisions, session_info,
+    ) -> dict:
+        """Build the keyword-argument dict for the DecisionContext constructor."""
+        df, ds, db, di = self._df, self._ds, self._db, self._di
+        session_open = self._resolve_session_open(
+            effective_time, market, contract_expiry, session_info)
+        return dict(
+            state=None,
+            bar=bar,
+            symbol=symbol,
+            market=market,
+            bar_index=bar_index,
+            session_open=session_open,
+            warmup_complete=(bar_index + warm_bars) >= warmup_bars,
+            position_open=pos["pos_open"],
+            position_side=pos["pos_side"],
+            position_entry_price=pos["pos_entry"],
+            position_size=pos["pos_size"],
+            position_unrealized_pnl=pos["pos_pnl"],
+            position_sl=pos["pos_sl"],
+            position_tp=pos["pos_tp"],
+            position_bars_held=pos["pos_bars_held"],
+            cooldown_remaining_sec=cooldown_remaining_sec,
+            risk_halted=risk_state.halted,
+            consecutive_losses=risk_state.consecutive_losses,
+            agent_direction=agent_direction,
+            agent_probability=_DETERMINISTIC_CONVICTION,
+            data_quality=self._resolve_data_quality(amt_dto),
+            setup_evidence=setup_evidence,
+            market_state=amt_market_state,
+            balance_ratio=df(amt_dto, "balanceRatio"),
+            drive_entry_valid=db(amt_dto, "isSecondDrive"),
+            drive_number=di(amt_dto, "driveNumber"),
+            break_direction=break_dir,
+            break_type=break_type,
+            obi=obi,
+            poc=df(amt_dto, "poc"),
+            vah=df(amt_dto, "valueAreaHigh"),
+            val=df(amt_dto, "valueAreaLow"),
+            prior_poc=df(amt_dto, "priorPoc"),
+            npoc_above=df(amt_dto, "npocAbove"),
+            npoc_below=df(amt_dto, "npocBelow"),
+            tick_size=tick_size,
+            vwap_std=df(amt_dto, "vwapDeviationSigmas"),
+            vwap_upper_2=df(amt_dto, "vwapUpper2"),
+            vwap_lower_2=df(amt_dto, "vwapLower2"),
+            cvd_slope=df(amt_dto, "cvdSlope"),
+            absorption_side=ds(amt_dto, "absorptionSide"),
+            equity=risk_state.equity,
+            risk_per_trade_pct=risk_state.risk_per_trade_pct,
+            leg_lvn=nearest_leg_lvn,
+            bid=float(amt_dto.get("bid") or best_bid),
+            ask=float(amt_dto.get("ask") or best_ask),
+            time_str=effective_time,
+            session_phase=session_phase,
+            allow_trend=allow_trend,
+            allow_reversion=allow_reversion,
+            is_expiry=is_expiry,
+            profile_shape=ds(amt_dto, "profileShape"),
+            # deltaNormalizedOption is candle order-flow delta, not an option
+            # Greek. No chain-Greek producer exists, so options fall back to
+            # DEFAULT_OPTION_DELTA and futures stay None.
+            option_delta=(
+                DEFAULT_OPTION_DELTA if is_option_contract(symbol) else None
+            ),
+            contested_bubble_zone=db(amt_dto, "contestedZone"),
+            stacked_imbalance_direction=si_dir,
+            stacked_imbalance_magnitude=si_mag,
+            stacked_imbalance_price_low=si_low,
+            stacked_imbalance_price_high=si_high,
+            nearest_buy_print_below=buy_wall_below,
+            nearest_sell_print_above=sell_wall_above,
+            triple_a_phase=ds(amt_dto, "tripleAPhase"),
+            triple_a_signal=ds(amt_dto, "tripleASignal"),
+            absorption_cluster_high=df(amt_dto, "absorptionClusterHigh"),
+            absorption_cluster_low=df(amt_dto, "absorptionClusterLow"),
+            squeeze_detected=squeeze_detected,
+            squeeze_direction=squeeze_dir,
+            squeeze_trapped_level=trapped_lvl,
+            pullback_confirmed=pullback,
+            vars_result=amt_dto.get("vars"),
+            recent_decisions=tuple(recent_decisions or ()),
+        )
 
     def build(
         self,
@@ -321,168 +621,57 @@ class DecisionContextBuilder:
             A fully-populated DecisionContext
         """
         warmup_bars = 15
-        obi = float(amt_dto.get("obi") or 0.0)
+        df = self._df
+        obi = df(amt_dto, "obi")
         close_px = float(bar.close if bar else 0.0)
-        vah = float(amt_dto.get("valueAreaHigh") or 0.0)
-        val = float(amt_dto.get("valueAreaLow") or 0.0)
-        ofi = float(amt_dto.get("ofi") or 0.0)
-        vwap_upper_1 = float(amt_dto.get("vwapUpper1") or float("inf"))
-        vwap_lower_1 = float(amt_dto.get("vwapLower1") or float("-inf"))
-        best_bid = 0.0
-        best_ask = 0.0
-        if order_book is not None:
-            bids = getattr(order_book, "bids", ()) or ()
-            asks = getattr(order_book, "asks", ()) or ()
-            if bids: best_bid = float(bids[0].price)
-            if asks: best_ask = float(asks[0].price)
+        vah = df(amt_dto, "valueAreaHigh")
+        val = df(amt_dto, "valueAreaLow")
+        ofi = df(amt_dto, "ofi")
+        vwap_upper_1 = df(amt_dto, "vwapUpper1") or float("inf")
+        vwap_lower_1 = df(amt_dto, "vwapLower1") or float("-inf")
+        best_bid, best_ask = self._extract_best_bid_ask(order_book)
 
         # Session & Expiry
-        effective_time = str((bar.time if bar else None) or amt_dto.get("time") or "").strip()
-        is_epoch = (
-            effective_time.replace(".", "", 1).lstrip("-").isdigit()
-            and len(effective_time) >= 9
-            and "T" not in effective_time
-        )
-        is_iso = "T" in effective_time or "+" in effective_time or ":" in effective_time
-        session_info = None
-        if is_epoch or is_iso:
-            try: session_info = get_session_info(effective_time, market=market)
-            except Exception:
-                logger.warning(
-                    "session-info resolution failed for %r (market=%s); falling back to PRIMARY phase",
-                    effective_time, market, exc_info=True,
-                )
-        elif not effective_time:
-            # Fallback for live contexts where bar is not yet assembled
-            try: session_info = get_session_info(market=market)
-            except Exception:
-                logger.warning(
-                    "session-info resolution failed (market=%s); falling back to PRIMARY phase",
-                    market, exc_info=True,
-                )
-
+        effective_time, is_epoch, is_iso = self._parse_effective_time(bar, amt_dto)
+        session_info = self._fetch_session_info(effective_time, is_epoch, is_iso, market)
         session_phase = session_info.session if session_info else "PRIMARY"
-        bar_dt = ist_dt(effective_time) if (effective_time and (is_epoch or is_iso)) else None
-        is_expiry = (bar_dt.date() == contract_expiry) if (contract_expiry and bar_dt) else False
+        is_expiry = self._resolve_expiry(effective_time, is_epoch, is_iso, contract_expiry)
 
         # Direction, Setup, Position via extracted helpers
         agent_direction = self._resolve_direction(amt_dto, close_px, vah, val, obi, ofi, vwap_upper_1, vwap_lower_1, market=market)
         nearest_leg_lvn = self._nearest_leg_lvn(amt_dto, close_px)
         setup_evidence = self._build_setup_evidence(amt_dto, agent_direction, nearest_leg_lvn)
         # ponytail: a confirmed structural setup evidence establishes the trade direction
-        if setup_evidence and getattr(setup_evidence, "direction", None) and getattr(setup_evidence, "is_complete", lambda: False)():
-            agent_direction = setup_evidence.direction
-        if is_option_contract(symbol) and agent_direction == "SHORT":
-            # Retail scalpers are option buyers (long calls / long puts) with defined risk.
-            # Shorting naked options is disabled.
-            agent_direction = None
+        agent_direction = self._apply_setup_direction(agent_direction, setup_evidence)
+        agent_direction = self._apply_option_short_suppression(symbol, agent_direction)
         pos = self._extract_position(position, close_px, bar_index, entry_bar_index)
         _si_dir, _si_mag, _si_low, _si_high = _latest_stacked_imbalance(amt_dto)
         _buy_wall_below, _sell_wall_above = _print_levels_from_dto(amt_dto, bar)
 
-        # Squeeze (Fabio Playbook #4): direction + trapped level from Task 2a's
-        # DTO keys; pullback = a retest of the trapped VA level within 3 ticks.
-        squeeze_dir = str(amt_dto.get("squeezeDirection", ""))
-        trapped_lvl = float(amt_dto.get("squeezeTrappedLevel", 0.0))
-        pullback = False
-        if squeeze_dir and trapped_lvl > 0 and bar is not None:
-            tick = tick_size or 0.05
-            pullback = abs(float(bar.close) - trapped_lvl) <= 3.0 * tick  # ponytail: retest proxy; proper LVN-pullback when leg_lvn lands near trapped level
-
-        # Market state + break info
-        raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
-        break_dir = str(amt_dto.get("breakDirection") or "").upper()
-        break_type = str(amt_dto.get("breakType") or "").upper()
-        if raw_ms == "DEAD": amt_market_state = MarketState.DEAD
-        elif raw_ms == "IMBALANCED": amt_market_state = MarketState.IMBALANCED
-        else: amt_market_state = MarketState.BALANCED
-
-        bar_time = effective_time
+        # Squeeze, market state, session
+        squeeze_detected, squeeze_dir, trapped_lvl, pullback = self._resolve_squeeze(amt_dto, bar, tick_size)
+        amt_market_state = self._resolve_market_state_enum(amt_dto)
         allow_trend = session_info.allow_trend if session_info else True
         allow_reversion = session_info.allow_reversion if session_info else True
+        break_dir = self._ds(amt_dto, "breakDirection").upper()
+        break_type = self._ds(amt_dto, "breakType").upper()
 
-        return DecisionContext(
-            state=None,
-            bar=bar,
-            symbol=symbol,
-            market=market,
-            bar_index=bar_index,
-            session_open=session_allow_entry(
-                effective_time, market=market, contract_expiry=contract_expiry
-            ) if effective_time else (session_info.allow_entry if session_info else True),
-            warmup_complete=(bar_index + warm_bars) >= warmup_bars,
-            position_open=pos["pos_open"],
-            position_side=pos["pos_side"],
-            position_entry_price=pos["pos_entry"],
-            position_size=pos["pos_size"],
-            position_unrealized_pnl=pos["pos_pnl"],
-            position_sl=pos["pos_sl"],
-            position_tp=pos["pos_tp"],
-            position_bars_held=pos["pos_bars_held"],
-            cooldown_remaining_sec=cooldown_remaining_sec,
-            risk_halted=risk_state.halted,
-            consecutive_losses=risk_state.consecutive_losses,
-            agent_direction=agent_direction,
-            agent_probability=_DETERMINISTIC_CONVICTION,
-            data_quality=(
-                normalize_data_quality(
-                    amt_dto.get("dataQuality") or amt_dto.get("data_quality")
-                )
-                if ("dataQuality" in amt_dto or "data_quality" in amt_dto)
-                else None
-            ),
-            setup_evidence=setup_evidence,
-            market_state=amt_market_state,
-            balance_ratio=float(amt_dto.get("balanceRatio") or 0.0),
-            drive_entry_valid=bool(amt_dto.get("isSecondDrive") or False),
-            drive_number=int(amt_dto.get("driveNumber") or 0),
-            break_direction=break_dir,
-            break_type=break_type,
-            obi=obi,
-            poc=float(amt_dto.get("poc") or 0.0),
-            vah=float(amt_dto.get("valueAreaHigh") or 0.0),
-            val=float(amt_dto.get("valueAreaLow") or 0.0),
-            prior_poc=float(amt_dto.get("priorPoc") or 0.0),
-            npoc_above=float(amt_dto.get("npocAbove") or 0.0),
-            npoc_below=float(amt_dto.get("npocBelow") or 0.0),
-            tick_size=tick_size,
-            vwap_std=float(amt_dto.get("vwapDeviationSigmas") or 0.0),
-            vwap_upper_2=float(amt_dto.get("vwapUpper2") or 0.0),
-            vwap_lower_2=float(amt_dto.get("vwapLower2") or 0.0),
-            cvd_slope=float(amt_dto.get("cvdSlope") or 0.0),
-            absorption_side=amt_dto.get("absorptionSide") or "",
-            equity=risk_state.equity,
-            risk_per_trade_pct=risk_state.risk_per_trade_pct,
-            leg_lvn=nearest_leg_lvn,
-            bid=float(amt_dto.get("bid") or best_bid or 0.0),
-            ask=float(amt_dto.get("ask") or best_ask or 0.0),
-            time_str=effective_time,
-            session_phase=session_phase,
-            allow_trend=allow_trend,
-            allow_reversion=allow_reversion,
-            is_expiry=is_expiry,
-            profile_shape=str(amt_dto.get("profileShape") or ""),
-            # deltaNormalizedOption is candle order-flow delta, not an option
-            # Greek. No chain-Greek producer exists, so options fall back to
-            # DEFAULT_OPTION_DELTA and futures stay None.
-            option_delta=(
-                DEFAULT_OPTION_DELTA if is_option_contract(symbol) else None
-            ),
-            contested_bubble_zone=bool(amt_dto.get("contestedZone") or False),
-            stacked_imbalance_direction=_si_dir,
-            stacked_imbalance_magnitude=_si_mag,
-            stacked_imbalance_price_low=_si_low,
-            stacked_imbalance_price_high=_si_high,
-            nearest_buy_print_below=_buy_wall_below,
-            nearest_sell_print_above=_sell_wall_above,
-            triple_a_phase=str(amt_dto.get("tripleAPhase") or ""),
-            triple_a_signal=str(amt_dto.get("tripleASignal") or ""),
-            absorption_cluster_high=float(amt_dto.get("absorptionClusterHigh") or 0.0),
-            absorption_cluster_low=float(amt_dto.get("absorptionClusterLow") or 0.0),
-            squeeze_detected=bool(squeeze_dir and trapped_lvl > 0),
-            squeeze_direction=squeeze_dir,
-            squeeze_trapped_level=trapped_lvl,
-            pullback_confirmed=pullback,
-            vars_result=amt_dto.get("vars"),
-            recent_decisions=tuple(recent_decisions or ()),
+        ctx_kwargs = self._build_context_kwargs(
+            bar=bar, symbol=symbol, market=market, bar_index=bar_index,
+            effective_time=effective_time, contract_expiry=contract_expiry,
+            warm_bars=warm_bars, warmup_bars=warmup_bars,
+            cooldown_remaining_sec=cooldown_remaining_sec, risk_state=risk_state,
+            agent_direction=agent_direction, setup_evidence=setup_evidence,
+            pos=pos, amt_dto=amt_dto, best_bid=best_bid, best_ask=best_ask,
+            session_phase=session_phase, is_expiry=is_expiry,
+            allow_trend=allow_trend, allow_reversion=allow_reversion,
+            amt_market_state=amt_market_state, obi=obi, vah=vah, val=val,
+            nearest_leg_lvn=nearest_leg_lvn, tick_size=tick_size,
+            squeeze_detected=squeeze_detected, squeeze_dir=squeeze_dir,
+            trapped_lvl=trapped_lvl, pullback=pullback,
+            break_dir=break_dir, break_type=break_type,
+            si_dir=_si_dir, si_mag=_si_mag, si_low=_si_low, si_high=_si_high,
+            buy_wall_below=_buy_wall_below, sell_wall_above=_sell_wall_above,
+            recent_decisions=recent_decisions, session_info=session_info,
         )
+        return DecisionContext(**ctx_kwargs)
