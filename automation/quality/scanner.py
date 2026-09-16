@@ -7,22 +7,8 @@ from typing import List
 from pathlib import Path
 from radon.complexity import cc_visit
 
-
-@dataclass
-class QualityIssue:
-    file: str
-    line: int
-    rule: str
-    severity: str
-    message: str
-
-
-@dataclass
-class QualityReport:
-    issues: List[QualityIssue]
-    files_scanned: int
-    rules_violated: int
-    overall_score: float
+from automation.quality import QualityIssue, QualityReport
+from automation.quality.patterns import PatternDetector
 
 
 class CodeQualityScanner:
@@ -30,6 +16,7 @@ class CodeQualityScanner:
         self.config_path = Path(config_path)
         self.rules = self._load_rules()
         self._rules_loaded = True
+        self._pattern_detector = PatternDetector()
     
     @property
     def rules_loaded(self) -> bool:
@@ -95,6 +82,10 @@ class CodeQualityScanner:
         
         return issues
     
+    def _detect_patterns(self, filepath: str, source: str) -> List[QualityIssue]:
+        """Detect code anti-patterns."""
+        return self._pattern_detector.detect_patterns(filepath, source)
+    
     def scan(self, path: str) -> QualityReport:
         """Scan a file or directory for quality issues."""
         issues: List[QualityIssue] = []
@@ -111,6 +102,7 @@ class CodeQualityScanner:
             source = file.read_text()
             issues.extend(self._analyze_complexity(str(file), source))
             issues.extend(self._check_architecture(str(file), source))
+            issues.extend(self._detect_patterns(str(file), source))
         
         return QualityReport(
             issues=issues,
