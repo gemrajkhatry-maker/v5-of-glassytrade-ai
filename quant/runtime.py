@@ -75,6 +75,7 @@ from quant.config.constants import (
 from quant.amt_engine import AMTEngine
 from quant.engine.tick_handler import TickHandler
 from quant.engine.decision_loop import DecisionLoop
+from quant.engine.exit_manager import ExitManager
 from quant.amt.dto import empty_amt_dto
 from quant.amt.session.context import get_session_info
 from quant.bars import Bar
@@ -605,6 +606,9 @@ class QuantEngine:
         # context build, strategy evaluation, signal translation, submission).
         # Created after all dependencies are initialized so it can bind to them.
         self._decision_loop = self._create_decision_loop()
+        # ExitManager: encapsulates all exit evaluation and execution logic
+        # (bar exits, tick exits, thesis flip, full close, bookkeeping).
+        self._exit_manager = self._create_exit_manager()
 
     # =========================================================================
     # 2. TICK PROCESSING — tick ingestion, bar aggregation, AMT updates
@@ -870,6 +874,55 @@ class QuantEngine:
             advisor=getattr(self, "_advisor", None),
         )
 
+    def _create_exit_manager(self) -> ExitManager:
+        """Build an ExitManager wired to this engine's state and dependencies.
+
+        Called once at the end of ``__init__``. All mutable state is accessed
+        through callbacks so the manager is fully testable in isolation.
+        """
+        config = {
+            "symbol": self.symbol,
+            "market": self._market,
+            "contract_expiry": self._contract_expiry,
+            "tick_size": self._tick_size,
+            "cooldown_bars": self._cooldown_bars,
+        }
+        deps = {
+            "get_position_manager": self._get_position_manager,
+            "get_portfolio_risk": lambda: self._portfolio_risk,
+            "strategy": self._strategy,
+            "amt_engine": self._amt_engine,
+            "aggregator": self._aggregator,
+            "get_underlying_symbol": self._underlying if self._underlying_gateway is not None else None,
+            "close_lock": self._close_lock,
+            "underlying_gateway": self._underlying_gateway,
+            "risk": self._risk,
+        }
+        state = {
+            "get_bar_index": lambda: self._bar_index,
+            "get_entry_bar_index": lambda: self._entry_bar_index,
+            "get_entry_time_epoch": lambda: getattr(self, "_entry_time_epoch", 0.0),
+            "get_last_close_bar_index": lambda: self._last_close_bar_index,
+            "set_last_close_bar_index": lambda v: setattr(self, "_last_close_bar_index", v),
+            "get_open_trade_risk": lambda: getattr(self, "_open_trade_risk", 0.0),
+            "set_open_trade_risk": lambda v: setattr(self, "_open_trade_risk", v),
+            "get_state": lambda: self.state,
+            "set_state": lambda s: setattr(self, "state", s),
+            "get_last_depth": lambda: self._last_depth,
+            "get_recent_decisions": lambda: self._recent_decisions,
+            "get_underlying_amt_dto": lambda: self._underlying_amt_dto,
+            "get_last_underlying_bar": lambda: self._last_underlying_bar,
+            "get_option_amt_dto": lambda: self._option_amt_dto,
+        }
+        return ExitManager(
+            config=config,
+            deps=deps,
+            state=state,
+            emit=self._emit,
+            forecast_fn=self._fresh_forecast,
+            advisor=getattr(self, "_advisor", None),
+        )
+
     def _run_inner(self, max_steps: int | None = None) -> list[Event]:
         if not self._subscribed:
             self._gateway.subscribe(self.symbol)
@@ -960,55 +1013,20 @@ class QuantEngine:
         return self._latest_depth
 
     def _release_partial_reserves(self, pm: PositionManager, remaining) -> None:
-        """Fractional portfolio-risk reserve release after a tiered partial
-        exit — shared by the bar (_manage_exit) and tick (_manage_tick_exit)
-        paths so both book the same fraction of reserved open risk."""
-        if self._portfolio_risk is None:
-            return
-        if pm.last_partial_fill is not None:
-            closed_sz = abs(pm.last_partial_fill.position.size)
-            remaining_sz = abs(remaining.size) if remaining is not None else 0.0
-            total_sz = closed_sz + remaining_sz
-            fraction = closed_sz / total_sz if total_sz > 0 else 0.0
-            release = getattr(self, "_open_trade_risk", 0.0) * fraction
-            self._portfolio_risk.record_close(release, float(pm.last_partial_fill.pnl))
-            self._open_trade_risk = getattr(self, "_open_trade_risk", 0.0) - release
-        # Pyramid add-on PnL is NOT booked here: _execute_full_close's E11
-        # loop already pairs every add-on with its OWN fill pnl and risk_i —
-        # re-releasing the aggregate last_pyramid_pnl would double-book it.
+        """Fractional portfolio-risk reserve release after a tiered partial exit.
+
+        Delegates to the ExitManager. Retained as a thin wrapper so that
+        direct callers continue to work.
+        """
+        self._exit_manager._release_partial_reserves(pm, remaining)
 
     def _manage_tick_exit(self, tick_price: float, tick_time: str) -> None:
-        """Tick-level fast stop-loss and take-profit breach check (Fabio)."""
-        with self._close_lock:
-            pm = self._get_position_manager()
-            if pm.current_position is None:
-                return
-            # manage_tick_exit does NOT reset these per call (unlike manage_exit);
-            # clear them so stale values from an earlier tick/bar can't trigger
-            # duplicate reserve releases below.
-            pm.last_partial_fill = None
-            pm.last_pyramid_pnl = 0.0
-            # Adopt the survivor: a tick-path partial returns a NEW Position with
-            # the reduced size — keeping the pre-partial object as the current
-            # position would re-book the ORIGINAL size at the eventual full close.
-            try:
-                remaining = pm.manage_tick_exit(pm.current_position, tick_price, tick_time)
-            except Exception:
-                # C3: a broker/OMS failure while exiting must not kill the engine
-                # thread. Keep the position open so the exit is retried on the
-                # next tick/bar; the failure is loud so ops can intervene.
-                logger.exception(
-                    "❌ [EXIT FAILED] %s: tick-exit OMS call raised — position kept "
-                    "open, will retry next tick (engine stays alive)",
-                    self.symbol,
-                )
-                return
-            pm.current_position = remaining
-            self._release_partial_reserves(pm, remaining)
-            if remaining is None:
-                if self.state.position is not None:
-                    self.state = self.state.with_position(None)
-                self._book_full_close()
+        """Tick-level fast stop-loss and take-profit breach check (Fabio).
+
+        Delegates to the ExitManager. Retained as a thin wrapper so that
+        direct callers (TickHandler) continue to work.
+        """
+        self._exit_manager.manage_tick_exit(tick_price, tick_time)
 
     def _emit_merged_amt(self, base_dto: dict, time_str: str) -> None:
         merged = dict(self._underlying_amt_dto or base_dto)
@@ -1104,89 +1122,10 @@ class QuantEngine:
     def _check_thesis_flip(self, amt_dto: dict, bar) -> None:
         """Opposing-signal exit (thesis invalidation).
 
-        Runs ONLY after manage_exit declined to close (SL/spread/CVD/TP/
-        trail/time priority preserved). Re-runs the unchanged decision
-        pipeline with one bypass — gate 2's open-position blocker — through
-        the existing DecisionService so SignalBuilder qualification holds.
-        A fully-approved signal OPPOSITE the held side flattens now; a halt
-        gates entries, not exits, so this still runs while risk-halted.
+        Delegates to the ExitManager. Retained as a thin wrapper so that
+        direct callers continue to work.
         """
-        with self._close_lock:
-            pm = self._get_position_manager()
-            pos = pm.current_position
-            if pos is None:
-                return
-            exec_bar = bar  # close settles on the caller bar (premium scale)
-            # Basis parity: entries qualify on the UNDERLYING dto+bar whenever an
-            # underlying feed drives decisions — evaluating the flip on the
-            # option-side dto (what the positioned bar-exit path hands down)
-            # could approve on noise the entry qualification never saw. The
-            # executed close still settles on the caller bar (premium scale).
-            if self._underlying_gateway is not None:
-                amt_dto = self._underlying_amt_dto
-                bar = self._last_underlying_bar
-                if not amt_dto or bar is None:
-                    logger.info(
-                        "🔄 [THESIS FLIP] %s: skipped — underlying context "
-                        "(entry basis) unavailable this bar",
-                        self.symbol,
-                    )
-                    return
-            bars_since_close = (
-                self._bar_index - self._last_close_bar_index
-                if self._last_close_bar_index >= 0
-                else self._cooldown_bars  # no trade yet → no cooldown
-            )
-            cooldown_remaining_sec = max(0, self._cooldown_bars - bars_since_close) * int(
-                getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC) or DEFAULT_INTERVAL_SEC
-            )
-            ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
-            # One strategy seam: the positioned flip evaluation goes through the
-            # same should_enter entry point entries use (allow_positioned=True
-            # bypasses gate 2's open-position blocker and the halt entry gate),
-            # so a swapped-in strategy governs both entries and flips.
-            decision = self._strategy.should_enter(ctx, allow_positioned=True)
-            self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
-            if not (decision.approved and decision.signal is not None):
-                return
-            signal = decision.signal
-            held_side = "LONG" if pos.size > 0 else "SHORT"
-            is_put = is_put_symbol(self.symbol)
-            is_call = is_call_symbol(self.symbol)
-            if is_put:
-                held_thesis = "SHORT" if pos.size > 0 else "LONG"
-            elif is_call:
-                held_thesis = "LONG" if pos.size > 0 else "SHORT"
-            else:
-                held_thesis = held_side
-
-            # Same-direction approvals (and NO_EDGE) do nothing.
-            if signal.type == held_thesis:
-                return
-
-            # Fabio Structural Holding: do NOT flip an active trade on minor drift / micro momentum.
-            # A genuine thesis flip requires structural invalidation (BREAKOUT, TRIPLE_A, or confirmed VA_FADE).
-            if str(signal.reason).upper() == "MODEL_MOMENTUM":
-                logger.debug(
-                    "🔄 [THESIS FLIP SKIPPED] %s: opposing %s is minor drift (MODEL_MOMENTUM) — holding %s position",
-                    self.symbol, signal.type, held_thesis,
-                )
-                return
-
-            logger.info(
-                "🔄 [THESIS FLIP] %s: fresh %s approval (%s @ %.2f RR=%.2f) opposes "
-                "held %s thesis (pos %s @ %.2f) — flattening (OPPOSING_SIGNAL)",
-                self.symbol, signal.type, signal.model_label,
-                float(signal.entry), float(signal.rr), held_thesis,
-                held_side,
-                float(pos.open_price) if getattr(pos, "open_price", None) else 0.0,
-            )
-            pm._execute_full_close(
-                pos,
-                ExitDecision(True, "OPPOSING_SIGNAL", float(exec_bar.close)),
-                exec_bar.time,
-            )
-            self._book_full_close()
+        self._exit_manager.check_thesis_flip(amt_dto, bar)
 
     # =========================================================================
     # 5. RISK — session risk, portfolio risk, halt logic
@@ -1194,33 +1133,10 @@ class QuantEngine:
     def _book_full_close(self) -> None:
         """Shared post-full-close bookkeeping — the ONLY full-close release path.
 
-        Called exactly once per full close by every close site (bar exit, tick
-        exit, thesis-flip, EOD force-close): marks the cooldown bar index and
-        releases the aggregate portfolio-risk reservation for the trade. Prior
-        to this extraction each site duplicated the block inline; a divergence
-        (e.g. one path skipping the risk release) silently leaked aggregate
-        headroom for the rest of the day.
+        Delegates to the ExitManager. Retained as a thin wrapper so that
+        direct callers continue to work.
         """
-        pm = self._get_position_manager()
-        self._last_close_bar_index = self._bar_index
-        if self._portfolio_risk is not None:
-            self._portfolio_risk.record_close(
-                getattr(self, "_open_trade_risk", 0.0),
-                float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
-                symbol=self.symbol,
-                is_full_close=True,
-            )
-            self._open_trade_risk = 0.0
-        # Immediately notify advisor that position is closed (switch role back to Auction Scanner)
-        if hasattr(self, "_advisor") and self._advisor is not None:
-            try:
-                cooldown_sec = float(self._cooldown_bars * int(getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC) or DEFAULT_INTERVAL_SEC))
-                curr_bar = self._aggregator.current_bar or getattr(self.state, "last_bar", None)
-                if curr_bar is not None:
-                    close_ctx = self._build_context(curr_bar, self._amt_engine.last_amt_dto or {}, cooldown_sec)
-                    self._advisor.on_context(close_ctx)
-            except Exception as e:  # advisor context notify is best-effort
-                logger.debug(f"Advisor context notification failed: {e}")
+        self._exit_manager._book_full_close()
 
     def _get_position_manager(self) -> PositionManager:
         """Lazily create the PositionManager with the correct emit function."""
@@ -1243,49 +1159,10 @@ class QuantEngine:
     def force_close_position(self, reason: str) -> bool:
         """Time-driven full close of the base position AND pyramid add-ons.
 
-        EOD square-off backstop: the bar-driven SESSION_CLOSE (Phase 5) only
-        fires when a bar closes. If bars stop flowing near the close (feed
-        dead / engine starved), an open position would otherwise be carried
-        overnight — unacceptable for an intraday book. The coordinator's EOD
-        watchdog invokes this on the engine's behalf; it routes through
-        PositionManager._execute_full_close so pyramid add-ons, risk release
-        and PositionClosed events are handled exactly as the bar-driven path.
-        Idempotent: returns False when nothing is open.
+        Delegates to the ExitManager. Retained as a thin wrapper so that
+        direct callers (coordinator EOD watchdog) continue to work.
         """
-        with self._close_lock:
-            pm = self._get_position_manager()
-            pos = pm.current_position
-            if pos is None and not pm.pyramid_positions:
-                return False
-            bar = getattr(self._aggregator, "current_bar", None)
-            if pos is not None:
-                price = (
-                    float(bar.close)
-                    if bar is not None and bar.close
-                    else float(pos.open_price)
-                )
-            else:
-                price = float(bar.close) if bar is not None and bar.close else 0.0
-            from quant.contracts.timezones import IST as _IST
-            ts = datetime.now(tz=_IST).isoformat()
-            if pos is not None:
-                pm._execute_full_close(pos, ExitDecision(True, reason, price), ts)
-                pyramid_closed = 0
-            else:
-                # Base already gone but pyramid add-ons linger — close them
-                # through the single release path so the exit is stamped,
-                # logged and risk-released exactly like the base close.
-                # The count is surfaced below: a lingering-add-on EOD flatten
-                # that closes nothing (all guarded/already gone) is otherwise
-                # indistinguishable in the log from one that closed three.
-                pyramid_closed = close_lingering_pyramids(pm, price, ts, reason)
-            # Post-close bookkeeping — one shared release path.
-            self._book_full_close()
-            logger.warning(
-                "🔒 [EOD FORCE CLOSE] %s reason=%s price=%.2f pyramids_closed=%d",
-                self.symbol, reason, price, pyramid_closed,
-            )
-            return True
+        return self._exit_manager.execute_full_close(reason)
 
     def _fresh_forecast(self):
         """Return the cached TimesFM forecast unless it is stale (>1 bar old).
@@ -1311,86 +1188,12 @@ class QuantEngine:
         return tfm_fc
 
     def _manage_exit(self, amt_dto: dict, bar) -> None:
-        with self._close_lock:
-            pm = self._get_position_manager()
-            # manage_exit returns the surviving position (unchanged, or reduced by
-            # a tiered TP partial fill per spec §13.3), or None once fully closed.
-            current_pos = pm.current_position
-            was_open = current_pos is not None
-            tfm_fc = self._fresh_forecast()
-            try:
-                remaining = pm.manage_exit(
-                    amt_dto=amt_dto,
-                    bar=bar,
-                    position=current_pos,
-                    bar_index=self._bar_index,
-                    entry_bar_index=self._entry_bar_index,
-                    entry_time_epoch=getattr(self, '_entry_time_epoch', 0.0),
-                    timesfm_forecast=tfm_fc,
-                )
-            except Exception:
-                # C3: a broker/OMS failure while exiting must not kill the engine
-                # thread. Keep the position open so the exit is retried on the
-                # next bar; the failure is loud so ops can intervene.
-                logger.exception(
-                    "❌ [EXIT FAILED] %s: bar-exit OMS call raised — position kept "
-                    "open, will retry next bar (engine stays alive)",
-                    self.symbol,
-                )
-                return
-            pm.current_position = remaining
-            self._release_partial_reserves(pm, remaining)
-            if was_open and remaining is None:
-                self._book_full_close()
+        """Bar-driven exit evaluation.
 
-        # Run advisor on position management state so model reasons about open trade
-        if hasattr(self, "_advisor") and self._advisor is not None:
-            try:
-                risk_st = self._risk.state()
-                active_pos = remaining or self.state.position
-                if self._option_amt_dto is not None and self._last_underlying_bar is not None:
-                    advisor_ctx = DecisionContextBuilder().build(
-                        bar=bar,
-                        symbol=self.symbol,
-                        market=self._market,
-                        contract_expiry=self._contract_expiry,
-                        tick_size=self._tick_size,
-                        bar_index=self._bar_index,
-                        warm_bars=self._option_amt_engine.warm_bars if self._option_amt_engine else self._amt_engine.warm_bars,
-                        cooldown_remaining_sec=0.0,
-                        risk_state=risk_st,
-                        amt_dto=self._option_amt_dto if self._option_amt_dto else amt_dto,
-                        order_book=self._last_depth,
-                        position=active_pos,
-                        entry_bar_index=self._entry_bar_index,
-                        recent_decisions=list(self._recent_decisions),
-                    )
-                    self._advisor.on_context(advisor_ctx)
-                else:
-                    advisor_ctx = DecisionContextBuilder().build(
-                        bar=bar,
-                        symbol=self.symbol,
-                        market=self._market,
-                        contract_expiry=self._contract_expiry,
-                        tick_size=self._tick_size,
-                        bar_index=self._bar_index,
-                        warm_bars=self._amt_engine.warm_bars,
-                        cooldown_remaining_sec=0.0,
-                        risk_state=risk_st,
-                        amt_dto=amt_dto,
-                        order_book=self._last_depth,
-                        position=active_pos,
-                        entry_bar_index=self._entry_bar_index,
-                        recent_decisions=list(self._recent_decisions),
-                    )
-                    self._advisor.on_context(advisor_ctx)
-            except Exception as e:  # advisor context notify is best-effort
-                logger.debug(f"Advisor context notification failed: {e}")
-
-        # Thesis invalidation: normal exits ran first and the position
-        # survived — evaluate a fresh contrary approval against it.
-        if remaining is not None:
-            self._check_thesis_flip(amt_dto, bar)
+        Delegates to the ExitManager. Retained as a thin wrapper so that
+        direct callers (TickHandler) continue to work.
+        """
+        self._exit_manager.manage_exit(amt_dto, bar)
 
     # =========================================================================
     # 6. EVENTS — emission, event store, reconciliation

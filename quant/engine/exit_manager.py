@@ -171,7 +171,7 @@ class ExitManager:
 
         # --- Dependencies ---
         self._get_position_manager = deps["get_position_manager"]
-        self._portfolio_risk = deps.get("portfolio_risk")
+        self._get_portfolio_risk = deps.get("get_portfolio_risk", lambda: deps.get("portfolio_risk"))
         self._strategy = deps["strategy"]
         self._amt_engine = deps["amt_engine"]
         self._aggregator = deps["aggregator"]
@@ -438,7 +438,8 @@ class ExitManager:
         """Fractional portfolio-risk reserve release after a tiered partial
         exit — shared by the bar (manage_exit) and tick (manage_tick_exit)
         paths so both book the same fraction of reserved open risk."""
-        if self._portfolio_risk is None:
+        portfolio_risk = self._get_portfolio_risk()
+        if portfolio_risk is None:
             return
         if pm.last_partial_fill is not None:
             closed_sz = abs(pm.last_partial_fill.position.size)
@@ -447,7 +448,7 @@ class ExitManager:
             fraction = closed_sz / total_sz if total_sz > 0 else 0.0
             open_trade_risk = self._get_open_trade_risk()
             release = open_trade_risk * fraction
-            self._portfolio_risk.record_close(release, float(pm.last_partial_fill.pnl))
+            portfolio_risk.record_close(release, float(pm.last_partial_fill.pnl))
             self._set_open_trade_risk(open_trade_risk - release)
         # Pyramid add-on PnL is NOT booked here: _execute_full_close's E11
         # loop already pairs every add-on with its OWN fill pnl and risk_i —
@@ -466,8 +467,9 @@ class ExitManager:
         """
         pm = self._get_position_manager()
         self._set_last_close_bar_index(self._get_bar_index())
-        if self._portfolio_risk is not None:
-            self._portfolio_risk.record_close(
+        portfolio_risk = self._get_portfolio_risk()
+        if portfolio_risk is not None:
+            portfolio_risk.record_close(
                 self._get_open_trade_risk(),
                 float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
                 symbol=self._symbol,

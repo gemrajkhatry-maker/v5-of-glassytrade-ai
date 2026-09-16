@@ -58,6 +58,8 @@ def test_manage_exit_partial_releases_proportional_portfolio_risk():
     exits.is_risk_free.return_value = False
     exits.stop_state.return_value = (None, None)
     eng._exits = exits
+    # Also set on the PositionManager since it was already created
+    eng._get_position_manager()._exits = exits
 
     bar = Bar(time="t300", open=100.0, high=102.5, low=99.5, close=102.0, volume=10.0)
     eng._manage_exit({}, bar)

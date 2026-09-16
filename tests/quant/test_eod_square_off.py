@@ -266,6 +266,44 @@ def test_force_close_position_closes_base_and_pyramids():
     eng._pos_mgr = pm
     # Wire the PositionManager's emit to go through engine's _emit
     pm._emit = eng._emit
+    # event_appender needed by _emit
+    eng.event_appender = MagicMock()
+    eng.event_appender.append = lambda e: None
+    eng.persistence_health = MagicMock()
+    eng.persistence_health.failure = None
+    eng._is_paper_runtime = True
+    eng.persistence_degraded = False
+    eng.reconciliation_required = False
+    eng.persistence_failure = None
+    eng._recent_decisions = []
+    eng._trace = emitted
+    eng._bus = MagicMock()
+    eng._emit_lock = threading.Lock()
+    from quant.execution.exposure import ExposureState
+    eng.exposure_state = ExposureState.none()
+    # Wire ExitManager for delegated exit methods
+    eng._exit_manager = ExitManager(
+        config={"symbol": symbol, "market": "NSE"},
+        deps={
+            "get_position_manager": eng._get_position_manager,
+            "portfolio_risk": None,
+            "strategy": MagicMock(),
+            "amt_engine": MagicMock(),
+            "aggregator": eng._aggregator,
+            "close_lock": eng._close_lock,
+        },
+        state={
+            "get_bar_index": lambda: eng._bar_index,
+            "get_entry_bar_index": lambda: 0,
+            "get_last_close_bar_index": lambda: eng._last_close_bar_index,
+            "set_last_close_bar_index": lambda v: setattr(eng, "_last_close_bar_index", v),
+            "get_open_trade_risk": lambda: getattr(eng, "_open_trade_risk", 0.0),
+            "set_open_trade_risk": lambda v: setattr(eng, "_open_trade_risk", v),
+            "get_state": lambda: eng.state,
+            "set_state": lambda s: setattr(eng, "state", s),
+        },
+        emit=eng._emit,
+    )
 
     result = eng.force_close_position("EOD_SQUARE_OFF")
 
@@ -322,6 +360,44 @@ def test_force_close_position_falls_back_to_entry_price_without_bar():
     eng._pos_mgr = pm
     # Wire the PositionManager's emit to go through engine's _emit
     pm._emit = eng._emit
+    # event_appender needed by _emit
+    eng.event_appender = MagicMock()
+    eng.event_appender.append = lambda e: None
+    eng.persistence_health = MagicMock()
+    eng.persistence_health.failure = None
+    eng._is_paper_runtime = True
+    eng.persistence_degraded = False
+    eng.reconciliation_required = False
+    eng.persistence_failure = None
+    eng._recent_decisions = []
+    eng._trace = emitted
+    eng._bus = MagicMock()
+    eng._emit_lock = threading.Lock()
+    from quant.execution.exposure import ExposureState
+    eng.exposure_state = ExposureState.none()
+    # Wire ExitManager for delegated exit methods
+    eng._exit_manager = ExitManager(
+        config={"symbol": symbol, "market": "NSE"},
+        deps={
+            "get_position_manager": eng._get_position_manager,
+            "portfolio_risk": None,
+            "strategy": MagicMock(),
+            "amt_engine": MagicMock(),
+            "aggregator": eng._aggregator,
+            "close_lock": eng._close_lock,
+        },
+        state={
+            "get_bar_index": lambda: eng._bar_index,
+            "get_entry_bar_index": lambda: 0,
+            "get_last_close_bar_index": lambda: eng._last_close_bar_index,
+            "set_last_close_bar_index": lambda v: setattr(eng, "_last_close_bar_index", v),
+            "get_open_trade_risk": lambda: getattr(eng, "_open_trade_risk", 0.0),
+            "set_open_trade_risk": lambda v: setattr(eng, "_open_trade_risk", v),
+            "get_state": lambda: eng.state,
+            "set_state": lambda s: setattr(eng, "state", s),
+        },
+        emit=eng._emit,
+    )
 
     assert eng.force_close_position("EOD_SQUARE_OFF") is True
     assert eng.state.position is None
