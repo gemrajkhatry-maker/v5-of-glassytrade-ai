@@ -67,7 +67,13 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 
 from quant.aggregator import BarAggregator
+from quant.config.constants import (
+    CVD_KILL_THRESHOLD,
+    DETERMINISTIC_CONVICTION as _DETERMINISTIC_CONVICTION,
+    WARMUP_BARS as _WARMUP_BARS,
+)
 from quant.amt_engine import AMTEngine
+from quant.engine.tick_handler import TickHandler
 from quant.amt.dto import empty_amt_dto
 from quant.amt.session.context import get_session_info
 from quant.bars import Bar
@@ -156,12 +162,8 @@ _OPTION_SCALE_KEYS = (
 # Safe empty shape for the option-scale keys above (built once at import).
 _EMPTY_AMT_DTO = empty_amt_dto()
 
-_DETERMINISTIC_CONVICTION = 0.7
-# Minimum closed bars (live + seeded history) before the engine may decide.
-# The analysis kernel needs enough bars for a meaningful POC/VA/VWAP profile;
-# the AMT/decision design pins this at > 15 bars, which also keeps entries
-# out of the opening-noise window (15 minutes at the default 1m timeframe).
-_WARMUP_BARS = 15
+# _DETERMINISTIC_CONVICTION and _WARMUP_BARS are imported from
+# quant.config.constants (see top-of-file import).
 
 
 def _as_counter(value) -> int:
@@ -468,7 +470,7 @@ class QuantEngine:
         if time_stop_bars is None:
             time_stop_bars = max(1, int(time_stop_minutes) * 60 // _interval_sec)
         # ponytail: mirror BE constant; tune from journal replay later
-        self._exits = ExitEngine(time_stop_bars=time_stop_bars, cvd_kill_threshold=2.0)
+        self._exits = ExitEngine(time_stop_bars=time_stop_bars, cvd_kill_threshold=CVD_KILL_THRESHOLD)
         # Strategy — pluggable entry/exit logic. Defaults to the AMT scalping
         # playbook (Fabio Valentini) or TimesFM autonomous management.
         if strategy is not None:
@@ -743,6 +745,50 @@ class QuantEngine:
         except Exception as e:  # certification record append must never break trading
             logger.debug(f"Certification record append failed: {e}")
 
+    def _create_tick_handler(self) -> TickHandler:
+        """Build a TickHandler wired to this engine's callbacks and state.
+
+        Called once by ``_run_inner()`` before the tick loop starts. All
+        callbacks are bound methods or thin closures so the handler can drive
+        the full pipeline without knowing about QuantEngine internals.
+        """
+        def _depth_update(depth) -> None:
+            self._last_depth = self._depth_to_book(depth)
+
+        def _hotpath_emit(symbol: str, phase: str, time_str: str, price: float, source: str) -> None:
+            if _HOTPATH.enabled:
+                _HOTPATH.try_emit(symbol, phase, time=time_str, price=price, source=source)
+
+        return TickHandler(
+            symbol=self.symbol,
+            macro_aggregator=self._aggregator,
+            micro_aggregator=self._micro_aggregator,
+            amt_engine=self._amt_engine,
+            state_getter=lambda: self.state,
+            # Core callbacks
+            manage_tick_exit_callback=self._manage_tick_exit,
+            decide_callback=self._decide,
+            on_bar_closed_callback=self._on_bar_closed,
+            manage_exit_callback=self._manage_exit,
+            # Option-specific (None for futures-only engines)
+            underlying_gateway=self._underlying_gateway,
+            underlying_aggregator=self._underlying_aggregator,
+            micro_underlying_aggregator=self._micro_underlying_aggregator,
+            option_amt_engine=self._option_amt_engine,
+            # Live quote and depth
+            live_quote_callback=self._live.on_quote,
+            depth_callback=_depth_update,
+            # Hotpath tracing
+            hotpath_callback=_hotpath_emit if _HOTPATH.enabled else None,
+            # State tracking setters (keep QuantEngine state in sync)
+            underlying_bar_setter=lambda bar: setattr(self, "_last_underlying_bar", bar),
+            underlying_amt_dto_setter=lambda dto: setattr(self, "_underlying_amt_dto", dto),
+            option_amt_dto_setter=lambda dto: setattr(self, "_option_amt_dto", dto),
+            bar_index_increaser=lambda: setattr(self, "_bar_index", self._bar_index + 1),
+            bar_closed_emitter=lambda sym, t, bar: self._emit(BarClosed(symbol=sym, time=t, bar=bar)),
+            merged_amt_emitter=self._emit_merged_amt,
+        )
+
     def _run_inner(self, max_steps: int | None = None) -> list[Event]:
         if not self._subscribed:
             self._gateway.subscribe(self.symbol)
@@ -791,6 +837,7 @@ class QuantEngine:
             )
             self._advisor.on_context(ctx)
 
+        tick_handler = self._create_tick_handler()
         steps = 0
         while True:
             if max_steps is not None and steps >= max_steps:
@@ -800,91 +847,7 @@ class QuantEngine:
                 break
             steps += 1
             self._last_tick_wall = time.time()
-            if _HOTPATH.enabled:
-                _HOTPATH.try_emit(
-                    self.symbol, "tick",
-                    time=str(tick.time), price=float(tick.price), source="option",
-                )
-            # 0. Tick-level fast SL/TP protection (Fabio: exit immediately on stop breach, never wait 5m)
-            if self.state.position is not None:
-                self._manage_tick_exit(float(tick.price), str(tick.time))
-
-            # When an underlying feed is present, option ticks aggregate into option candles,
-            # while underlying futures ticks feed the AMT auction structure engine.
-            if self._underlying_gateway is not None:
-                # 1. Micro-trigger: option's own ticks feed 1-min micro aggregator for fast entry decisions
-                if self._micro_aggregator is not None:
-                    micro_bar = self._micro_aggregator.add_tick(tick)
-                    if micro_bar is not None and self.state.position is None:
-                        if self._underlying_amt_dto and self._last_underlying_bar is not None:
-                            self._decide(
-                                self._underlying_amt_dto,
-                                self._last_underlying_bar,
-                                execution_bar=micro_bar,
-                            )
-
-                # Option's OWN ticks feed the option's 5m aggregator to form real option candles
-                option_bar = self._aggregator.add_tick(tick)
-                if self._option_amt_engine is not None:
-                    self._option_amt_engine.on_tick(tick, self._aggregator.current_bar)
-                if option_bar is not None:
-                    self._bar_index += 1
-                    self._emit(BarClosed(symbol=self.symbol, time=option_bar.time, bar=option_bar))
-                    if self._option_amt_engine is not None:
-                        self._option_amt_dto = self._option_amt_engine.analyze(option_bar)
-                        self._emit_merged_amt(self._option_amt_dto, option_bar.time)
-                        if self.state.position is not None:
-                            self._manage_exit(self._option_amt_dto, option_bar)
-                        elif self._micro_aggregator is None:
-                            if self._underlying_amt_dto and self._last_underlying_bar is not None:
-                                self._decide(
-                                    self._underlying_amt_dto,
-                                    self._last_underlying_bar,
-                                    execution_bar=option_bar,
-                                )
-
-                # 2. Underlying futures ticks feed the underlying aggregator and AMT engine.
-                if self._underlying_aggregator is not None:
-                    utick = self._underlying_gateway.try_next_tick()
-                    while utick is not None:
-                        if _HOTPATH.enabled:
-                            _HOTPATH.try_emit(
-                                self.symbol, "tick",
-                                time=str(utick.time), price=float(utick.price),
-                                source="underlying",
-                            )
-                        if self._micro_underlying_aggregator is not None:
-                            micro_ubar = self._micro_underlying_aggregator.add_tick(utick)
-                            if micro_ubar is not None:
-                                self._last_underlying_bar = micro_ubar
-                        ubar = self._underlying_aggregator.add_tick(utick)
-                        self._amt_engine.on_tick(utick, self._underlying_aggregator.current_bar)
-                        if ubar is not None:
-                            self._last_underlying_bar = ubar
-                            self._underlying_amt_dto = self._amt_engine.analyze(ubar)
-                            self._emit_merged_amt(self._underlying_amt_dto, ubar.time)
-                        utick = self._underlying_gateway.try_next_tick()
-            else:
-                # Direct instrument / Futures: micro-trigger evaluation
-                if self._micro_aggregator is not None:
-                    micro_bar = self._micro_aggregator.add_tick(tick)
-                    if micro_bar is not None and self.state.position is None:
-                        amt_dto = self._amt_engine.last_amt_dto
-                        if amt_dto:
-                            self._decide(amt_dto, micro_bar)
-
-                bar = self._aggregator.add_tick(tick)
-                self._amt_engine.on_tick(tick, self._aggregator.current_bar)
-                if bar is not None:
-                    self._on_bar_closed(bar)
-
-            # Per-tick live LTP/OI/depth and real-time forming live candle —
-            # the option's own forming candle is self._aggregator.current_bar
-            self._live.on_quote(
-                self.symbol, tick, current_bar=self._aggregator.current_bar
-            )
-            if tick.depth is not None:
-                self._last_depth = self._depth_to_book(tick.depth)
+            tick_handler.process_tick(tick)
         return list(self._trace)
 
     @property
