@@ -22,6 +22,7 @@ from quant.amt.profile.volume_profile import IncrementalVolumeProfile
 from quant.amt.orderflow.footprint import TickFootprintAccumulator
 from quant.amt.session.npoc import NPOCTracker
 from quant.bars import Bar
+from quant.config.constants import SEED_CACHE_TTL_SECONDS
 from quant.contracts.value_objects import FloatOHLC
 from quant.session_levels import SessionLevelStore
 from quant.state import _epoch_to_iso, session_date_key
@@ -236,7 +237,7 @@ class AMTEngine:
         seed_interval = self._seed_interval_str()
         cache_key = (self.symbol, seed_interval)
         cached = _SEED_CACHE.get(cache_key)
-        if cached and (time.monotonic() - cached[0]) < 300.0:
+        if cached and (time.monotonic() - cached[0]) < SEED_CACHE_TTL_SECONDS:
             logger.info("AMT history seed: reusing cached history for %s (%d candles)", self.symbol, len(cached[1]))
             candles = list(cached[1])
         elif self._seed_scheduler is not None:
