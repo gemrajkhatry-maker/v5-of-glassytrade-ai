@@ -1,20 +1,22 @@
 """Gate 3 — the Triple-A edge (Fabio: absorption -> accumulation -> aggression)."""
 
 from quant.amt.orderflow.aggression import canonical_absorption_direction
+from quant.config.constants import (
+    ABSORPTION_MAX_AGE_BARS as _ABSORPTION_MAX_AGE_BARS,
+    OBI_AGGRESSION_THRESHOLD as _OBI_AGGRESSION_THRESHOLD,
+)
 from quant.contracts.enums import MarketState
 
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 
-# Fresh absorption window (bars): the absorption must be recent enough to back
-# the breakout — older footprints are re-tested, not traded through.
-_ABSORPTION_MAX_AGE_BARS = 5
+# _ABSORPTION_MAX_AGE_BARS: fresh absorption window (bars); the absorption must
+# be recent enough to back the breakout — older footprints are re-tested, not
+# traded through. Imported from quant.config.constants.
 
-# Depth-derived order-flow aggression (Fabio's A3): |OBI| above this threshold
-# with the price beyond the matching VWAP band is an aggression confirmation.
-# OBI is the live order-book imbalance ([-1, 1]) computed by the AMT analyzer
-# from the Dhan 5-level depth snapshot.
-_OBI_AGGRESSION_THRESHOLD = 0.20
+# _OBI_AGGRESSION_THRESHOLD: depth-derived order-flow aggression (Fabio's A3);
+# |OBI| above this threshold with the price beyond the matching VWAP band is
+# an aggression confirmation. Imported from quant.config.constants.
 
 # Fabio's 1-minute acceptance rule: an entry must be a full-body candle close in
 # the trade direction, NOT a wick probe or a mid-candle entry. Entry signals fire
