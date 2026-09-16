@@ -1,3 +1,6 @@
+import ast
+import re
+
 import yaml
 from dataclasses import dataclass, field
 from typing import List
@@ -58,6 +61,40 @@ class CodeQualityScanner:
         
         return issues
     
+    def _check_architecture(self, filepath: str, source: str) -> List[QualityIssue]:
+        """Check for forbidden architectural dependencies."""
+        issues: List[QualityIssue] = []
+        forbidden = self.rules['rules']['architecture'].get('forbidden_dependencies', [])
+        
+        try:
+            tree = ast.parse(source)
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    module = node.module or ""
+                    for rule in forbidden:
+                        from_pattern = rule['from'].replace('*', '.*')
+                        to_pattern = rule['to'].replace('*', '.*')
+                        
+                        # Check if this import matches a forbidden pattern
+                        if re.match(from_pattern, module):
+                            for name in node.names:
+                                full_import = f"{module}.{name.name}"
+                                # Check if importing from forbidden target
+                                target_module = to_pattern.replace('from ', '')
+                                if re.match(target_module, full_import) or re.match(target_module, module):
+                                    issues.append(QualityIssue(
+                                        file=filepath,
+                                        line=node.lineno,
+                                        rule="architecture.forbidden_dependency",
+                                        severity="error",
+                                        message=f"Forbidden dependency: {module} -> {name.name}"
+                                    ))
+        except Exception:
+            pass
+        
+        return issues
+    
     def scan(self, path: str) -> QualityReport:
         """Scan a file or directory for quality issues."""
         issues: List[QualityIssue] = []
@@ -73,6 +110,7 @@ class CodeQualityScanner:
             files_scanned += 1
             source = file.read_text()
             issues.extend(self._analyze_complexity(str(file), source))
+            issues.extend(self._check_architecture(str(file), source))
         
         return QualityReport(
             issues=issues,
