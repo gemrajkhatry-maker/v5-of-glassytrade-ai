@@ -29,8 +29,9 @@ or programmatically (tests/harnesses):
         print(r)
 
 When disabled, call sites short-circuit on a single boolean — no allocation
-on the hot path. Stdlib only: no quant imports, so this module can never
-participate in an import cycle.
+on the hot path. Only imports stdlib + quant.config.constants (pure-data
+constants, no risk of import cycle), so this module can never participate
+in an import cycle.
 """
 
 from __future__ import annotations
@@ -45,15 +46,16 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
 
+from quant.config.constants import (
+    DEFAULT_RING_SIZE as _DEFAULT_RING,
+    JSONL_FLUSH_BATCH as _JSONL_FLUSH_BATCH,
+)
+
 logger = logging.getLogger(__name__)
 
 _ENV_FLAG = "GLASSYTRADE_HOTPATH_TRACE"
 _ENV_FILE = "GLASSYTRADE_HOTPATH_TRACE_FILE"
-_DEFAULT_RING = 8_192
-# JSONL write buffering: tick records accumulate in memory and flush once the
-# buffer reaches this size; non-tick phases flush immediately so a crash loses
-# at most the pending tick burst.
-_JSONL_FLUSH_BATCH = 128
+# _DEFAULT_RING and _JSONL_FLUSH_BATCH are imported from quant.config.constants.
 
 # Phases in canonical order (matches the documented hot path).
 PHASES: Tuple[str, ...] = ("tick", "bar_closed", "decision", "fill", "snapshot")
