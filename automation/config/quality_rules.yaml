@@ -1,0 +1,20 @@
+rules:
+  complexity:
+    max_cyclomatic: 10
+    max_cognitive: 15
+    max_lines_per_function: 50
+  
+  naming:
+    function_pattern: "^[a-z_][a-z0-9_]*$"
+    class_pattern: "^[A-Z][a-zA-Z0-9]*$"
+    constant_pattern: "^[A-Z_][A-Z0-9_]*$"
+  
+  architecture:
+    max_imports_per_file: 20
+    forbidden_dependencies:
+      - from: "quant.*"
+        to: "backend.*"
+  
+  documentation:
+    min_docstring_coverage: 0.8
+    require_module_docstrings: true
