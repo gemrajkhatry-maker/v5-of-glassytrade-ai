@@ -740,8 +740,8 @@ class QuantEngine:
                 rec["bar_index"] = self._bar_index
                 rec["position_open"] = self.state.position is not None
             self.cert_records.append(rec)
-        except Exception:  # silent-except - certification record append must never break trading
-            pass  # certification must never break trading
+        except Exception as e:  # certification record append must never break trading
+            logger.debug(f"Certification record append failed: {e}")
 
     def _run_inner(self, max_steps: int | None = None) -> list[Event]:
         if not self._subscribed:
@@ -1044,8 +1044,8 @@ class QuantEngine:
                 } if decision.signal else None,
                 "position_size": None,
             })
-        except Exception:  # silent-except - certification decision record must never break trading
-            pass
+        except Exception as e:  # certification decision record must never break trading
+            logger.debug(f"Certification decision record failed: {e}")
         self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
         if hasattr(self, "_advisor") and self._advisor is not None:
             if self._option_amt_dto is not None and execution_bar is not None:
@@ -1410,8 +1410,8 @@ class QuantEngine:
                     recent_decisions=list(self._recent_decisions),
                 )
                 self._advisor.on_context(pos_ctx)
-            except Exception:  # silent-except - advisor context notify is best-effort
-                pass
+            except Exception as e:  # advisor context notify is best-effort
+                logger.debug(f"Advisor context notification failed: {e}")
 
     def _latch_or_signal_block(self, signal, block_reason: str, bar_time: str) -> None:
         """Record a blocked approval. First occurrence of an episode (same
@@ -1575,8 +1575,8 @@ class QuantEngine:
                 if curr_bar is not None:
                     close_ctx = self._build_context(curr_bar, self._amt_engine.last_amt_dto or {}, cooldown_sec)
                     self._advisor.on_context(close_ctx)
-            except Exception:  # silent-except - advisor context notify is best-effort
-                pass
+            except Exception as e:  # advisor context notify is best-effort
+                logger.debug(f"Advisor context notification failed: {e}")
 
     def _get_position_manager(self) -> PositionManager:
         """Lazily create the PositionManager with the correct emit function."""
@@ -1740,8 +1740,8 @@ class QuantEngine:
                         recent_decisions=list(self._recent_decisions),
                     )
                     self._advisor.on_context(advisor_ctx)
-            except Exception:  # silent-except - advisor context notify is best-effort
-                pass
+            except Exception as e:  # advisor context notify is best-effort
+                logger.debug(f"Advisor context notification failed: {e}")
 
         # Thesis invalidation: normal exits ran first and the position
         # survived — evaluate a fresh contrary approval against it.
