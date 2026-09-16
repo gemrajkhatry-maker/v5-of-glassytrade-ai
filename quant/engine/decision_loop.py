@@ -135,6 +135,7 @@ class DecisionLoop:
         self._set_open_trade_risk = state.get("set_open_trade_risk")
         self._get_exposure_state = state.get("get_exposure_state")
         self._set_exposure_state = state.get("set_exposure_state")
+        self._set_entry_time_epoch = state.get("set_entry_time_epoch")
 
         # --- Event emission ---
         self._emit = emit
@@ -567,6 +568,8 @@ class DecisionLoop:
 
         # Update engine state
         self._set_entry_bar_index(self._get_bar_index())
+        if self._set_entry_time_epoch is not None:
+            self._set_entry_time_epoch(_bar_epoch_ms(bar.time) / 1000.0)
         if self._pop_latch is not None:
             self._pop_latch((getattr(signal, "symbol", "") or self._symbol, str(signal.type)))
         else:

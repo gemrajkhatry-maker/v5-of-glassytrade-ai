@@ -74,6 +74,7 @@ from quant.config.constants import (
 )
 from quant.amt_engine import AMTEngine
 from quant.engine.tick_handler import TickHandler
+from quant.engine.decision_loop import DecisionLoop
 from quant.amt.dto import empty_amt_dto
 from quant.amt.session.context import get_session_info
 from quant.bars import Bar
@@ -578,6 +579,10 @@ class QuantEngine:
         # quant.wiring_advisor.build_live_advisor — so backtest/replay
         # constructions stay thread-free and reproducible.
         self._advisor = advisor
+        # DecisionLoop: encapsulates the entry decision pipeline (entry guards,
+        # context build, strategy evaluation, signal translation, submission).
+        # Created after all dependencies are initialized so it can bind to them.
+        self._decision_loop = self._create_decision_loop()
 
     # =========================================================================
     # 2. TICK PROCESSING — tick ingestion, bar aggregation, AMT updates
@@ -789,6 +794,60 @@ class QuantEngine:
             merged_amt_emitter=self._emit_merged_amt,
         )
 
+    def _create_decision_loop(self) -> DecisionLoop:
+        """Build a DecisionLoop wired to this engine's state and dependencies.
+
+        Called once at the end of ``__init__``. All mutable state is accessed
+        through callbacks so the loop is fully testable in isolation.
+        """
+        config = {
+            "symbol": self.symbol,
+            "market": self._market,
+            "contract_expiry": self._contract_expiry,
+            "tick_size": self._tick_size,
+            "cooldown_bars": self._cooldown_bars,
+            "max_lots": self._max_lots,
+        }
+        deps = {
+            "risk": self._risk,
+            "portfolio_risk": self._portfolio_risk,
+            "oms": self._oms,
+            "strategy": self._strategy,
+            "amt_engine": self._amt_engine,
+            "get_position_manager": self._get_position_manager,
+            "execution_model": self._execution_model,
+            "contract": self._contract,
+            "underlying_gateway": self._underlying_gateway,
+            "execution_enabled": self._execution_enabled,
+            "get_underlying_symbol": self._underlying if self._underlying_gateway is not None else None,
+        }
+        state = {
+            "get_bar_index": lambda: self._bar_index,
+            "get_entry_bar_index": lambda: self._entry_bar_index,
+            "set_entry_bar_index": lambda v: setattr(self, "_entry_bar_index", v),
+            "get_last_close_bar_index": lambda: self._last_close_bar_index,
+            "get_latch": lambda: self._latch,
+            "set_latch": lambda k, v: self._latch.__setitem__(k, v),
+            "clear_latch": lambda: self._latch.clear(),
+            "pop_latch": lambda key: self._latch.pop(key, None),
+            "get_cert_records": lambda: self.cert_records,
+            "get_last_depth": lambda: self._last_depth,
+            "get_recent_decisions": lambda: self._recent_decisions,
+            "get_open_trade_risk": lambda: getattr(self, "_open_trade_risk", 0.0),
+            "set_open_trade_risk": lambda v: setattr(self, "_open_trade_risk", v),
+            "get_exposure_state": lambda: getattr(self, "exposure_state", None),
+            "set_exposure_state": lambda v: setattr(self, "exposure_state", v),
+            "set_entry_time_epoch": lambda v: setattr(self, "_entry_time_epoch", v),
+        }
+        return DecisionLoop(
+            config=config,
+            deps=deps,
+            state=state,
+            emit=self._emit,
+            forecast_fn=self._fresh_forecast,
+            advisor=getattr(self, "_advisor", None),
+        )
+
     def _run_inner(self, max_steps: int | None = None) -> list[Event]:
         if not self._subscribed:
             self._gateway.subscribe(self.symbol)
@@ -976,426 +1035,26 @@ class QuantEngine:
 
     # =========================================================================
     # 4. DECISIONS — entry gating, signal translation, submission
+    #    Delegated to DecisionLoop (quant/engine/decision_loop.py)
     # =========================================================================
     def _decide(self, amt_dto: dict, bar, execution_bar=None) -> None:
-        blocked, cooldown_remaining_sec = self._entry_guards(bar)
-        if blocked:
-            return
+        """Delegate entry evaluation to the DecisionLoop.
 
-        decision, ctx, amt_dto, risk_st = self._build_decision(
-            amt_dto, bar, execution_bar, cooldown_remaining_sec,
-)
-
-        # S1: record the decision itself — gates with pass/fail and reasons.
-        try:
-            self.cert_records.append({
-                "symbol": self.symbol, "time": bar.time,
-                "stage": "decision",
-                "approved": decision.approved, "reason": decision.reason,
-                "block_reasons": list(decision.block_reasons or ()),
-                "gate_results": [
-                    {"gate": g.gate if hasattr(g, 'gate') else getattr(g, 'name', '?'),
-                     "passed": bool(getattr(g, 'passed', False))}
-                    for g in (decision.gate_results or ())
-                ],
-                "signal": {
-                    "type": decision.signal.type,
-                    "entry": float(decision.signal.entry),
-                    "sl": float(decision.signal.sl),
-                    "tp": float(decision.signal.tp),
-                    "rr": float(decision.signal.rr),
-                } if decision.signal else None,
-                "position_size": None,
-            })
-        except Exception as e:  # certification decision record must never break trading
-            logger.debug(f"Certification decision record failed: {e}")
-        self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
-        if hasattr(self, "_advisor") and self._advisor is not None:
-            if self._option_amt_dto is not None and execution_bar is not None:
-                advisor_ctx = DecisionContextBuilder().build(
-                    bar=execution_bar,
-                    symbol=self.symbol,
-                    market=self._market,
-                    contract_expiry=self._contract_expiry,
-                    tick_size=self._tick_size,
-                    bar_index=self._bar_index,
-                    warm_bars=self._option_amt_engine.warm_bars if self._option_amt_engine else self._amt_engine.warm_bars,
-                    cooldown_remaining_sec=cooldown_remaining_sec,
-                    risk_state=risk_st,
-                    amt_dto=self._option_amt_dto,
-                    order_book=self._last_depth,
-                    position=self.state.position,
-                    entry_bar_index=self._entry_bar_index,
-                    recent_decisions=list(self._recent_decisions),
-                )
-                self._advisor.on_context(advisor_ctx)
-            else:
-                self._advisor.on_context(ctx)
-
-        if decision.approved and decision.signal is not None:
-            self._translate_and_submit(decision, bar, amt_dto, risk_st)
-        else:
-            # Market state changed — all open blocking episodes are stale.
-            self._latch.clear()
-            if decision.reason == "OPPOSING_TYPE":
-                logger.debug(
-                    "⚪ [DECISION EVAL] %s: approved=False reason=OPPOSING_TYPE phase=%s",
-                    self.symbol,
-                    decision.phase,
-                )
-            else:
-                logger.info(
-                    "⚪ [DECISION EVAL] %s: approved=False reason=%s phase=%s blocked=%s",
-                    self.symbol,
-                    decision.reason,
-                    decision.phase,
-                    decision.block_reasons,
-                )
+        The DecisionLoop encapsulates the full pipeline: entry guards, context
+        build, strategy evaluation, signal translation, risk ceilings, sizing,
+        OMS submission, and event emission.
+        """
+        self._decision_loop.evaluate(amt_dto, bar, execution_bar)
 
     def _entry_guards(self, bar):
         """Debounce, risk-halt and post-trade cooldown gates.
 
-        Returns ``(blocked, cooldown_remaining_sec)``; the halt and cooldown
-        branches emit their DecisionProduced, the debounce branch emits nothing.
+        Delegates to the DecisionLoop. Retained as a thin wrapper so that
+        direct callers (tests, exposure-state checks) continue to work.
+
+        Returns ``(blocked, cooldown_remaining_sec)``.
         """
-        # Broker may hold partial exposure after a timeout/cancel race. Until
-        # reconciled, this engine must stay flat and reject new entries.
-        exposure = getattr(self, "exposure_state", None)
-        if exposure is not None and not exposure.can_open_new_position:
-            logger.error(
-                "[BLOCKED] %s: broker exposure requires reconciliation (%s)",
-                self.symbol, exposure.status,
-            )
-            return True, 0.0
-        # ponytail: debounce repeated rejected entries to avoid 60-second log flood
-        if (self._bar_index - getattr(self, "_last_rejected_bar_index", -999)) < 2:
-            return True, 0.0
-        # --- Guard 0: trade-count / risk halt check BEFORE building any context ---
-        can_trade, no_trade_reason = self._risk.can_trade()
-        if not can_trade:
-            logger.info(
-                "🚫 [BLOCKED] %s: %s (trades_today=%d)",
-                self.symbol, no_trade_reason, self._risk.state().trades_today,
-            )
-            # Defect 2 fix: emit an explicit HALTED DecisionProduced so the
-            # WS snapshot clears any stale approved/ENTER state that was
-            # carried over from before the halt was triggered.
-            from quant.decision.decision_service import QuantDecision
-            halted_decision = QuantDecision(
-                approved=False,
-                signal=None,
-                reason="HALTED",
-                phase="",
-                gate_results=(),
-                block_reasons=(f"Risk: {no_trade_reason}",),
-                model_label="",
-            )
-            self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=halted_decision))
-            return True, 0.0
-        # --- Guard 1: post-trade cooldown (bars since last close) ---
-        bars_since_close = (
-            self._bar_index - self._last_close_bar_index
-            if self._last_close_bar_index >= 0
-            else self._cooldown_bars  # no trade yet → no cooldown
-        )
-        cooldown_bars_remaining = max(0, self._cooldown_bars - bars_since_close)
-        # Convert bars to seconds for the DecisionContext contract
-        cooldown_remaining_sec = cooldown_bars_remaining * int(
-            getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC) or DEFAULT_INTERVAL_SEC
-        )
-        if cooldown_bars_remaining > 0:
-            logger.debug(
-                "⏳ [COOLDOWN] %s: %d bars remaining before next entry",
-                self.symbol, cooldown_bars_remaining,
-            )
-            from quant.decision.decision_service import QuantDecision
-            cooldown_decision = QuantDecision(
-                approved=False,
-                signal=None,
-                reason="COOLDOWN",
-                phase="",
-                gate_results=(),
-                block_reasons=(f"Cooldown: {cooldown_bars_remaining} bars remaining",),
-                model_label="",
-            )
-            self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=cooldown_decision))
-            return True, cooldown_remaining_sec
-        return False, cooldown_remaining_sec
-
-    def _build_decision(self, amt_dto, bar, execution_bar, cooldown_remaining_sec):
-        """Build the DecisionContext, ask the strategy, translate to the option leg.
-
-        Returns ``(decision, ctx, amt_dto, risk_st)``.
-        """
-        # Event purity (F5): the decision uses the DTO that arrived WITH this
-        # bar — re-reading mutable last_amt_dto here could pick up evidence
-        # from a LATER bar's analyze() on a multi-threaded consumer.
-        amt_dto = amt_dto or self._amt_engine.last_amt_dto or {}
-        risk_st = self._risk.state()
-        self._cert_trace(
-            bar=bar,
-            stage="context",
-            market_data={
-                "open": float(bar.open), "high": float(bar.high),
-                "low": float(bar.low), "close": float(bar.close),
-                "volume": float(bar.volume),
-            },
-            profile_data={
-                "poc": amt_dto.get("poc"), "vah": amt_dto.get("valueAreaHigh"),
-                "val": amt_dto.get("valueAreaLow"),
-                "lvns": amt_dto.get("lvns") or [],
-                "hvns": amt_dto.get("hvns") or [],
-                "leg_lvn": amt_dto.get("legLvn"),
-            },
-            context={
-                "market_state": amt_dto.get("marketState"),
-                "profile_shape": amt_dto.get("profileShape"),
-                "session_phase": getattr(self, "_last_session_phase", ""),
-                "balance_ratio": amt_dto.get("balanceRatio"),
-            },
-        )
-        ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
-        decision = self._strategy.should_enter(ctx)
-        # If running on an option contract with underlying futures feed, translate signal to option premium
-        if decision.approved and decision.signal is not None and self._underlying_gateway is not None:
-            from quant.amt.session.selector import OptionSelector
-            from dataclasses import replace as _dc_replace
-            exec_bar = execution_bar or self._aggregator.current_bar or bar
-            opt_ltp = float(exec_bar.close) if exec_bar and exec_bar.close > 0 else 0.0
-            if opt_ltp > 0:
-                delta = getattr(ctx, "option_delta", None)
-                selector = OptionSelector()
-                opt_signal = selector.translate_underlying_signal_to_option(
-                    signal=decision.signal,
-                    option_symbol=self.symbol,
-                    option_ltp=opt_ltp,
-                    delta=delta,
-                    tick_size=self._tick_size,
-                )
-                if opt_signal is None:
-                    decision = _dc_replace(
-                        decision,
-                        approved=False,
-                        signal=None,
-                        reason="OPPOSING_TYPE",
-                        block_reasons=("Signal direction opposes option contract type (Call vs Put)",),
-                    )
-                else:
-                    decision = _dc_replace(decision, signal=opt_signal)
-        return decision, ctx, amt_dto, risk_st
-
-    def _apply_risk_ceilings(self, signal, bar, quantity) -> bool:
-        """Cross-engine portfolio ceiling check + reservation.
-
-        Returns True when the trade may proceed; on refusal it latches a
-        SignalBlocked and returns False.
-        """
-        # Portfolio-level ceiling: aggregate open risk across ALL engines.
-        # Per-engine SessionRisk stays authoritative for its own halts;
-        # this is the cross-engine backstop (8 engines x 0.5% each would
-        # otherwise risk 4% of capital simultaneously).
-        if self._portfolio_risk is not None:
-            trade_risk = abs(float(signal.entry) - float(signal.sl)) * max(1.0, quantity)
-            ok, why = self._portfolio_risk.can_accept(trade_risk, symbol=self.symbol)
-            if not ok:
-                self._latch_or_signal_block(signal, why, bar.time)
-                self._last_rejected_bar_index = self._bar_index
-                return
-            if not self._portfolio_risk.register_open(trade_risk, symbol=self.symbol):
-                self._latch_or_signal_block(
-                    signal, "portfolio cap breached between can_accept and register", bar.time,
-                )
-                self._last_rejected_bar_index = self._bar_index
-                return
-            self._open_trade_risk = trade_risk
-
-        return True
-
-    def _translate_and_submit(self, decision, bar, amt_dto, risk_st) -> None:
-        """Size, ceiling-check and submit an approved signal, then emit fills."""
-        signal = decision.signal
-        if (
-            self._execution_model is ExecutionModel.INDEPENDENT
-            and self._contract is not None
-            and not signal_matches_contract(getattr(signal, "symbol", None), self.symbol)
-        ):
-            logger.warning(
-                "[INDEPENDENT_CONTRACT_GUARD] %s: rejected signal for %s",
-                self.symbol,
-                getattr(signal, "symbol", None),
-            )
-            self._latch_or_signal_block(
-                signal,
-                "independent execution requires signal and engine contract to match",
-                bar.time,
-            )
-            return
-        # ponytail: underlying observer engines stream charts/data but must not submit orders
-        if not getattr(self, "_execution_enabled", True):
-            logger.debug(
-                "⏭️ [EXECUTION_DISABLED] %s: approved signal not submitted (underlying observer engine)",
-                self.symbol,
-            )
-            return
-        # Mirror position_manager's is_expiry source of truth (the traded
-        # contract expires today) so entry sizing halves risk on expiry day.
-        _ist = _ist_dt(bar.time)
-        self._contract_is_expiry = bool(
-            self._contract_expiry is not None
-            and _ist is not None and _ist.date() == self._contract_expiry
-        )
-        # If strategy provides a TimesFM forecast, pass it for dynamic Kelly & VaR sizing
-        tfm_fc = self._fresh_forecast()
-        # Finding 1 (review of D-12): distinguish a model-sizing REFUSAL
-        # from a genuine budget-zero so the operator-facing reason is
-        # truthful. Snapshot the per-call count around the sizing call.
-        # int(...) coercion matters: a stubbed risk object (MagicMock)
-        # fabricates ANY attribute, so getattr's default never applies and
-        # the counter would be a mock, not 0.
-        _sizing_failures_before = _as_counter(
-            getattr(self._risk, "model_sizing_failures", 0)
-        )
-        quantity = clamp_quantity(
-            self._risk.position_size(
-                signal.entry, signal.sl, lot_size=self._oms.lot_size,
-                is_expiry=self._contract_is_expiry,
-                max_lots=self._max_lots,
-                forecast=tfm_fc,
-                side=signal.type,
-            )
-        )
-        # Risk-budget guard: when the per-trade budget can't afford even
-        # ONE lot (budget < lot_size * risk distance), sizing correctly
-        # returns 0 — opening a zero-size position would put a phantom
-        # trade on the UI with frozen P&L. Skip the entry entirely.
-        if quantity <= 0:
-            # Episode-key stability: the reason must exclude per-evaluation
-            # moving values (entry/sl drift with bar.close on a fresh Signal
-            # each micro-bar) — a new reason string every evaluation would
-            # re-open the blocking episode and spam SignalBlocked. The
-            # payload carries the signal; the log line prints entry/sl.
-            _model_sizing_failed = (
-                _as_counter(getattr(self._risk, "model_sizing_failures", 0))
-                > _sizing_failures_before
-            )
-            _zero_reason = (
-                "model sizing unavailable (TimesFM failure) — refusing entry"
-                if _model_sizing_failed
-                else f"risk budget affords 0 lots (lot={self._oms.lot_size})"
-            )
-            self._latch_or_signal_block(signal, _zero_reason, bar.time)
-            return
-        if not self._apply_risk_ceilings(signal, bar, quantity):
-            return
-        try:
-            position = self._oms.submit(signal, quantity)
-        except Exception:
-            # C3: a broker/OMS submission failure must not kill the engine
-            # thread, and the portfolio risk reserved above must be unwound
-            # — the entry never happened, so leaving the reservation in
-            # place would leak aggregate headroom for the rest of the day.
-            logger.exception(
-                "❌ [ENTRY FAILED] %s: OMS submit raised — skipping entry and "
-                "unwinding risk reservation (engine stays alive)",
-                self.symbol,
-            )
-            self._latch_or_signal_block(signal, "OMS submit raised — broker/OMS failure", bar.time)
-            if self._portfolio_risk is not None:
-                reserved = getattr(self, "_open_trade_risk", 0.0)
-                if reserved > 0:
-                    self._portfolio_risk.release(reserved, symbol=self.symbol)
-                self._open_trade_risk = 0.0
-            return
-        paper_fill = getattr(self._oms, "last_fill", None)
-        try:
-            _is_partial = (
-                paper_fill is not None
-                and float(paper_fill.filled_quantity) < float(paper_fill.requested_quantity)
-            )
-        except (TypeError, ValueError, AttributeError):
-            _is_partial = False
-        if _is_partial:
-            from quant.execution.exposure import ExposureState
-            self.exposure_state = self.exposure_state.partial_entry(
-                symbol=self.symbol,
-                order_id=paper_fill.order_id,
-                requested_qty=paper_fill.requested_quantity,
-                filled_qty=paper_fill.filled_quantity,
-                fill_price=paper_fill.fill_price,
-            )
-            logger.error(
-                "[RECONCILIATION REQUIRED] %s: paper order %s partially filled "
-                "(%s/%s)",
-                self.symbol,
-                paper_fill.order_id,
-                paper_fill.filled_quantity,
-                paper_fill.requested_quantity,
-            )
-        logger.info(
-            "⚡ [SIGNAL EXECUTED] %s: %s %s @ %.2f (SL=%.2f, TP=%.2f, RR=%.2f) — %s | trades_today=%d equity=₹%.0f",
-            self.symbol,
-            signal.type,
-            signal.symbol,
-            signal.entry,
-            signal.sl,
-            signal.tp,
-            signal.rr,
-            decision.reason,
-            risk_st.trades_today,
-            risk_st.equity,
-        )
-        # Contract (quant/execution/ports.py): every SignalApproved must
-        # route through an IOMS — emit only after a successful submit.
-        self._emit(SignalApproved(symbol=self.symbol, time=bar.time, signal=signal))
-        self._entry_bar_index = self._bar_index
-        self._latch.pop((getattr(signal, "symbol", "") or self.symbol, str(signal.type)), None)
-        pm = self._get_position_manager()
-        pm.current_position = position
-        self._entry_time_epoch = _bar_epoch_ms(bar.time) / 1000.0
-        self._emit(PositionOpened(symbol=self.symbol, time=bar.time, position=position))
-        # Immediately notify advisor of new open position (switch role to Position Manager)
-        if hasattr(self, "_advisor") and self._advisor is not None:
-            try:
-                pos_ctx = DecisionContextBuilder().build(
-                    bar=bar,
-                    symbol=self.symbol,
-                    market=self._market,
-                    contract_expiry=self._contract_expiry,
-                    tick_size=self._tick_size,
-                    bar_index=self._bar_index,
-                    warm_bars=self._amt_engine.warm_bars,
-                    cooldown_remaining_sec=0.0,
-                    risk_state=self._risk.state(),
-                    amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
-                    order_book=self._last_depth,
-                    position=position,
-                    entry_bar_index=self._entry_bar_index,
-                    recent_decisions=list(self._recent_decisions),
-                )
-                self._advisor.on_context(pos_ctx)
-            except Exception as e:  # advisor context notify is best-effort
-                logger.debug(f"Advisor context notification failed: {e}")
-
-    def _latch_or_signal_block(self, signal, block_reason: str, bar_time: str) -> None:
-        """Record a blocked approval. First occurrence of an episode (same
-        signal blocked for the same reason) warns + emits SignalBlocked;
-        repeats debug-log only. Episodes live per (signal symbol, side) key in
-        self._latch. Evaluation is never suppressed."""
-        key = (getattr(signal, "symbol", "") or self.symbol, str(signal.type))
-        if self._latch.get(key) == block_reason:
-            logger.debug(
-                "🛑 [SIGNAL BLOCKED] %s: %s %s @ %.2f — %s (repeat, latched)",
-                self.symbol, signal.type, signal.symbol, signal.entry, block_reason,
-            )
-            return
-        self._latch[key] = block_reason
-        logger.warning(
-            "🛑 [SIGNAL BLOCKED] %s: %s %s @ %.2f — %s",
-            self.symbol, signal.type, signal.symbol, signal.entry, block_reason,
-        )
-        self._emit(SignalBlocked(
-            symbol=self.symbol, time=bar_time, signal=signal, reason=block_reason,
-        ))
+        return self._decision_loop._entry_guards(bar)
 
     def _build_context(self, bar, amt_dto: dict, cooldown_remaining_sec: float):
         """Single DecisionContext source shared by the flat-path ``_decide()``
