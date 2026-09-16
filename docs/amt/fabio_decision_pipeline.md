@@ -41,7 +41,7 @@ DecisionContext
 
 ## Gate 1: Session Phase
 
-**File**: `quant/decision/gates_session_position.py` → `gate_session_phase(ctx)`
+**File**: `quant/decision/gates/gate_session_phase.py` → `gate_session_phase(ctx)`
 
 **Purpose**: Ensure the market is open, warmed up, in a tradeable session phase, and spread is acceptable.
 
@@ -49,10 +49,11 @@ DecisionContext
 
 | # | Check | Fail Reason | Code |
 |---|-------|-------------|------|
-| 1 | `ctx.session_open == True` | "Session closed" | L12-13 |
-| 2 | `ctx.warmup_complete == True` | "Warming up — insufficient bars" | L14-15 |
-| 3 | Setup type vs session phase permission | "SESSION_PHASE: {type} blocked — trend continuation not permitted" or "mean reversion not permitted" | L18-38 |
-| 4 | Spread ≤ max(3× tick, 0.1% of price, ₹0.40) | "Wide spread — slippage risk" | L40-50 |
+| 1 | `ctx.session_open == True` | "Session closed" | L56-57 |
+| 2 | `ctx.warmup_complete == True` | "Warming up — insufficient bars" | L58-59 |
+| 3 | Exchange clock: NSE 09:30–15:15 IST, MCX 09:15–23:15 IST | "NSE/MCX clock blackout: current {t} outside {window} IST" | L61-79 |
+| 4 | Setup type vs session phase permission | "SESSION_PHASE: {type} blocked — trend continuation not permitted" or "mean reversion not permitted" | L81-101 |
+| 5 | Spread ≤ max(2× tick, 0.1% of price, ₹0.40) | "Wide spread — slippage risk" | L103-115 |
 
 ### Session Phase Permissions
 
@@ -65,7 +66,7 @@ DecisionContext
 
 ## Gate 2: Position / Cooldown
 
-**File**: `quant/decision/gates_session_position.py` → `gate_position_cooldown(ctx, allow_positioned)`
+**File**: `quant/decision/gates/gate_position_cooldown.py` → `gate_position_cooldown(ctx, allow_positioned)`
 
 **Purpose**: Prevent duplicate entries and enforce post-trade cooldown.
 
@@ -73,8 +74,8 @@ DecisionContext
 
 | # | Check | Fail Reason | Code |
 |---|-------|-------------|------|
-| 1 | `ctx.cooldown_remaining_sec == 0` | "In cooldown — {N}s remaining" | L59-64 |
-| 2 | `ctx.position_open == False` (unless `allow_positioned`) | "Position already open" | L65-71 |
+| 1 | `ctx.cooldown_remaining_sec == 0` | "In cooldown — {N}s remaining" | L19-24 |
+| 2 | `ctx.position_open == False` (unless `allow_positioned`) | "Position already open" | L26-33 |
 
 ### Thesis-Flip Exception
 

@@ -25,9 +25,20 @@ _MCX_END = time(23, 15, 0)
 
 
 def _parse_time(time_str: str) -> Optional[time]:
+    """Parse wall-clock time from ISO-8601, epoch-adjacent or bare "HH:MM[:SS]" strings.
+
+    The context builder feeds ``time_str`` straight from ``bar.time`` (ISO-8601
+    with offset, e.g. ``2026-08-19T09:20:00+05:30``), so the ISO "T" separator
+    must be handled or the exchange-clock blackout would never fire.
+    """
     if not time_str:
         return None
-    clean = time_str.strip().split(" ")[-1].split("+")[0].split(".")[0]
+    clean = time_str.strip()
+    if "T" in clean:
+        clean = clean.split("T", 1)[1]
+    elif " " in clean:
+        clean = clean.split(" ")[-1]
+    clean = clean.split("+")[0].split("Z")[0].split(".")[0]
     parts = clean.split(":")
     if len(parts) >= 2:
         try:

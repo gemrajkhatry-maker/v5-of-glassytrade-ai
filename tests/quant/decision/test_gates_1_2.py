@@ -1,5 +1,5 @@
 from quant.decision.context import DecisionContext
-from quant.decision.gates_session_position import (
+from quant.decision.gates import (
     gate_session_phase, gate_position_cooldown)
 
 def _ctx(**kw):
