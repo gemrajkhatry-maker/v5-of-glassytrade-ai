@@ -15,6 +15,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Any
 from quant.amt.profile.gamma import compute_gamma_exposure
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY, UnknownInstrumentError
 from quant.contracts.sync_boundary import ensure_sync_adapter_result, invoke_sync_or_async
@@ -188,6 +189,229 @@ class OptionScannerService:
             return None
         return premium / spot
 
+    @staticmethod
+    def _format_expiry(chain) -> str:
+        """Format chain expiry as ISO date string."""
+        if hasattr(chain.expiry, "date"):
+            return chain.expiry.date().isoformat()
+        if hasattr(chain.expiry, "isoformat"):
+            return chain.expiry.isoformat()
+        return str(chain.expiry)
+
+    def _advance_to_live_expiry(self, u, _exchange, effective_expiry_index):
+        """Advance expiry index until a non-expired chain is found.
+
+        Returns (chain, expiry_date) or (None, None) if no live expiry found.
+        """
+        chain = ensure_sync_adapter_result(
+            "broker.get_option_chain",
+            self._broker.get_option_chain,
+            underlying=u,
+            exchange=_exchange,
+            expiry_index=effective_expiry_index,
+        )
+        while chain is not None:
+            expiry_date = (
+                chain.expiry.date()
+                if hasattr(chain.expiry, "date")
+                else (date.fromisoformat(chain.expiry) if isinstance(chain.expiry, str) else chain.expiry)
+            )
+            if expiry_date >= today_ist():
+                break
+            if effective_expiry_index >= 3:
+                logger.info("%s: no live expiry up to index 3 — skipping", u)
+                return None, None
+            effective_expiry_index += 1
+            logger.info(
+                "%s: exp %s is past — advancing to index %d",
+                u, expiry_date, effective_expiry_index,
+            )
+            chain = ensure_sync_adapter_result(
+                "broker.get_option_chain",
+                self._broker.get_option_chain,
+                underlying=u,
+                exchange=_exchange,
+                expiry_index=effective_expiry_index,
+            )
+        return chain, (expiry_date if chain is not None else None)
+
+    def _compute_gex(self, u, chain):
+        """Compute and attach gamma exposure to the option chain."""
+        try:
+            lot_size = DEFAULT_REGISTRY.resolve(u).lot_size
+        except Exception:
+            lot_size = 1
+        try:
+            spot_val = float(getattr(chain, "spot_price", 0) or chain.atm_strike or 0)
+            calls_oi = {float(k): getattr(v, "oi", 0) for k, v in getattr(chain, "calls", {}).items()}
+            puts_oi = {float(k): getattr(v, "oi", 0) for k, v in getattr(chain, "puts", {}).items()}
+            calls_iv = {float(k): getattr(v, "iv", 0.18) for k, v in getattr(chain, "calls", {}).items() if getattr(v, "iv", 0)}
+            puts_iv = {float(k): getattr(v, "iv", 0.18) for k, v in getattr(chain, "puts", {}).items() if getattr(v, "iv", 0)}
+            strikes = sorted(set(calls_oi.keys()) | set(puts_oi.keys()))
+            chain.gex = compute_gamma_exposure(
+                spot=spot_val, strikes=strikes,
+                calls_oi=calls_oi, puts_oi=puts_oi,
+                calls_iv=calls_iv, puts_iv=puts_iv,
+                lot_size=lot_size,
+            )
+        except Exception:
+            logger.debug("Failed computing GEX for %s", u, exc_info=True)
+            chain.gex = None
+
+    @staticmethod
+    def _snap_atm_to_listed(chain, atm, interval):
+        """Snap ATM to nearest listed strike; returns (atm, listed)."""
+        listed = sorted(chain.calls.keys())
+        if listed:
+            atm = min(listed, key=lambda s: abs(s - atm))
+        return atm, listed
+
+    def _check_big_move_skip(self, u, chain, atm, expiry_date):
+        """Return True if big-move mode filters reject this chain."""
+        dte = (expiry_date - today_ist()).days
+        if dte < self.big_move_min_dte:
+            logger.info("%s: big-move skipped — DTE %d < %d", u, dte, self.big_move_min_dte)
+            return True
+        straddle_pct = self._straddle_pct(chain, atm)
+        if straddle_pct is None or straddle_pct > self.big_move_max_straddle_pct:
+            logger.info(
+                "%s: big-move skipped — ATM straddle %.2f%% of spot > %.2f%%",
+                u, (straddle_pct or 0) * 100, self.big_move_max_straddle_pct * 100,
+            )
+            return True
+        return False
+
+    def _fetch_broker_historical_prices(self, u, fut_sym):
+        """Try to fetch historical closes via raw broker. Returns list or empty."""
+        if not hasattr(self._broker, "get_broker"):
+            return []
+        try:
+            raw_b = self._broker.get_broker()
+            if not (hasattr(raw_b, "get_historical") and hasattr(self._broker, "_make_instrument")):
+                return []
+            inst = self._broker._make_instrument(fut_sym or u)
+            end_dt = datetime.now(tz=IST)
+            start_dt = end_dt - timedelta(days=5)
+            df = raw_b.get_historical(instrument=inst, from_date=start_dt, to_date=end_dt, interval="5")
+            if df is not None and not df.empty and "close" in df.columns:
+                return [float(c) for c in df["close"].tail(32)]
+        except Exception as e:
+            logger.debug("%s: raw_broker.get_historical skipped: %s", u, e)
+        return []
+
+    def _fetch_seed_prices(self, u, _exchange, chain):
+        """Fetch seed prices for TimesFM forecast from various sources."""
+        prices: list[float] = []
+        fut_sym = None
+        if hasattr(self._broker, "get_nearest_futures"):
+            try:
+                fut_sym = self._broker.get_nearest_futures(u, exchange=_exchange)
+            except Exception:
+                fut_sym = None
+        if not fut_sym:
+            now = datetime.now(tz=IST)
+            month_str = now.strftime("%b").upper()
+            fut_sym = f"{u.upper()} {month_str} FUT"
+
+        prices = self._fetch_historical_closes(fut_sym, limit=32)
+        if len(prices) < 32:
+            root_prices = self._fetch_historical_closes(u, limit=32)
+            if len(root_prices) > len(prices):
+                prices = root_prices
+
+        if len(prices) < 32:
+            broker_prices = self._fetch_broker_historical_prices(u, fut_sym)
+            if broker_prices:
+                prices = broker_prices
+
+        if not prices and hasattr(self._broker, "get_quote"):
+            try:
+                q = self._broker.get_quote(u)
+                p = float(getattr(q, "ltp", 0.0) or getattr(q, "price", 0.0) or 0.0)
+                if p > 0:
+                    prices = [p] * 32
+            except Exception:
+                logger.warning("%s: broker.get_quote fallback for seed prices failed", u, exc_info=True)
+        if not prices and hasattr(chain, "spot_price") and chain.spot_price:
+            prices = [float(chain.spot_price)] * 32
+        return prices
+
+    def _build_timesfm_forecast(self, u, _exchange, chain, timesfm_forecast):
+        """Build a TimesFM forecast if none provided and model is available."""
+        if timesfm_forecast is not None:
+            return timesfm_forecast
+        tfm_enabled = (
+            os.getenv("TIMESFM_CONTRACT_SELECTION", "true").strip().lower() in ("1", "true", "yes")
+            or os.getenv("TIMESFM_ADVISOR_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+        )
+        if not tfm_enabled:
+            return None
+        try:
+            from quant.decision.timesfm_engine import (
+                _TIMESFM_INFER_LOCK,
+                get_timesfm_model,
+            )
+            from quant.decision.timesfm_forecast_factory import build_forecast
+            import numpy as np
+
+            model = get_timesfm_model()
+            if model is None:
+                return None
+
+            prices = self._fetch_seed_prices(u, _exchange, chain)
+            if not prices:
+                return None
+            if len(prices) < 32:
+                prices = [prices[0]] * (32 - len(prices)) + prices
+            np_prices = np.array(prices[-32:], dtype=np.float32)
+            with _TIMESFM_INFER_LOCK:
+                res = model.predict(context=np_prices, horizon=32, return_quantiles=True)
+            quantiles = getattr(res, "quantiles", None)
+            curr_price = float(np_prices[-1])
+            forecast = build_forecast(quantiles, curr_price, 32, 5.0)
+            logger.info(
+                "%s: TimesFM auto-forecasted (drift=%.2f%%, spread=%.2f, candles=%d)",
+                u, forecast.pct_change * 100, forecast.q_spread, len(prices),
+            )
+            return forecast
+        except Exception as e:
+            logger.debug("%s: TimesFM auto-forecast skipped: %s", u, e)
+            return None
+
+    @staticmethod
+    def _compute_median_volume(chain) -> int:
+        """Compute median volume across all contracts in the chain."""
+        all_vols = sorted(
+            int(o.volume or 0)
+            for opt_map in (chain.calls, chain.puts)
+            for o in opt_map.values()
+            if (o.volume or 0) > 0
+        )
+        return all_vols[len(all_vols) // 2] if all_vols else 1000
+
+    def _collect_scored_contracts(
+        self, u, chain, atm, interval, strikes, bullish_only, bias, bias_reason,
+        is_mcx, median_vol, big_move_mode, preferred_option_type, effective_tfm_forecast,
+    ) -> list[ScanResult]:
+        """Iterate strikes x option types, score each, return non-None results."""
+        out: list[ScanResult] = []
+        option_types = [("CE", chain.calls), ("PE", chain.puts)]
+        if preferred_option_type:
+            pref = preferred_option_type.upper()
+            option_types = [t for t in option_types if t[0] == pref]
+        for opt_type, option_map in option_types:
+            for strike in strikes:
+                result = self._process_contract(
+                    u, opt_type, int(strike), atm, interval, option_map,
+                    bullish_only, bias, bias_reason, chain,
+                    is_mcx=is_mcx, median_vol=median_vol,
+                    big_move_mode=big_move_mode,
+                    timesfm_forecast=effective_tfm_forecast,
+                )
+                if result:
+                    out.append(result)
+        return out
+
     def _process_contract(self, u, opt_type, strike, atm, interval, option_map,
                           bullish_only, bias, bias_reason, chain, is_mcx, median_vol=1000,
                           big_move_mode=False, timesfm_forecast=None):
@@ -255,12 +479,7 @@ class OptionScannerService:
             opt.symbol,
         )
 
-        if hasattr(chain.expiry, "date"):
-            expiry_str = chain.expiry.date().isoformat()
-        elif hasattr(chain.expiry, "isoformat"):
-            expiry_str = chain.expiry.isoformat()
-        else:
-            expiry_str = str(chain.expiry)
+        expiry_str = self._format_expiry(chain)
         sim = getattr(opt, "_timesfm_sim", None)
         return ScanResult(
             symbol=opt.symbol, underlying=u, strike=strike,
@@ -295,192 +514,35 @@ class OptionScannerService:
             logger.error("%s: unknown instrument root — refusing silent MCX default", u)
             return out
 
-        effective_expiry_index = expiry_index
-        chain = ensure_sync_adapter_result(
-            "broker.get_option_chain",
-            self._broker.get_option_chain,
-            underlying=u,
-            exchange=_exchange,
-            expiry_index=effective_expiry_index,
-        )
-        while chain is not None:
-            expiry_date = (
-                chain.expiry.date()
-                if hasattr(chain.expiry, "date")
-                else (date.fromisoformat(chain.expiry) if isinstance(chain.expiry, str) else chain.expiry)
-            )
-            if expiry_date >= today_ist():
-                break
-            if effective_expiry_index >= 3:
-                logger.info("%s: no live expiry up to index 3 — skipping", u)
-                chain = None
-                break
-            effective_expiry_index += 1
-            logger.info(
-                "%s: exp %s is past — advancing to index %d",
-                u,
-                expiry_date,
-                effective_expiry_index,
-            )
-            chain = ensure_sync_adapter_result(
-                "broker.get_option_chain",
-                self._broker.get_option_chain,
-                underlying=u,
-                exchange=_exchange,
-                expiry_index=effective_expiry_index,
-            )
-
+        chain, expiry_date = self._advance_to_live_expiry(u, _exchange, expiry_index)
         if chain is None:
             logger.info("%s: option chain returned None — skipping", u)
             return out
 
-        try:
-            lot_size = DEFAULT_REGISTRY.resolve(u).lot_size
-        except Exception:
-            lot_size = 1
-
-        try:
-            spot_val = float(getattr(chain, "spot_price", 0) or chain.atm_strike or 0)
-            calls_oi = {float(k): getattr(v, "oi", 0) for k, v in getattr(chain, "calls", {}).items()}
-            puts_oi = {float(k): getattr(v, "oi", 0) for k, v in getattr(chain, "puts", {}).items()}
-            calls_iv = {float(k): getattr(v, "iv", 0.18) for k, v in getattr(chain, "calls", {}).items() if getattr(v, "iv", 0)}
-            puts_iv = {float(k): getattr(v, "iv", 0.18) for k, v in getattr(chain, "puts", {}).items() if getattr(v, "iv", 0)}
-            strikes = sorted(set(calls_oi.keys()) | set(puts_oi.keys()))
-            chain.gex = compute_gamma_exposure(
-                spot=spot_val,
-                strikes=strikes,
-                calls_oi=calls_oi,
-                puts_oi=puts_oi,
-                calls_iv=calls_iv,
-                puts_iv=puts_iv,
-                lot_size=lot_size,
-            )
-        except Exception:
-            logger.debug("Failed computing GEX for %s", u, exc_info=True)
-            chain.gex = None
-
+        self._compute_gex(u, chain)
         if chains_out is not None:
             chains_out[u] = chain
 
         atm = chain.atm_strike
         interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
-        listed = sorted(chain.calls.keys())
-        if listed:
-            # ponytail: snap to nearest listed strike — broker atm prints
-            # (e.g. 23437) off the grid make every candidate lookup miss.
-            atm = min(listed, key=lambda s: abs(s - atm))
+        atm, listed = self._snap_atm_to_listed(chain, atm, interval)
 
-        if big_move_mode:
-            dte = (expiry_date - today_ist()).days
-            if dte < self.big_move_min_dte:
-                logger.info(
-                    "%s: big-move skipped — DTE %d < %d",
-                    u,
-                    dte,
-                    self.big_move_min_dte,
-                )
-                return out
-            straddle_pct = self._straddle_pct(chain, atm)
-            if straddle_pct is None or straddle_pct > self.big_move_max_straddle_pct:
-                logger.info(
-                    "%s: big-move skipped — ATM straddle %.2f%% of spot > %.2f%%",
-                    u,
-                    (straddle_pct or 0) * 100,
-                    self.big_move_max_straddle_pct * 100,
-                )
-                return out
+        if big_move_mode and self._check_big_move_skip(u, chain, atm, expiry_date):
+            return out
 
         all_strikes = sorted(chain.calls.keys())
         near_atm = [s for s in all_strikes if abs(s - atm) <= interval * 3]
         logger.info(
             "%s: chain OK — spot=%.0f atm=%.0f step=%.0f strikes_near_atm=%s",
-            u,
-            chain.spot_price,
-            atm,
-            interval,
-            near_atm[:10],
+            u, chain.spot_price, atm, interval, near_atm[:10],
         )
 
-        effective_tfm_forecast = timesfm_forecast
-        if effective_tfm_forecast is None:
-            tfm_enabled = (
-                os.getenv("TIMESFM_CONTRACT_SELECTION", "true").strip().lower() in ("1", "true", "yes")
-                or os.getenv("TIMESFM_ADVISOR_ENABLED", "false").strip().lower() in ("1", "true", "yes")
-            )
-            if tfm_enabled:
-                try:
-                    from quant.decision.timesfm_engine import (
-                        _TIMESFM_INFER_LOCK,
-                        get_timesfm_model,
-                    )
-                    from quant.decision.timesfm_forecast_factory import build_forecast
-                    import numpy as np
-
-                    model = get_timesfm_model()
-                    if model is not None:
-                        prices: list[float] = []
-                        fut_sym = None
-                        if hasattr(self._broker, "get_nearest_futures"):
-                            try:
-                                fut_sym = self._broker.get_nearest_futures(u, exchange=_exchange)
-                            except Exception:
-                                fut_sym = None
-                        if not fut_sym:
-                            now = datetime.now(tz=IST)
-                            month_str = now.strftime("%b").upper()
-                            fut_sym = f"{u.upper()} {month_str} FUT"
-
-                        prices = self._fetch_historical_closes(fut_sym, limit=32)
-                        if len(prices) < 32:
-                            root_prices = self._fetch_historical_closes(u, limit=32)
-                            if len(root_prices) > len(prices):
-                                prices = root_prices
-
-                        if len(prices) < 32 and hasattr(self._broker, "get_broker"):
-                            try:
-                                raw_b = self._broker.get_broker()
-                                if hasattr(raw_b, "get_historical") and hasattr(self._broker, "_make_instrument"):
-                                    inst = self._broker._make_instrument(fut_sym or u)
-                                    end_dt = datetime.now(tz=IST)
-                                    start_dt = end_dt - timedelta(days=5)
-                                    df = raw_b.get_historical(instrument=inst, from_date=start_dt, to_date=end_dt, interval="5")
-                                    if df is not None and not df.empty and "close" in df.columns:
-                                        prices = [float(c) for c in df["close"].tail(32)]
-                            except Exception as e:
-                                logger.debug("%s: raw_broker.get_historical skipped: %s", u, e)
-                        if not prices and hasattr(self._broker, "get_quote"):
-                            try:
-                                q = self._broker.get_quote(u)
-                                p = float(getattr(q, "ltp", 0.0) or getattr(q, "price", 0.0) or 0.0)
-                                if p > 0:
-                                    prices = [p] * 32
-                            except Exception:
-                                logger.warning("%s: broker.get_quote fallback for seed prices failed", u, exc_info=True)
-                        if not prices and hasattr(chain, "spot_price") and chain.spot_price:
-                            prices = [float(chain.spot_price)] * 32
-
-                        if prices:
-                            if len(prices) < 32:
-                                prices = [prices[0]] * (32 - len(prices)) + prices
-                            np_prices = np.array(prices[-32:], dtype=np.float32)
-                            with _TIMESFM_INFER_LOCK:
-                                res = model.predict(context=np_prices, horizon=32, return_quantiles=True)
-                            quantiles = getattr(res, "quantiles", None)
-                            curr_price = float(np_prices[-1])
-                            effective_tfm_forecast = build_forecast(quantiles, curr_price, 32, 5.0)
-                            logger.info("%s: TimesFM auto-forecasted (drift=%.2f%%, spread=%.2f, candles=%d)", u, effective_tfm_forecast.pct_change * 100, effective_tfm_forecast.q_spread, len(prices))
-                except Exception as e:
-                    logger.debug("%s: TimesFM auto-forecast skipped: %s", u, e)
+        effective_tfm_forecast = self._build_timesfm_forecast(u, _exchange, chain, timesfm_forecast)
 
         bias, bias_strength, bias_reason = self._detect_momentum(chain, atm, interval, timesfm_forecast=effective_tfm_forecast)
         logger.info(
             "MOMENTUM: %s — %s (strength=%d) [calls=%d puts=%d atm=%.0f]",
-            u,
-            bias,
-            bias_strength,
-            len(chain.calls),
-            len(chain.puts),
-            atm,
+            u, bias, bias_strength, len(chain.calls), len(chain.puts), atm,
         )
 
         strikes = [
@@ -488,44 +550,13 @@ class OptionScannerService:
             for i in range(-strikes_around_atm, strikes_around_atm + 1)
         ]
         is_mcx = u.upper() in DEFAULT_REGISTRY.mcx_roots()
+        median_vol = self._compute_median_volume(chain)
 
-        # ponytail: relative liquidity — normalize vol against chain median so
-        # BANKNIFTY's naturally larger volumes don't outrank FINNIFTY. Compute
-        # median once per chain instead of scoring absolute volume.
-        all_vols = sorted(
-            int(o.volume or 0)
-            for opt_map in (chain.calls, chain.puts)
-            for o in opt_map.values()
-            if (o.volume or 0) > 0
+        return self._collect_scored_contracts(
+            u, chain, atm, interval, strikes, bullish_only,
+            bias, bias_reason, is_mcx, median_vol, big_move_mode,
+            preferred_option_type, effective_tfm_forecast,
         )
-        median_vol = all_vols[len(all_vols) // 2] if all_vols else 1000
-
-        option_types = [("CE", chain.calls), ("PE", chain.puts)]
-        if preferred_option_type:
-            pref = preferred_option_type.upper()
-            option_types = [t for t in option_types if t[0] == pref]
-
-        for opt_type, option_map in option_types:
-            for strike in strikes:
-                result = self._process_contract(
-                    u,
-                    opt_type,
-                    int(strike),
-                    atm,
-                    interval,
-                    option_map,
-                    bullish_only,
-                    bias,
-                    bias_reason,
-                    chain,
-                    is_mcx=is_mcx,
-                    median_vol=median_vol,
-                    big_move_mode=big_move_mode,
-                    timesfm_forecast=effective_tfm_forecast,
-                )
-                if result:
-                    out.append(result)
-        return out
 
     def scan_top_n(
         self,
@@ -822,13 +853,7 @@ class OptionScannerService:
                 if _fb_exp is not None and _fb_exp < today_ist():
                     continue
                 atm = chain.atm_strike
-
-                if hasattr(chain.expiry, "date"):
-                    expiry_str = chain.expiry.date().isoformat()
-                elif hasattr(chain.expiry, "isoformat"):
-                    expiry_str = chain.expiry.isoformat()
-                else:
-                    expiry_str = str(chain.expiry)
+                expiry_str = self._format_expiry(chain)
 
                 for opt_type, opt_map in [("CE", chain.calls), ("PE", chain.puts)]:
                     atm_opt = opt_map.get(float(atm))
