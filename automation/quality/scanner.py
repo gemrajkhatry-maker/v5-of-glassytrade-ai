@@ -2,6 +2,7 @@ import yaml
 from dataclasses import dataclass, field
 from typing import List
 from pathlib import Path
+from radon.complexity import cc_visit
 
 
 @dataclass
@@ -35,6 +36,28 @@ class CodeQualityScanner:
         with open(self.config_path, 'r') as f:
             return yaml.safe_load(f)
     
+    def _analyze_complexity(self, filepath: str, source: str) -> List[QualityIssue]:
+        """Analyze cyclomatic complexity of Python source code."""
+        issues: List[QualityIssue] = []
+        max_complexity = self.rules['rules']['complexity']['max_cyclomatic']
+        
+        try:
+            results = cc_visit(source)
+            for result in results:
+                if result.complexity > max_complexity:
+                    issues.append(QualityIssue(
+                        file=filepath,
+                        line=result.lineno,
+                        rule="complexity.cyclomatic",
+                        severity="warning",
+                        message=f"Function '{result.name}' has cyclomatic complexity {result.complexity} (max: {max_complexity})"
+                    ))
+        except Exception:
+            # Skip files that can't be parsed
+            pass
+        
+        return issues
+    
     def scan(self, path: str) -> QualityReport:
         """Scan a file or directory for quality issues."""
         issues: List[QualityIssue] = []
@@ -49,7 +72,7 @@ class CodeQualityScanner:
         for file in files:
             files_scanned += 1
             source = file.read_text()
-            # Analysis methods will be added in later tasks
+            issues.extend(self._analyze_complexity(str(file), source))
         
         return QualityReport(
             issues=issues,
