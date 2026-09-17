@@ -62,13 +62,24 @@ def _rel(p: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def check_entry_authority():
-    src = _read("quant/runtime.py")
-    calls_should_enter = src.count("self._strategy.should_enter(")
-    direct_service = re.findall(r"self\._decision_service\.evaluate\(", src)
+    # The entry seam moved to DecisionLoop.evaluate() -> strategy.should_enter().
+    # runtime.py must not call DecisionService.evaluate() directly (the strategy is
+    # the only caller), and exactly one strategy implements should_enter.
+    loop = _read("quant/engine/decision_loop.py")
+    rt = _read("quant/runtime.py")
+    calls_should_enter = loop.count("self._strategy.should_enter(")
+    direct_service = re.findall(r"self\._decision_service\.evaluate\(", rt + loop)
+    strategies = [
+        p for p in QUANT.rglob("*.py")
+        if "def should_enter(" in p.read_text(encoding="utf-8")
+        and "quant/strategy.py" not in _rel(p) and "quant/strategies/" in _rel(p)
+    ]
     _add(
         "A. Flow authority", "single entry seam (strategy.should_enter)",
-        calls_should_enter >= 2 and not direct_service,
-        f"should_enter call sites={calls_should_enter}, direct DecisionService.evaluate={len(direct_service)}",
+        calls_should_enter >= 1 and not direct_service and len(strategies) == 1,
+        f"should_enter call sites={calls_should_enter}, "
+        f"direct DecisionService.evaluate={len(direct_service)}, "
+        f"entry strategies={[_rel(p) for p in strategies]}",
     )
 
 
@@ -99,14 +110,18 @@ def check_exit_source_stamp():
 
 
 def check_single_sizing_authority():
-    rt = _read("quant/runtime.py")
+    # Sizing is owned by SessionRisk; it is invoked at submission time
+    # (engine/submission_handler.py), not in runtime.py directly.
+    sh = _read("quant/engine/submission_handler.py")
     dead = list(QUANT.rglob("risk_sizer.py")) + list(QUANT.rglob("decision/intent.py"))
-    ok = "self._risk.position_size(" in rt and "clamp_quantity(" in rt and not dead
+    uses_authority = "self._risk.position_size(" in sh
+    clamps = "clamp_quantity(" in sh
+    ok = uses_authority and clamps and not dead
     _add(
         "A. Flow authority", "one sizing authority (SessionRisk.position_size + clamp_quantity)",
         ok,
-        f"runtime uses SessionRisk={('self._risk.position_size(' in rt)}, "
-        f"clamp_quantity={('clamp_quantity(' in rt)}, dead scaffolding={[ _rel(p) for p in dead ] or 'none'}",
+        f"submission uses SessionRisk={uses_authority}, "
+        f"clamp_quantity={clamps}, dead scaffolding={[ _rel(p) for p in dead ] or 'none'}",
     )
 
 
