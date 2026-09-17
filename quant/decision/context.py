@@ -139,3 +139,9 @@ class DecisionContext:
     # Defaults to NEUTRAL / 0.0 so existing callers that don't supply bias continue to work.
     bias_direction: BiasDirection = BiasDirection.NEUTRAL
     bias_confidence: float = 0.0
+    # Session extreme prices for VA_Fade stop placement (Fabio failed-breakout rule):
+    # the full probe beyond the value area across all session bars. When non-zero,
+    # VA_Fade references these instead of just the current bar's wick so the stop
+    # sits beyond the true probe extreme. Zero means unavailable → fall back to bar.
+    session_extreme_low: float = 0.0
+    session_extreme_high: float = 0.0

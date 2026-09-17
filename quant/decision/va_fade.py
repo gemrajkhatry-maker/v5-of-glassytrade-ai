@@ -57,7 +57,9 @@ def detect_va_fade(ctx: DecisionContext) -> VAFadeSignal | None:
     # LONG: price probed below VAL and buyers are in control (positive CVD or VARS Bullish Reclaim)
     if (zone == "BELOW_VA" and cvd > 0 and close < poc) or (vars_bull and close < poc):
         entry = close
-        probe_low = float(ctx.bar.low) if hasattr(ctx.bar, "low") else entry
+        # Fabio failed-breakout rule: stop beyond the full probe extreme, not just current bar wick
+        session_low = getattr(ctx, "session_extreme_low", 0.0) or 0.0
+        probe_low = session_low if session_low > 0 else (float(ctx.bar.low) if hasattr(ctx.bar, "low") else entry)
         sl = min(entry - step, probe_low - step) if probe_low < entry else entry - step
         if sl >= entry:
             sl = entry - step
@@ -70,7 +72,9 @@ def detect_va_fade(ctx: DecisionContext) -> VAFadeSignal | None:
     # SHORT: price probed above VAH and sellers are in control (negative CVD or VARS Bearish Reclaim)
     if (zone == "ABOVE_VA" and cvd < 0 and close > poc) or (vars_bear and close > poc):
         entry = close
-        probe_high = float(ctx.bar.high) if hasattr(ctx.bar, "high") else entry
+        # Fabio failed-breakout rule: stop beyond the full probe extreme, not just current bar wick
+        session_high = getattr(ctx, "session_extreme_high", 0.0) or 0.0
+        probe_high = session_high if session_high > 0 else (float(ctx.bar.high) if hasattr(ctx.bar, "high") else entry)
         sl = max(entry + step, probe_high + step) if probe_high > entry else entry + step
         if sl <= entry:
             sl = entry + step
