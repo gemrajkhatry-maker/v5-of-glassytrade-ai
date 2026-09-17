@@ -50,11 +50,12 @@ INTERVAL_SECONDS = 2
 # The engine's BarAggregator (interval_seconds=1) pairs consecutive ticks into a
 # bar whose time is the FIRST tick's epoch, so bar i of the session surfaces in
 # the engine with time "t{2*i}". The approved bars in the fixture:
-#   t166  = first displacement close (Triple-A evidence) but the structural
-#           stop resolves razor-thin (SignalBuilder drops it as "thin stop")
-#   t168  = continuation close — AGGRESSION/INITIATIVE approval (Triple-A)
+#   t166  = first displacement close — AGGRESSION approval; the nearest
+#           structural level (leg-VA-clamped VAH) is noise-thin, so
+#           structural_anchor re-anchors to a deeper level and emits
+#   t168  = continuation close (no longer needed for the first entry)
 #   t340  = VAL-bounce fade (VA_FADE, bar 170)
-AGGRESSION_BAR = "t168"
+AGGRESSION_BAR = "t166"
 FADE_BAR = "t340"
 
 
@@ -167,9 +168,9 @@ def test_no_trade_without_approved_decision():
         assert abs(signal.entry - decision.signal.entry) <= 1e-9
         assert signal.timestamp == t
 
-    # The 1 Triple-A trade opens at t168 (t166's breakout was dropped by
-    # SignalBuilder as a thin stop, so the approval slips to the next
-    # displacement close).
+    # The 1 Triple-A trade opens at t166. The nearest structural level there is
+    # noise-thin, so structural_anchor re-anchors to a deeper level and the
+    # certified breakout is traded instead of being dropped as a thin stop.
     # The t184 absorbing breakout is now correctly rejected because Path A2 (Anti-whipsaw violation) was removed.
     # The VA-fade candidate (t340) is present in the session but is correctly rejected
     # by the MIN_STOP_DISTANCE_PCT guard, so no VA-fade position opens.
@@ -186,9 +187,9 @@ def test_no_trade_without_approved_decision():
 
 
 def test_approved_decisions_without_position_explainable(caplog):
-    """Count approved decisions that did not open a position; they must be
-    explainable (cooldown / position already open / risk-halt), and are logged
-    rather than failed when they are."""
+    """Every approved decision must either open a position or be explainable
+    (gate 2 blocked it, or it is a positioned thesis-flip hold). Any other
+    approval without a position is a bug."""
     trace = _run_trace()
     _, decisions, opens, _, _ = _index(trace)
     open_times = {e.time for e in opens}
@@ -204,17 +205,23 @@ def test_approved_decisions_without_position_explainable(caplog):
                     [(g.gate, g.passed, g.reason) for g in d.gate_results],
                 )
 
-    # In the current engine every approval opens a position (the cooldown/risk
-    # gates live in DecisionContext and the engine drives them pre-open), so the
-    # count is 0 — but the accounting must stay robust to future cooldown skips.
+    # An approval with no new position is explainable when gate 2 blocked it
+    # (position already open / cooldown / risk halt) OR when it is a
+    # positioned thesis-flip evaluation (gate 2 intentionally bypassed — a
+    # same-direction approval while in a trade holds rather than re-enters).
     for t, d in skips:
         gate2 = next((g for g in d.gate_results if g.gate == 2), None)
-        explainable = (
+        gate2_reason = (gate2.reason or "") if gate2 is not None else ""
+        blocked_by_gate2 = (
             gate2 is not None and not gate2.passed
-            and any(k in gate2.reason for k in ("Position already open", "cooldown", "Risk halted"))
+            and any(k in gate2_reason for k in ("Position already open", "cooldown", "Risk halted"))
         )
-        assert explainable, f"unexplained approved decision without position at {t} ({d.reason})"
-    assert len(skips) == 0
+        thesis_flip_hold = (
+            gate2 is not None and gate2.passed and "thesis-flip" in gate2_reason
+        )
+        assert blocked_by_gate2 or thesis_flip_hold, (
+            f"unexplained approved decision without position at {t} ({d.reason})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +329,7 @@ def test_fills_follow_fill_price_convention():
     # spot-check the approved fills map to their exact signal bar close; the
     # VA-fade (t340) is rejected by the min-stop guard, so it never fills
     assert len(opens) >= 1
-    assert opens[0].position.open_price == bars[AGGRESSION_BAR].close == 100.9
+    assert opens[0].position.open_price == bars[AGGRESSION_BAR].close == 100.6
     # First exit is the structural TP: fills AT the signal's TP level (the
     # fill-at-level contract asserted above), NOT at the bar close.
     assert closes[0].fill.position.open_time == AGGRESSION_BAR
@@ -399,7 +406,7 @@ def test_ws_contract_carries_quant_decision_on_approved_bars():
         if evt.time == AGGRESSION_BAR:
             assert ws["amt"]["marketState"] == "IMBALANCED"
             assert ws["quantDecision"]["reason"] == "Triple-A"
-            assert ws["quantDecision"]["signal"]["entry"] == 100.9
+            assert ws["quantDecision"]["signal"]["entry"] == 100.6
     # 1 Triple-A bar is approved; the VA-fade (t340) is rejected by the
     # min-stop guard and never surfaces as an approved WS decision
     assert checks >= 1

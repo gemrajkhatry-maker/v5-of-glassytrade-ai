@@ -7,7 +7,10 @@ position UUIDs). Everything else must match exactly.
 
 from __future__ import annotations
 
-_VOLATILE_KEYS = frozenset({"event_id", "correlation_id", "_id"})
+# Keys that identify a run-local object rather than behaviour. position_id is
+# derived from the position's internal _id (uuid) so two runs that trade
+# identically still emit different StopMoved.position_id values.
+_VOLATILE_KEYS = frozenset({"event_id", "correlation_id", "_id", "position_id"})
 
 
 def normalize(obj):

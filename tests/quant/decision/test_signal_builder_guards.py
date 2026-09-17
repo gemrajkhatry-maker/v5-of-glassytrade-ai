@@ -13,6 +13,7 @@ from quant.decision.signal_builder import (
     is_min_stop_met,
     is_stop_too_thin,
 )
+from quant.decision.stops import min_stop_distance
 
 
 def _ctx(close, val, step, nearest):
@@ -37,10 +38,23 @@ def test_defaults_are_exported_constants():
 
 
 def test_thin_stop_setup_is_rejected():
-    # entry 104.92, SL at VAL - 2 ticks = 104.819 (~0.096% away) -> rejected.
+    # The anchor walks to a deeper level when the nearest is noise, so on a
+    # normal-priced instrument a thin nearest stop no longer blocks the trade.
+    # On a high-priced instrument even the fallback (5 ticks) sits inside the
+    # 0.1% noise band, so the builder must refuse rather than emit a noise stop.
+    sb = SignalBuilder()
+    ctx = _ctx(close=56000.0, val=55999.9, step=0.1, nearest=55999.8)
+    assert sb.build(ctx, _pass_results()) is None
+
+
+def test_thin_nearest_anchor_reanchors_to_a_valid_level():
+    # entry 104.92, nearest VAL 104.919 is noise-thin, but the bar provides a
+    # deeper structural level, so the builder emits with a valid stop.
     sb = SignalBuilder()
     ctx = _ctx(close=104.92, val=104.919, step=0.01, nearest=104.9)
-    assert sb.build(ctx, _pass_results()) is None
+    sig = sb.build(ctx, _pass_results())
+    assert sig is not None
+    assert abs(sig.entry - sig.sl) >= min_stop_distance(sig.entry, ctx.tick_size)
 
 
 def test_thin_stop_pure_function():

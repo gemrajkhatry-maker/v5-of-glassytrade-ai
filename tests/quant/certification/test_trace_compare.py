@@ -27,6 +27,19 @@ def test_normalize_strips_nested_position_uuid():
     assert norm["position"]["order"]["signal"]["entry"] == 100.0
 
 
+def test_normalize_strips_stop_moved_position_id():
+    """position_id is a run-local uuid, not behaviour — it must not diverge."""
+    from quant.events import StopMoved
+    from tests.quant.certification.trace_compare import traces_equal
+
+    a = [StopMoved(symbol="X", time="100", old_sl=99.0, new_sl=100.0,
+                   reason="BREAKEVEN_ARMED", position_id="uuid-a", stop_kind="TRAIL")]
+    b = [StopMoved(symbol="X", time="100", old_sl=99.0, new_sl=100.0,
+                   reason="BREAKEVEN_ARMED", position_id="uuid-b", stop_kind="TRAIL")]
+    assert traces_equal(a, b)
+    assert "position_id" not in normalize({"position_id": "uuid-a", "new_sl": 100.0})
+
+
 def test_traces_equal_ignores_volatile_fields():
     a = [_evt("1", "ua"), _evt("2", "ub")]
     b = [_evt("9", "uz"), _evt("8", "uy")]

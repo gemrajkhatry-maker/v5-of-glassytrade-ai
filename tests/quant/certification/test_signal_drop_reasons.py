@@ -83,7 +83,10 @@ def minimal_ctx_factory():
 
 def test_thin_stop_drop_reports_reason(minimal_ctx_factory):
     ctx = minimal_ctx_factory(entry=100.0, anchor_distance_pct=0.01)  # razor stop
-    sig, why = SignalBuilder().build_or_reason(ctx, [])
+    # The anchor now walks to a deeper structural level when the nearest is
+    # noise. Force the guard by demanding an implausibly wide minimum stop so
+    # even the deepest anchor is rejected as thin noise.
+    sig, why = SignalBuilder(min_stop_distance_pct=500.0).build_or_reason(ctx, [])
     assert sig is None
     assert why == "thin stop"
 
@@ -101,6 +104,9 @@ def test_service_block_reason_includes_builder_drop(minimal_ctx_factory):
     """GATE_REJECTED with empty block_reasons was unauditable (cert E5)."""
     svc = DecisionService()
     ctx = minimal_ctx_factory(entry=100.0, anchor_distance_pct=0.01)
-    dec = svc.evaluate(ctx)
+    # Force the builder drop so the assertion tests DecisionService's
+    # block_reasons wiring, independent of anchor/stop-distance policy.
+    with patch.object(SignalBuilder, "build_or_reason", return_value=(None, "forced drop")):
+        dec = svc.evaluate(ctx)
     assert dec.reason == "GATE_REJECTED"
     assert any(r.startswith("SIGNAL_BUILDER:") for r in dec.block_reasons)

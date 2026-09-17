@@ -43,12 +43,13 @@ def test_model_label_populated():
     s = sb.build(_ctx(), _pass_results(), model_label="Triple-A")
     assert s.model_label == "Triple-A"
 
-def test_build_returns_none_when_sl_on_wrong_side_of_entry():
+def test_malformed_va_falls_back_to_a_valid_stop_below_entry():
+    # val > vah is a malformed value area: no structural support sits below
+    # entry, so the anchor falls back to the minimum-distance stop. The signal
+    # must still be well-formed (sl < entry < tp), never inverted.
     sb = SignalBuilder()
-    # entry 100 < val 110 so the anchor falls back to nearest_level=105;
-    # SL = 105 - 0.10 = 104.90 lands above entry -> inverted -> rejected.
-    ctx = _ctx(poc=100, vah=102, val=110)
-    assert sb.build(ctx, _pass_results()) is None
+    s = sb.build(_ctx(poc=100, vah=102, val=110), _pass_results())
+    assert s is not None and s.sl < s.entry < s.tp
 
 def test_build_emits_short_with_sl_above_entry():
     sb = SignalBuilder()
