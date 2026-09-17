@@ -174,10 +174,6 @@ class SubmissionHandler:
         # not silently change position size.
         self._fresh_forecast()
 
-        # Distinguish a model-sizing REFUSAL from a genuine budget-zero
-        sizing_failures_before = _as_counter(
-            getattr(self._risk, "model_sizing_failures", 0)
-        )
         quantity = clamp_quantity(
             self._risk.position_size(
                 signal.entry, signal.sl, lot_size=self._oms.lot_size,
@@ -189,15 +185,7 @@ class SubmissionHandler:
 
         # Risk-budget guard: when the per-trade budget can't afford even ONE lot
         if quantity <= 0:
-            model_sizing_failed = (
-                _as_counter(getattr(self._risk, "model_sizing_failures", 0))
-                > sizing_failures_before
-            )
-            zero_reason = (
-                "model sizing unavailable (TimesFM failure) — refusing entry"
-                if model_sizing_failed
-                else f"risk budget affords 0 lots (lot={self._oms.lot_size})"
-            )
+            zero_reason = f"risk budget affords 0 lots (lot={self._oms.lot_size})"
             self._latch_or_signal_block(signal, zero_reason, bar.time)
             return False
 

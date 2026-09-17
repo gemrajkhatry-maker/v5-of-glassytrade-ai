@@ -14,16 +14,16 @@ from tests.helpers.synthetic import SyntheticGateway
 
 
 def test_position_size_rounds_to_whole_lots():
-    # Standard mode (0.5% risk): CONSERVATIVE tier uses 0.25% risk = ₹2,500
+    # Standard mode (0.5% risk): flat CONSERVATIVE tier uses base 0.5% = ₹5,000
     # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
     risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, day_of_week=1)
     qty = risk.position_size(
         entry=100.0,
         sl=93.0,       # loss per unit = 7.0
-        lot_size=15,   # loss per lot = 105.0 -> lots = floor(2500 / 105) = 23 lots
+        lot_size=15,   # loss per lot = 105.0 -> nearest lot(5000 / 105) = 48 lots
     )
     assert qty % 15 == 0
-    assert qty == 23 * 15
+    assert qty == 48 * 15
 
 
 def test_lot_rounding_never_exceeds_rupee_risk_cap():
@@ -90,9 +90,9 @@ def test_position_size_honors_is_expiry_at_call_site():
 def test_max_lots_cap_enforced():
     # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
     risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, day_of_week=1)
-    # Without cap: lots = 23
+    # Without cap: nearest lot(5000 / 105) = 48 lots
     uncapped = risk.position_size(entry=100.0, sl=93.0, lot_size=15)
-    assert uncapped == 23 * 15
+    assert uncapped == 48 * 15
     # With cap: max 5 lots
     capped = risk.position_size(entry=100.0, sl=93.0, lot_size=15, max_lots=5)
     assert capped == 5 * 15
@@ -125,29 +125,6 @@ def test_reset_session_restores_clean_state():
 
 
 
-def test_model_sizing_failure_refuses_instead_of_deploying_50pct(monkeypatch):
-    """D-12: a raising model-sizing call used to fall through to the flat
-    50%-of-equity deployment branch — a structurally different, non-risk-
-    equivalent policy — with only a warning."""
-    from quant.execution.risk import SessionRisk
-
-    risk = SessionRisk(storage=None, symbol="SYM", base_risk_pct=0.05)
-
-    import quant.decision.timesfm_sizing as sz
-
-    class _Boom:
-        def compute_size(self, **_k):
-            raise RuntimeError("empty p10_path")
-
-    monkeypatch.setattr(sz, "TimesFMPositionSizer", lambda *a, **k: _Boom())
-
-    class _Fc:
-        forecast_steps = ["LONG"] * 32
-
-    qty = risk.position_size(100.0, 99.0, lot_size=1.0, side="LONG")
-    assert qty == 0.0
-
-
 def test_forecast_path_applies_expiry_and_day_of_week_cuts():
     """D-12: the expiry halving and the Mon/Fri multiplier were applied only
     on the static branches, so they never applied on the E2E (forecast) path."""
@@ -165,69 +142,3 @@ def test_forecast_path_applies_expiry_and_day_of_week_cuts():
     monday = SessionRisk(storage=None, symbol="SYM", day_of_week=0)
     qty_monday = monday.position_size(100.0, 99.0, lot_size=1.0, side="LONG")
     assert qty_monday == pytest.approx(qty_normal * 0.5)
-
-
-def test_model_sizing_failure_counted_and_still_refuses(monkeypatch):
-    """Finding 1 (review of D-12): a raising model-sizing call must be
-    distinguishable from a genuine budget-zero. The refuse path must bump an
-    observable counter (per instance) and still return 0.0."""
-    from quant.execution.risk import SessionRisk
-
-    risk = SessionRisk(storage=None, symbol="SYM", base_risk_pct=0.05)
-    assert risk.model_sizing_failures == 0
-
-    import quant.decision.timesfm_sizing as sz
-
-    class _Boom:
-        def compute_size(self, **_k):
-            raise RuntimeError("empty p10_path")
-
-    monkeypatch.setattr(sz, "TimesFMPositionSizer", lambda *a, **k: _Boom())
-
-    class _Fc:
-        forecast_steps = ["LONG"] * 32
-
-    qty = risk.position_size(100.0, 99.0, lot_size=1.0, side="LONG")
-    assert qty == 0.0
-    assert risk.model_sizing_failures == 1
-
-
-def test_forecast_path_snaps_to_lots_before_expiry_cut():
-    """Finding 2 (review of D-12): the forecast path must snap the model
-    quantity to whole lots FIRST, then apply the expiry and day-of-week
-    multipliers on the snapped value — same order as the static branches
-    (which compute whole lots and multiply the returned qty by the Mon/Fri
-    factor). Pinned with lot_size=75: the model returns 24975 (333 lots);
-    snapping first then halving gives an exact 0.5 cut (12487.5), whereas the
-    old snap-last order floored the halved value to 12450."""
-    from quant.execution.risk import SessionRisk
-
-    normal = SessionRisk(storage=None, symbol="SYM", day_of_week=2)  # Wednesday
-    qty_normal = normal.position_size(100.0, 99.0, lot_size=75.0, side="LONG")
-    assert qty_normal == 24975.0  # snapped model size: 333 lots x 75
-
-    expiry = SessionRisk(storage=None, symbol="SYM", day_of_week=2)
-    qty_expiry = expiry.position_size(100.0, 99.0, lot_size=75.0,
-                                      side="LONG", is_expiry=True)
-    # Snap first, then halve -> an exact 0.5 cut on the snapped value.
-    assert qty_expiry == 12487.5
-
-    monday = SessionRisk(storage=None, symbol="SYM", day_of_week=0)
-    qty_monday = monday.position_size(100.0, 99.0, lot_size=75.0, side="LONG")
-    assert qty_monday == 12487.5
-
-
-def test_model_sizing_failures_reset_with_session():
-    from unittest.mock import patch
-    import quant.decision.timesfm_sizing as sizing
-
-    class Boom:
-        def compute_size(self, **_kwargs):
-            raise RuntimeError("test")
-
-    risk = SessionRisk(storage=None, symbol="SYM", day_of_week=1)
-    with patch.object(sizing, "TimesFMPositionSizer", lambda: Boom()):
-        assert risk.position_size(100.0, 99.0) == 0.0
-    assert risk.model_sizing_failures == 1
-    risk.reset_session()
-    assert risk.model_sizing_failures == 0

@@ -26,7 +26,8 @@ def test_max_loss_halts():
     r = SessionRisk(starting_equity=100000.0, max_daily_loss_pct=0.03)
     r.record_trade(-2500.0); r.record_trade(-2500.0); r.record_trade(-2500.0)
     s = r.state()
-    assert s.halted is True and "daily" in s.halt_reason
+    # The hard 2% session kill switch fires before the configured 3% limit.
+    assert s.halted is True and "kill switch" in s.halt_reason
 
 def test_max_streak_halts():
     r = SessionRisk(max_consecutive_losses=3)
@@ -37,10 +38,10 @@ def test_max_streak_halts():
 def test_position_size_risk_based():
     # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
     r = SessionRisk(starting_equity=100000.0, base_risk_pct=0.01, day_of_week=1)
-    # Conservative tier (base_risk_pct < 5%): first trades are CONSERVATIVE = 0.25%
-    # quantity = 100000 * 0.0025 / 1.0 = 250
+    # Flat base/CONSERVATIVE tier uses base_risk_pct = 1%
+    # quantity = 100000 * 0.01 / 1.0 = 1000
     qty = r.position_size(entry=100.0, sl=99.0)
-    assert qty == pytest.approx(250.0)
+    assert qty == pytest.approx(1000.0)
 
 
 def test_paper_capital_deployment_is_a_notional_ceiling():
@@ -55,11 +56,11 @@ def test_paper_capital_deployment_is_a_notional_ceiling():
 
     qty = r.position_size(entry=100.0, sl=99.0, lot_size=100.0)
 
-    # Conservative Fabio risk tier sizes 2 lots; deployment policy is only
-    # the independent 95% notional ceiling.
-    assert qty == pytest.approx(200.0)
+    # Flat base tier sizes 5 lots; deployment policy is only the independent
+    # 95% notional ceiling.
+    assert qty == pytest.approx(500.0)
     assert qty * 100.0 <= 100_000.0 * 0.95
-    assert r.state().risk_per_trade_pct == pytest.approx(0.0025)
+    assert r.state().risk_per_trade_pct == pytest.approx(0.005)
 
 
 def test_paper_capital_deployment_does_not_change_stop_risk_tier():
@@ -69,20 +70,20 @@ def test_paper_capital_deployment_does_not_change_stop_risk_tier():
         capital_deployment_pct=0.95,
     )
 
-    assert r.state().risk_per_trade_pct == pytest.approx(0.0025)
+    assert r.state().risk_per_trade_pct == pytest.approx(0.005)
 
 def test_cushion_tier_progression():
-    """Test Fabio's tier escalation: CONSERVATIVE → CUSHION → MOMENTUM."""
+    """Test Fabio's tier escalation: CUSHION → CUSHION_TIER_1 → CONSERVATIVE."""
     r = SessionRisk(starting_equity=100000.0)
-    # Trade 1: win → still < 2 trades, CONSERVATIVE
+    # Trade 1: win → session R = 1.0, pnl > 0 → CUSHION
     r.record_trade(+500.0)
-    assert r.state().cushion_tier == "CONSERVATIVE"
-    # Trade 2: win → 2 trades done, 2 consecutive wins, pnl > 0 → MOMENTUM
-    r.record_trade(+500.0)
-    assert r.state().cushion_tier == "MOMENTUM"
-    # Trade 3: loss → breaks win streak → pnl still > 0 → CUSHION
-    r.record_trade(-200.0)
     assert r.state().cushion_tier == "CUSHION"
+    # Trade 2: win → session R = 2.0 ≥ 1.5 → CUSHION_TIER_1
+    r.record_trade(+500.0)
+    assert r.state().cushion_tier == "CUSHION_TIER_1"
+    # Trade 3: loss → session R = 1.6, still ≥ 1.5 → CUSHION_TIER_1
+    r.record_trade(-200.0)
+    assert r.state().cushion_tier == "CUSHION_TIER_1"
     # Trade 4: loss → 2 consecutive losses → CONSERVATIVE
     r.record_trade(-200.0)
     assert r.state().cushion_tier == "CONSERVATIVE"
@@ -124,10 +125,9 @@ def test_house_money_bonus_capped():
     r._daily_pnl = 200_000      # huge winning day
     r._consecutive_wins = 2
     r._trades_today = 2         # past the 1-2 trade CONSERVATIVE warmup
-    pct = r._risk_per_trade_pct()
-    assert pct <= 0.005 + 1e-9, "never exceed 0.50% total"
-    bonus = pct - 0.004
-    assert bonus <= 0.30 * 200_000 / 1_000_000 + 1e-9, "addition never exceeds 30% of session profit"
+    # Session R = 40 → Cushion Tier 2 caps risk at 1.00%.
+    assert r._cushion_tier() == "CUSHION_TIER_2"
+    assert r._risk_per_trade_pct() == pytest.approx(0.01)
 
 
 def test_day_of_week_multiplier_monday_defensive():
@@ -137,17 +137,17 @@ def test_day_of_week_multiplier_monday_defensive():
     # Monday: defensive sizing
     r_mon = SessionRisk(starting_equity=100000.0, base_risk_pct=0.01, day_of_week=0)
     qty_mon = r_mon.position_size(entry=100.0, sl=99.0)
-    assert qty_mon == pytest.approx(250.0 * DAY_OF_WEEK_MULTIPLIER[0])
+    assert qty_mon == pytest.approx(1000.0 * DAY_OF_WEEK_MULTIPLIER[0])
 
     # Tuesday: full sizing
     r_tue = SessionRisk(starting_equity=100000.0, base_risk_pct=0.01, day_of_week=1)
     qty_tue = r_tue.position_size(entry=100.0, sl=99.0)
-    assert qty_tue == pytest.approx(250.0 * DAY_OF_WEEK_MULTIPLIER[1])
+    assert qty_tue == pytest.approx(1000.0 * DAY_OF_WEEK_MULTIPLIER[1])
 
     # Friday: defensive sizing
     r_fri = SessionRisk(starting_equity=100000.0, base_risk_pct=0.01, day_of_week=4)
     qty_fri = r_fri.position_size(entry=100.0, sl=99.0)
-    assert qty_fri == pytest.approx(250.0 * DAY_OF_WEEK_MULTIPLIER[4])
+    assert qty_fri == pytest.approx(1000.0 * DAY_OF_WEEK_MULTIPLIER[4])
 
     # Monday and Friday should be half of Tuesday
     assert qty_mon == pytest.approx(qty_tue * 0.5)

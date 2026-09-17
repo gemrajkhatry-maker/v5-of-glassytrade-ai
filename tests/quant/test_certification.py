@@ -78,13 +78,18 @@ def test_s5_conviction_formula_is_explicit():
     eng = _engine_from(scenario_displacement_breakout)
     dec_recs = [r for r in eng.cert_records if r["stage"] == "decision"]
     assert dec_recs
-    for r in dec_recs:
+    # DATA_QUALITY_BLOCKED / HALTED are pre-gate early returns and intentionally
+    # carry no gate_results; only records that reached the conviction pipeline
+    # must expose the full 4-gate breakdown.
+    gate_recs = [r for r in dec_recs if r["reason"] not in ("DATA_QUALITY_BLOCKED", "HALTED")]
+    assert gate_recs
+    for r in gate_recs:
         assert len(r["gate_results"]) >= 4, "Triple-A requires 4 gates"
         for g in r["gate_results"]:
             assert isinstance(g["passed"], bool)
     # At least one record must record 4 gates. Full pass requires Triple-A
     # AGGRESSION — this displacement tape must not sneak through on imbalance.
-    assert any(len(r["gate_results"]) >= 4 for r in dec_recs)
+    assert any(len(r["gate_results"]) >= 4 for r in gate_recs)
 
 
 # ---------------------------------------------------------------------------

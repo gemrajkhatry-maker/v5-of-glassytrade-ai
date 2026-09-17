@@ -209,8 +209,8 @@ def test_session_risk_sizes_from_portfolio_equity():
         "sizing must shrink when the portfolio is down, even if this engine "
         "has no losses of its own"
     )
-    # Fresh engine starts in CONSERVATIVE tier (0.25% base risk).
-    expected = int((980_000 * 0.0025) // 5.0)  # risk budget / per-unit risk
+    # Fresh engine starts in the flat base tier (0.5% base risk).
+    expected = int((980_000 * 0.005) // 5.0)  # risk budget / per-unit risk
     assert qty_portfolio == expected
 
 
