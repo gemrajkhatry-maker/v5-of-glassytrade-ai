@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from quant.contracts.enums import MarketState
+
 
 def _resolve_regime(market_state: Any) -> str:
     """Extract regime string from MarketState enum or string."""
     if hasattr(market_state, "value"):
         return str(market_state.value)
-    return str(market_state or "BALANCED")
+    return str(market_state or MarketState.BALANCED.value)
 
 
 def _resolve_timing(session_phase: Any) -> str:

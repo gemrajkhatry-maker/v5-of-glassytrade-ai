@@ -2,6 +2,7 @@
 
 import inspect
 import re
+from quant.engine.decision_loop import DecisionLoop
 from quant.runtime import QuantEngine
 
 
@@ -24,11 +25,13 @@ def test_no_bare_pass_in_except_blocks():
 
 def test_exception_handlers_have_logging():
     """Verify exception handlers in critical paths have logging."""
-    source = inspect.getsource(QuantEngine)
-    
-    # Check that certification has logging
-    assert "Certification record append failed" in source
-    assert "Certification decision record failed" in source
-    
-    # Check that advisor notification has logging
-    assert "Advisor context notification failed" in source
+    engine_source = inspect.getsource(QuantEngine)
+    loop_source = inspect.getsource(DecisionLoop)
+
+    # QuantEngine still owns the runtime-level certification handler.
+    assert "Certification record append failed" in engine_source
+
+    # Certification decision + advisor notification handlers now live in the
+    # decomposed DecisionLoop (quant/engine/decision_loop.py).
+    assert "Certification decision record failed" in loop_source
+    assert "Advisor context notification failed" in loop_source

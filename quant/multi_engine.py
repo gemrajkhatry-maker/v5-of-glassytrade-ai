@@ -874,7 +874,7 @@ class QuantCoordinator:
             "latencyMs": (agent_dec or {}).get("latencyMs") or 0.1,
             "modelLabel": "TimesFM-POSITION_MANAGEMENT",
             "modelVersions": {"timesfm": "3.0", "agent_role": "POSITION_MANAGEMENT", "engine": "native_direct"},
-            "regime": str((vs.amt or {}).get("marketState") or "BALANCED"),
+            "regime": str((vs.amt or {}).get("marketState") or MarketState.BALANCED.value),
             "timing": "REGULAR",
             "sizeFraction": 1.0,
             "latencyUs": 100,
