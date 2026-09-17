@@ -33,13 +33,22 @@ Net diff: **48 files, +673 / −1410 (net −737 lines)**.
 
 ## Verification
 
-- Baseline failure set captured at `7b3dfecc` for the affected files: **40 pre-existing failures**.
-- Post-merge and post-fix: **identical-or-better; 0 new regressions** (≤ 45-failure ledger baseline).
-- Two regressions found during integration and fixed:
+- Full suite (`tests/`): **2484 passed, 38 failed, 11 skipped**. The 38 are
+  exactly the 40 pre-existing failures at `7b3dfecc` minus the 2 pre-D2 contracts
+  fixed here (`test_signal_drop_reasons`, `test_production_correctness`) — **0
+  new regressions**.
+- Determinism + golden: **green** (no golden files moved in this change).
+- Certification suite: **13/13 pass**; no certification golden references a
+  VA-fade decision, so no regolden was required.
+- Pre-release decision check: **13/13 pass** (was 11/13 — two static checks were
+  stale since base, looking for the entry seam and sizing authority in
+  `runtime.py`; repointed to `decision_loop.py` / `submission_handler.py`).
+- Two integration regressions found and fixed during merge:
   - `test_timesfm_sizing::test_session_risk_delegation_to_timesfm` asserted the removed no-op `forecast=` param → rewritten to the deterministic contract (`80f8477b`).
   - `test_fabio_india_scenarios::test_scenario_value_area_fade_day` fixture closed *above* VAH (still outside VA) → fixture corrected to a true reclaim close (`1c90643c`).
-- D2-obsolete tests updated to the new contract: `tests/test_fabio_alignment.py` now 7/7 pass (`f72daec2`), previously 2 failing.
-- Full decision suite green after resolving one merge conflict in `test_decision_service.py`.
+- D2-obsolete tests updated to the new contract: `tests/test_fabio_alignment.py`
+  now 7/7 pass (`f72daec2`); the remaining pre-D2 test contracts aligned
+  (`abdb65bf`).
 
 ## Behaviour changes (intended, per D1/D2)
 
@@ -51,13 +60,14 @@ Net diff: **48 files, +673 / −1410 (net −737 lines)**.
 
 ## Known remaining risks / follow-ups
 
-- The two pre-existing `tests/quant/certification` / `test_production_correctness`
-  failures were red at base; they encode pre-D2 expectations and should be
-  re-examined when the certification goldens are next touched.
-- `scripts/pre_release_decision_check.py` lost its dead E2E probes; doc
-  references to the deleted `scripts/audit_e2e_entry_probe.py` may dangle.
-- Determinism/certification goldens were NOT re-golded because no golden
-  references a VA-fade decision and the affected traces were already failing.
+- 38 pre-existing failures remain (all red at `7b3dfecc`, unrelated to this
+  change): the `SessionRisk` sizing-branch group (`test_lot_aware_risk`,
+  `test_risk`), runtime approval/exits (`test_opposing_signal_exit`,
+  `test_positive_approval`, `test_paper_protocol`), trace/architecture guards
+  (`test_hotpath_trace`, `test_no_duplicate_types`, `test_market_state_enum_guard`),
+  and `test_fabio_behavior_trace`. They are the next cleanup batch.
+- Determinism/certification goldens were NOT re-golded — none referenced a
+  VA-fade decision and the affected traces were already failing.
 
 ## Rollback
 
