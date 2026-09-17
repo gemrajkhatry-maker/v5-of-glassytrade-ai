@@ -32,6 +32,7 @@ from quant.contracts.vocabulary import (
     is_opening_phase,
 )
 from quant.decision.context import DecisionContext
+from quant.decision.result_factory import build_decision_result, build_gate_results
 
 logger = logging.getLogger(__name__)
 
@@ -141,40 +142,33 @@ class TimesFMScanningAgent:
         g2 = bool(not ctx.risk_halted and ctx.cooldown_remaining_sec == 0)
         g2_msg = "" if g2 else ("Risk halted" if ctx.risk_halted else "Cooldown")
         if not has_profile:
-            return {
-                "role": "SCANNING",
-                "action": "FLAT",
-                "direction": "FLAT",
-                "setup": "NO_EDGE",
-                "reason": "NO_PROFILE",
-                "confidence": "Low",
-                "confidenceScore": 0.0,
-                "rationale": (
+            return build_decision_result(
+                role="SCANNING",
+                action="FLAT",
+                direction="FLAT",
+                setup="NO_EDGE",
+                reason="NO_PROFILE",
+                confidence="Low",
+                confidence_score=0.0,
+                rationale=(
                     f"No volume profile on {symbol} yet (poc={poc:.2f}, "
                     f"vah={vah:.2f}, val={val:.2f}) — standing down until the "
                     f"AMT profile populates."
                 ),
-                "forecastSteps": list(forecast.forecast_steps),
-                "quantileSpread": round(float(forecast.q_spread), 4),
-                "meanForecast": round(float(forecast.mean_forecast), 2),
-                "gateResults": [
-                    {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": g1, "message": g1_msg},
-                    {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": g2, "message": g2_msg},
-                    {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": False, "message": "No volume profile"},
-                    {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": False, "message": "No setup"},
-                ],
-                "activePosition": None,
-                "dynamicTrailStop": None,
-                "recommendedOption": None,
-                "source": "TIMESFM_3.0_NATIVE",
-                "latencyMs": round(float(forecast.lat_ms), 1),
-                "modelLabel": "TimesFM-NoProfile",
-                "modelVersions": {"timesfm": "3.0", "agent_role": "SCANNING", "engine": "native_direct"},
-                "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
-                "timing": str(ctx.session_phase or "REGULAR"),
-                "sizeFraction": 0.0,
-                "latencyUs": int(float(forecast.lat_ms) * 1000),
-            }
+                forecast=forecast,
+                gate_results=build_gate_results(
+                    g1_passed=g1, g1_msg=g1_msg,
+                    g2_passed=g2, g2_msg=g2_msg,
+                    g3_passed=False, g3_msg="No volume profile",
+                    g4_passed=False, g4_msg="No setup",
+                ),
+                active_position=None,
+                symbol=symbol,
+                entry_price=0.0,
+                market_state=ctx.market_state,
+                session_phase=ctx.session_phase,
+                model_label="TimesFM-NoProfile",
+            )
         cvd_slope = float(ctx.cvd_slope or 0.0)
         absorption = str(ctx.absorption_side or "").upper()
         stacked_imb = str(getattr(ctx, "stacked_imbalance_direction", "") or "").upper()
@@ -230,31 +224,28 @@ class TimesFMScanningAgent:
         is_entry = action in ("ENTER_LONG", "ENTER_SHORT") and direction in ("LONG", "SHORT")
         timing = "ENTER_NOW" if (is_entry and all_gates_passed) else str(ctx.session_phase or "REGULAR")
 
-        return {
-            "role": "SCANNING",
-            "action": action,
-            "direction": direction,
-            "setup": setup,
-            "reason": None,
-            "confidence": confidence,
-            "confidenceScore": round(confidence_score, 3),
-            "rationale": rationale,
-            "forecastSteps": forecast.forecast_steps,
-            "quantileSpread": round(forecast.q_spread, 4),
-            "meanForecast": round(forecast.mean_forecast, 2),
-            "gateResults": gate_results,
-            "activePosition": None,
-            "dynamicTrailStop": None,
-            "recommendedOption": rec_opt,
-            "source": "TIMESFM_3.0_NATIVE",
-            "latencyMs": round(forecast.lat_ms, 1),
-            "modelLabel": f"TimesFM-{setup}",
-            "modelVersions": {"timesfm": "3.0", "agent_role": "SCANNING", "engine": "native_direct"},
-            "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
-            "timing": timing,
-            "sizeFraction": 1.0 if direction != "FLAT" else 0.0,
-            "latencyUs": int(forecast.lat_ms * 1000),
-        }
+        result = build_decision_result(
+            role="SCANNING",
+            action=action,
+            direction=direction,
+            setup=setup,
+            reason=None,
+            confidence=confidence,
+            confidence_score=round(confidence_score, 3),
+            rationale=rationale,
+            forecast=forecast,
+            gate_results=gate_results,
+            active_position=None,
+            symbol=symbol,
+            entry_price=0.0,
+            market_state=ctx.market_state,
+            session_phase=ctx.session_phase,
+            model_label=f"TimesFM-{setup}",
+            timing_override=timing,
+            size_fraction=1.0 if direction != "FLAT" else 0.0,
+        )
+        result["recommendedOption"] = rec_opt
+        return result
 
 
     def _detect_setup(
@@ -705,32 +696,31 @@ class TimesFMPositionAgent:
         side = state["side"]
         entry_price = state["entry_price"]
         pnl = state["pnl"]
-        return {
-            "role": "POSITION_MANAGEMENT",
-            "action": action,
-            "direction": side,
-            "setup": "POSITION_MGMT",
-            "reason": reason,
-            "confidence": confidence,
-            "confidenceScore": round(confidence_score, 3),
-            "rationale": rationale,
-            "forecastSteps": forecast.forecast_steps,
-            "quantileSpread": round(forecast.q_spread, 4),
-            "meanForecast": round(forecast.mean_forecast, 2),
-            "gateResults": [
+        symbol = state["symbol"]
+        timing = "EXIT_NOW" if action == "EXIT" else ("REDUCE_NOW" if action == "SCALE_OUT" else "HOLD")
+        return build_decision_result(
+            role="POSITION_MANAGEMENT",
+            action=action,
+            direction=side,
+            setup="POSITION_MGMT",
+            reason=reason,
+            confidence=confidence,
+            confidence_score=round(confidence_score, 3),
+            rationale=rationale,
+            forecast=forecast,
+            gate_results=[
                 {"gate_no": 1, "gate_name": "POSITION_ACTIVE", "passed": True, "message": f"{side} @ {entry_price:.1f}"},
                 {"gate_no": 2, "gate_name": "TREND_HEALTH", "passed": bool(action in ("HOLD", "TIGHTEN_SL")), "message": reason},
                 {"gate_no": 3, "gate_name": "RISK_STATE", "passed": True, "message": f"PnL {pnl:+.1f}"},
                 {"gate_no": 4, "gate_name": "ACTION_DISPATCH", "passed": True, "message": action},
             ],
-            "activePosition": active_pos_payload,
-            "dynamicTrailStop": round(dyn_stop, 2) if dyn_stop is not None else None,
-            "source": "TIMESFM_3.0_NATIVE",
-            "latencyMs": round(forecast.lat_ms, 1),
-            "modelLabel": f"TimesFM-PM-{action}",
-            "modelVersions": {"timesfm": "3.0", "agent_role": "POSITION_MANAGEMENT", "engine": "native_direct"},
-            "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
-            "timing": "EXIT_NOW" if action == "EXIT" else ("REDUCE_NOW" if action == "SCALE_OUT" else "HOLD"),
-            "sizeFraction": 1.0 if action in ("HOLD", "TIGHTEN_SL") else 0.0,
-            "latencyUs": int(forecast.lat_ms * 1000),
-        }
+            active_position=active_pos_payload,
+            symbol=symbol,
+            entry_price=entry_price,
+            market_state=ctx.market_state,
+            session_phase=ctx.session_phase,
+            dynamic_trail_stop=dyn_stop,
+            model_label=f"TimesFM-PM-{action}",
+            timing_override=timing,
+            size_fraction=1.0 if action in ("HOLD", "TIGHTEN_SL") else 0.0,
+        )
