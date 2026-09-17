@@ -56,7 +56,7 @@ def _ctx(open_, high, low, close, **kw):
 class TestLongAcceptance:
     def test_full_body_close_near_high_passes(self):
         """Body 2.9 of a 3.1 range, closing at the high end: a real acceptance."""
-        result = gate_triple_a_edge(_ctx(100.0, 103.0, 99.9, 102.9))
+        result = gate_triple_a_edge(_ctx(100.0, 103.0, 99.9, 102.9, leg_lvn=102.9))
         assert result.passed
 
     def test_bearish_candle_is_rejected_for_a_long(self):
@@ -78,7 +78,7 @@ class TestLongAcceptance:
 class TestShortAcceptance:
     def test_full_body_close_near_low_passes(self):
         result = gate_triple_a_edge(
-            _ctx(101.0, 101.1, 98.0, 98.2, agent_direction="SHORT", triple_a_signal="SHORT", cvd_slope=-1.5)
+            _ctx(101.0, 101.1, 98.0, 98.2, agent_direction="SHORT", triple_a_signal="SHORT", cvd_slope=-1.5, leg_lvn=98.2)
         )
         assert result.passed
 
@@ -98,7 +98,7 @@ class TestShortAcceptance:
 class TestIndeterminateBarsDoNotBlock:
     def test_zero_range_bar_is_not_blocked_by_this_rule(self):
         """A flat bar cannot be judged; other guards still decide."""
-        result = gate_triple_a_edge(_ctx(100.0, 100.0, 100.0, 100.0))
+        result = gate_triple_a_edge(_ctx(100.0, 100.0, 100.0, 100.0, leg_lvn=100.0))
         assert result.passed
 
 

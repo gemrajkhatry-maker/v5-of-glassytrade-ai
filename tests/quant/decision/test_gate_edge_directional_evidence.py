@@ -36,7 +36,7 @@ def _ctx(**kw):
         market_state=market_state,
         obi=kw.pop("obi", 0.0),
         drive_entry_valid=kw.pop("drive_entry_valid", False),
-        leg_lvn=kw.pop("leg_lvn", 0.0),
+        leg_lvn=kw.pop("leg_lvn", close),
         break_direction=kw.pop("break_direction", ""),
         break_type=kw.pop("break_type", ""),
         vwap_upper_2=kw.pop("upper_2", 103.0),

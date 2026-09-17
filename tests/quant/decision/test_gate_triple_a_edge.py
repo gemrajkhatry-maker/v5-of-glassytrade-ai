@@ -49,7 +49,7 @@ def _ctx(**kw):
 
 
 def test_passes_on_aggression_signal():
-    r = gate_triple_a_edge(_ctx(triple_a_phase="AGGRESSION", triple_a_signal="LONG", cvd_slope=1.5))
+    r = gate_triple_a_edge(_ctx(triple_a_phase="AGGRESSION", triple_a_signal="LONG", cvd_slope=1.5, leg_lvn=100.0))
     assert r.passed and r.gate == 3
 
 
@@ -171,7 +171,7 @@ def test_mcx_cvd_slope_conflict_guard():
     r_allowed = gate_triple_a_edge(_ctx(
         market="MCX", agent_direction="LONG",
         triple_a_phase="AGGRESSION", triple_a_signal="LONG",
-        cvd_slope=-0.25,
+        cvd_slope=-0.25, leg_lvn=100.0,
     ))
     assert r_allowed.passed
 
@@ -188,7 +188,7 @@ def test_mcx_cvd_slope_conflict_guard():
     r_short_allowed = gate_triple_a_edge(_ctx(
         market="MCX", agent_direction="SHORT",
         triple_a_phase="AGGRESSION", triple_a_signal="SHORT",
-        cvd_slope=0.25,
+        cvd_slope=0.25, leg_lvn=100.0,
     ))
     assert r_short_allowed.passed
 
@@ -208,7 +208,7 @@ def test_nse_cvd_slope_conflict_guard():
     r_allowed = gate_triple_a_edge(_ctx(
         market="NSE", agent_direction="LONG",
         triple_a_phase="AGGRESSION", triple_a_signal="LONG",
-        cvd_slope=-0.40,
+        cvd_slope=-0.40, leg_lvn=100.0,
     ))
     assert r_allowed.passed
 

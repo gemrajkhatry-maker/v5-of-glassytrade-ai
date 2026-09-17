@@ -162,7 +162,15 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         if not getattr(ctx, "allow_trend", True):
             # ponytail: gate-1 owns evidence-gated paths; here we catch the evidence-free ones
             return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
-        return GateResult(3, True, f"Triple-A AGGRESSION {tsignal}")
+        # ponytail: Fabio Trend Model — pullback to LVN with aggression
+        leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0
+        tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
+        _LVN_PROXIMITY_TICKS = 5
+        price = float(ctx.bar.close) if ctx.bar else 0.0
+        lvn_near = leg_lvn > 0 and abs(price - leg_lvn) <= _LVN_PROXIMITY_TICKS * tick
+        if not lvn_near:
+            return GateResult(3, False, f"Triple-A AGGRESSION without LVN proximity (leg_lvn={leg_lvn:.2f}, price={price:.2f})")
+        return GateResult(3, True, f"Triple-A AGGRESSION {tsignal} @ LVN {leg_lvn:.2f}")
     if ctx.drive_entry_valid:
         return GateResult(3, True, "Second Drive reclaim confirmed")
     leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0
