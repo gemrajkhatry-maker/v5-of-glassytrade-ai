@@ -78,9 +78,11 @@ def test_aggression_blocked_in_dead_market():
 
 def test_va_fade_fallback():
     # A VA fade is the MEAN_REVERSION model, so the auction must be BALANCED
-    # (IMBALANCED -> TREND, where the router blocks a counter-trend fade).
+    # (IMBALANCED -> TREND, where the router blocks a counter-trend fade), AND
+    # the failed probe must have been reclaimed: the bar probed below VAL
+    # (low 99.4) and closed back INSIDE the VA at 100.4.
     ctx = _ctx(agent_direction="LONG", market_state="BALANCED",
-               close=99.6, poc=101.0, val=100.0, tick_size=0.5, cvd_slope=50.0)
+               close=100.4, poc=101.0, val=100.0, tick_size=0.5, cvd_slope=50.0)
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None and d.reason in ("VA_FADE", "Triple-A")
 

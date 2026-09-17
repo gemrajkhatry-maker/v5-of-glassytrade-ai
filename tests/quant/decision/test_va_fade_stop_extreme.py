@@ -5,11 +5,11 @@ from quant.bars import Bar
 
 
 def test_long_fade_stop_uses_session_extreme_when_available():
-    """LONG fade below VAL: stop should reference session_extreme_low if available."""
-    bar = Bar(time=1, open=97, high=98, low=95.5, close=97.5,
+    """LONG reclaim above VAL: stop should reference session_extreme_low if available."""
+    bar = Bar(time=1, open=98.5, high=99, low=95.5, close=98.5,
               volume=1000, buy_volume=600, sell_volume=400,
               delta=200, oi=50000, vwap=97.0)
-    
+
     # Check which fields DecisionContext accepts
     fields = set(DecisionContext.__dataclass_fields__.keys())
     kwargs = dict(
@@ -21,7 +21,7 @@ def test_long_fade_stop_uses_session_extreme_when_available():
         kwargs["session_extreme_low"] = 94.0
     if "session_extreme_high" in fields:
         kwargs["session_extreme_high"] = 0.0
-    
+
     ctx = DecisionContext(**kwargs)
     signal = detect_va_fade(ctx)
     assert signal is not None
@@ -32,11 +32,11 @@ def test_long_fade_stop_uses_session_extreme_when_available():
 
 
 def test_short_fade_stop_uses_session_extreme_when_available():
-    """SHORT fade above VAH: stop should reference session_extreme_high if available."""
-    bar = Bar(time=1, open=103, high=104.5, low=102, close=103.5,
+    """SHORT reclaim below VAH: stop should reference session_extreme_high if available."""
+    bar = Bar(time=1, open=101.5, high=104.5, low=101.0, close=101.5,
               volume=1000, buy_volume=400, sell_volume=600,
               delta=-200, oi=50000, vwap=103.0)
-    
+
     fields = set(DecisionContext.__dataclass_fields__.keys())
     kwargs = dict(
         symbol="TEST", bar=bar, poc=100.0, val=98.0, vah=102.0,
@@ -46,7 +46,7 @@ def test_short_fade_stop_uses_session_extreme_when_available():
         kwargs["session_extreme_low"] = 0.0
     if "session_extreme_high" in fields:
         kwargs["session_extreme_high"] = 106.0
-    
+
     ctx = DecisionContext(**kwargs)
     signal = detect_va_fade(ctx)
     assert signal is not None
@@ -56,11 +56,11 @@ def test_short_fade_stop_uses_session_extreme_when_available():
 
 
 def test_va_fade_falls_back_to_bar_extreme_when_no_session_extreme():
-    """When session_extreme is 0, fall back to bar.low/bar.high (existing behavior)."""
-    bar = Bar(time=1, open=97, high=98, low=95.5, close=97.5,
+    """When session_extreme is 0, fall back to bar.low/bar.high for the probe."""
+    bar = Bar(time=1, open=98.5, high=99, low=95.5, close=98.5,
               volume=1000, buy_volume=600, sell_volume=400,
               delta=200, oi=50000, vwap=97.0)
-    
+
     fields = set(DecisionContext.__dataclass_fields__.keys())
     kwargs = dict(
         symbol="TEST", bar=bar, poc=100.0, val=98.0, vah=102.0,
@@ -70,5 +70,5 @@ def test_va_fade_falls_back_to_bar_extreme_when_no_session_extreme():
     ctx = DecisionContext(**kwargs)
     signal = detect_va_fade(ctx)
     assert signal is not None
-    # Stop should still be below bar.low (existing behavior)
+    # Stop should still be below bar.low (existing behaviour)
     assert signal.sl < 95.5

@@ -191,10 +191,20 @@ class SignalBuilder:
         if risk <= 0:
             return fallback_tp
 
+        # MEAN_REVERSION exits at balance (Fabio Model 2): a VA_FADE always
+        # targets the POC. The generic filter below would drop the POC when its
+        # reward is under min_rr and fall through to the opposite VA edge, which
+        # is the wrong exit for a balance-return trade.
+        is_va_fade = getattr(ctx, "setup_evidence", None) and getattr(ctx.setup_evidence, "setup_type", "") == "VA_FADE"
+        if is_va_fade and ctx.poc and ctx.poc > 0:
+            if direction == "LONG" and ctx.poc > entry:
+                return ctx.poc
+            if direction == "SHORT" and ctx.poc < entry:
+                return ctx.poc
+
         candidates: list[float] = []
 
         # Collect structural targets in the right direction
-        is_va_fade = getattr(ctx, "setup_evidence", None) and getattr(ctx.setup_evidence, "setup_type", "") == "VA_FADE"
         if direction == "LONG":
             if is_va_fade and ctx.poc and ctx.poc > entry:
                 candidates.append(ctx.poc)
