@@ -73,8 +73,10 @@ def test_scenario_triple_a_bullish_trend_day():
 
 
 def test_scenario_value_area_fade_day():
-    # 10:30 IST VAH probe above 24600 rejected back into VA
-    bar = _make_bar("2026-08-19T10:30:00+05:30", o=24620.0, h=24650.0, l=24590.0, c=24610.0, vol=3000.0, delta=-800.0)
+    # 10:30 IST VAH probe above 24600 rejected, price CLOSES BACK INSIDE the VA
+    # (24590 <= VAH 24600) but still above POC 24520 -> failed auction, fade short
+    # toward POC (Fabio Model 2 reclaim semantics).
+    bar = _make_bar("2026-08-19T10:30:00+05:30", o=24620.0, h=24650.0, l=24570.0, c=24590.0, vol=3000.0, delta=-800.0)
     evidence = SetupEvidence(
         setup_type="VA_FADE",
         direction="SHORT",
@@ -105,7 +107,7 @@ def test_scenario_value_area_fade_day():
     assert decision.approved is True
     assert decision.signal is not None
     assert decision.signal.type == "SHORT"
-    assert decision.signal.entry == 24610.0
+    assert decision.signal.entry == 24590.0
     assert decision.signal.sl > decision.signal.entry
     assert decision.signal.sl >= 24649.0  # Anchored to probe high (inside by 2 ticks per Fabio)
     assert decision.signal.tp == 24520.0  # Target POC
