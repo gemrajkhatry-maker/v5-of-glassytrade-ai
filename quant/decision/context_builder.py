@@ -10,6 +10,13 @@ from __future__ import annotations
 import logging
 
 from quant.amt.bias.bias_resolver import BiasDirection, BiasResult
+from quant.contracts.constants import (
+    FABIO_BIAS_OVERRIDE_THRESHOLD,
+    FABIO_CVD_THRESHOLD_MCX,
+    FABIO_CVD_THRESHOLD_NSE,
+    FABIO_OBI_THRESHOLD,
+    FABIO_OFI_THRESHOLD,
+)
 from quant.contracts.enums import MarketState
 from quant.contracts.instrument_registry import is_option_contract
 from quant.contracts.vocabulary import absorption_direction
@@ -35,8 +42,8 @@ DEFAULT_OPTION_DELTA = 0.50
 # model inference is involved, so _decide never waits on external calls.
 _DETERMINISTIC_CONVICTION = 0.7
 
-# ponytail: Fabio's 15m bias overrides direction only when confidence >= 0.6
-_BIAS_OVERRIDE_THRESHOLD = 0.6
+# ponytail: Fabio's 15m bias overrides direction only when confidence >= threshold
+_BIAS_OVERRIDE_THRESHOLD = FABIO_BIAS_OVERRIDE_THRESHOLD
 
 
 def _apply_bias_override(current_direction: str, bias: BiasResult) -> str:
@@ -171,7 +178,7 @@ class DecisionContextBuilder:
         triple_a_sig = self._ds(amt_dto, "tripleASignal").upper()
         cvd_val = self._df(amt_dto, "cvdSlope")
 
-        cvd_threshold = 0.3 if str(market).upper() == "MCX" else 0.5
+        cvd_threshold = FABIO_CVD_THRESHOLD_MCX if str(market).upper() == "MCX" else FABIO_CVD_THRESHOLD_NSE
         if break_type == "INITIATIVE" and break_dir in ("UP", "DOWN"):
             # ponytail: CVD strongly opposing the break indicates absorption/exhaustion trap (Fabio Gap #2/#7)
             if break_dir == "DOWN" and cvd_val > cvd_threshold:
@@ -183,18 +190,18 @@ class DecisionContextBuilder:
             return triple_a_sig
         if absorption_direction(amt_dto.get("absorptionSide")):
             return absorption_direction(amt_dto.get("absorptionSide"))
-        if obi >= 0.20 and close_px > vwap_upper_1:
+        if obi >= FABIO_OBI_THRESHOLD and close_px > vwap_upper_1:
             return "LONG"
-        if obi <= -0.20 and close_px < vwap_lower_1:
+        if obi <= -FABIO_OBI_THRESHOLD and close_px < vwap_lower_1:
             return "SHORT"
-        if cvd_val > cvd_threshold and (close_px > vah or ofi > 0.10):
+        if cvd_val > cvd_threshold and (close_px > vah or ofi > FABIO_OFI_THRESHOLD):
             return "LONG"
-        if cvd_val < -cvd_threshold and (close_px < val or ofi < -0.10):
+        if cvd_val < -cvd_threshold and (close_px < val or ofi < -FABIO_OFI_THRESHOLD):
             return "SHORT"
         if raw_ms == "IMBALANCED":
-            if (vah > 0 and close_px > vah) or ofi > 0.10 or (close_px > vwap_upper_1):
+            if (vah > 0 and close_px > vah) or ofi > FABIO_OFI_THRESHOLD or (close_px > vwap_upper_1):
                 return "LONG"
-            if (val > 0 and close_px < val) or ofi < -0.10 or (close_px < vwap_lower_1):
+            if (val > 0 and close_px < val) or ofi < -FABIO_OFI_THRESHOLD or (close_px < vwap_lower_1):
                 return "SHORT"
         if raw_ms == "BALANCED":
             if val > 0 and close_px <= val and cvd_val >= -0.2:

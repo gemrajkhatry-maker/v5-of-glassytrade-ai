@@ -221,3 +221,23 @@ SOFT_GATE_QUORUM: int = 3
 ATR_TRAIL_ACTIVATION_R: float = 1.0
 ATR_TRAIL_STEP_PCT: float = 0.20
 ATR_TRAIL_PERIOD: int = 14
+
+# ============================================================================
+# Fabio AMT Methodology Parameters
+# ============================================================================
+# ponytail: Fabio Valentini's AMT methodology thresholds
+# Source: https://blog.pickmytrade.trade/fabio-valentini-pro-scalper-nasdaq-scalping-strategy/
+
+# Direction resolution (context_builder.py)
+FABIO_CVD_THRESHOLD_NSE: float = 0.5     # CVD slope threshold for NSE
+FABIO_CVD_THRESHOLD_MCX: float = 0.3     # CVD slope threshold for MCX
+FABIO_OBI_THRESHOLD: float = 0.20        # Order Book Imbalance threshold
+FABIO_OFI_THRESHOLD: float = 0.10        # Order Flow Imbalance threshold
+FABIO_BIAS_OVERRIDE_THRESHOLD: float = 0.60  # 15m bias confidence minimum
+
+# Absorption detection (detectors.py)
+FABIO_ABSORPTION_VOL_MULT: float = 2.0   # Volume must exceed 2x average
+FABIO_ABSORPTION_RANGE_ATR: float = 0.30 # Range must be < 0.3 ATR
+
+# Volume Profile
+FABIO_VALUE_AREA_PCT: float = 0.70       # CME standard value area (70%)
