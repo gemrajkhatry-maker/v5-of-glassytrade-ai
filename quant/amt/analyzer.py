@@ -607,6 +607,8 @@ class AMTAnalyzer:
             leg_vah=leg_data.get("vah", 0.0),
             leg_val=leg_data.get("val", 0.0),
             vwap_deviation_sigmas=vwap_deviation_sigmas,
+            bar_high=float(current.high),
+            bar_low=float(current.low),
         )
         market_state = state_result.state
         zone = state_result.zone

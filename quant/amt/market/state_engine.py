@@ -56,21 +56,39 @@ def detect_market_state(
     ib_complete: bool = False,
     ib_high: float = 0.0,
     ib_low: float = 0.0,
+    bar_high: float = 0.0,
+    bar_low: float = 0.0,
 ) -> MarketStateResult:
     """Fabio's 2-state market state classification.
 
     Priority order:
     1. BALANCED — price inside VA with acceptance
     2. IMBALANCED — price outside VA OR displacement+acceptance
+
+    Probe rejection rule (Fabio acceptance rule):
+    A bar that probes beyond VA (high > VAH or low < VAL) but closes back
+    inside VA is a *rejected probe* — mean-reversion context, NOT IMBALANCED.
+    Only *acceptance* (close beyond VA) triggers IMBALANCED from displacement.
     """
     inside_session_va = val <= price <= vah
     is_extreme = vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) >= 3.0
 
-    # If there is active displacement OR price is outside session Value Area OR low balance -> IMBALANCED
-    if has_displacement or not inside_session_va or balance_ratio < BALANCE_RATIO_THRESHOLD:
+    # Probe rejection detection (Fabio acceptance rule):
+    # If the bar probed beyond VA but closed inside, it's a rejected probe.
+    # This suppresses IMBALANCED from has_displacement alone — the probe is
+    # mean-reversion context, not trend initiation.
+    probe_rejected_above = bar_high > vah > 0 and price <= vah and inside_session_va
+    probe_rejected_below = bar_low < val and bar_low > 0 and price >= val and inside_session_va
+    is_probe_rejection = probe_rejected_above or probe_rejected_below
+
+    # Effective displacement: suppressed when it's a probe rejection (no acceptance)
+    effective_displacement = has_displacement and not is_probe_rejection
+
+    # If there is active displacement OR price is outside session Value Area Or low balance -> IMBALANCED
+    if effective_displacement or not inside_session_va or balance_ratio < BALANCE_RATIO_THRESHOLD:
         trigger_parts = []
         conf = 0.5  # base confidence for imbalanced
-        if has_displacement:
+        if effective_displacement:
             trigger_parts.append("active displacement leg")
             conf += 0.25
         if not inside_session_va:
@@ -83,6 +101,8 @@ def detect_market_state(
             conf += 0.05
         if is_extreme:
             conf += 0.05
+        if is_probe_rejection:
+            trigger_parts.append("probe rejected (mean-reversion context)")
 
         zone = "OUTSIDE_VA" if not inside_session_va else "DISPLACEMENT"
         return MarketStateResult(
@@ -109,12 +129,20 @@ def detect_market_state(
         conf += 0.05
     if is_extreme:
         conf -= 0.15  # extreme deviation reduces confidence in balance
+    if is_probe_rejection:
+        trigger_extra = "probe rejected beyond VA — mean-reversion context"
+    else:
+        trigger_extra = ""
+
+    trigger = f"Price {price:.2f} inside session VA [{val:.2f}, {vah:.2f}]"
+    if trigger_extra:
+        trigger += f" | {trigger_extra}"
 
     return MarketStateResult(
         state=MarketState.BALANCED,
         zone=zone,
         confidence=max(0.30, min(conf, 0.90)),
-        trigger=f"Price {price:.2f} inside session VA [{val:.2f}, {vah:.2f}]",
+        trigger=trigger,
         has_displacement=has_displacement,
         has_acceptance=has_acceptance,
         balance_ratio=balance_ratio,
