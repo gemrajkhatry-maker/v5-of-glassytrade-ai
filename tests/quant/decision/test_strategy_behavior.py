@@ -32,12 +32,17 @@ def make_bar(
     open: float | None = None,
     volume: float = 2000.0,
 ) -> Bar:
-    """Build an OHLCV bar with sensible defaults."""
+    """Build an OHLCV bar with sensible defaults.
+
+    The default geometry is a full-body bullish bar: the Gate-3 1-min
+    candle-acceptance guard requires a >=60% body in the trade direction with
+    the close near the extreme. Every caller here is LONG.
+    """
     return Bar(
         time=time,
-        open=open if open is not None else close,
-        high=high if high is not None else close + 1.0,
-        low=low if low is not None else close - 1.0,
+        open=open if open is not None else close - 1.2,
+        high=high if high is not None else close + 0.5,
+        low=low if low is not None else close - 1.5,
         close=close,
         volume=volume,
         buy_volume=volume * 0.6,

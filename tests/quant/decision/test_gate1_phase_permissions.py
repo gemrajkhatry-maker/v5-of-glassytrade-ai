@@ -21,15 +21,21 @@ from quant.decision.result import GateResult  # noqa: F401  (re-export check)
 from quant.decision.setup_state import SetupEvidence
 
 
-def _make_bar(time_iso: str):
+def _make_bar(time_iso: str, direction: str = "LONG"):
     from quant.bars import Bar
 
+    # Full-body bar in the trade direction: the Gate-3 1-min candle-acceptance
+    # guard needs a >=60% body with the close near the extreme.
+    if str(direction).upper() == "SHORT":
+        open_px, high, low, close = 24730.0, 24730.0, 24690.0, 24700.0
+    else:
+        open_px, high, low, close = 24690.0, 24730.0, 24690.0, 24720.0
     return Bar(
         time=time_iso,
-        open=24700.0,
-        high=24730.0,
-        low=24690.0,
-        close=24720.0,
+        open=open_px,
+        high=high,
+        low=low,
+        close=close,
         volume=2000.0,
         buy_volume=1250.0,
         sell_volume=750.0,
@@ -137,7 +143,7 @@ def _midday_ctx(direction="SHORT", break_type="", break_direction="",
     evidence-free momentum paths (Triple-A AGGRESSION / Initiative breakout)
     must be blocked at Gate 3 because allow_trend=False."""
     return DecisionContext(
-        bar=_make_bar("2026-08-19T12:45:00+05:30"),
+        bar=_make_bar("2026-08-19T12:45:00+05:30", direction),
         symbol="NIFTY",
         session_open=True,
         warmup_complete=True,

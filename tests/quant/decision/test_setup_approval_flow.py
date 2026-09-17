@@ -10,11 +10,12 @@ from quant.bars import Bar
 
 
 def _bar():
+    # Full-body bullish bar so the Gate-3 1-min candle-acceptance guard passes.
     return Bar(
         time="2026-08-19T10:00:00+05:30",
-        open=100.0,
-        high=101.0,
-        low=99.0,
+        open=99.3,
+        high=100.7,
+        low=99.3,
         close=100.5,
         volume=1000.0,
         buy_volume=600.0,
