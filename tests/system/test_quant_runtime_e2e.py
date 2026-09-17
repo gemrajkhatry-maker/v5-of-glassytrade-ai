@@ -2,10 +2,10 @@
 """System E2E: the greenfield QuantEngine's projected state fills the exact
 frontend WS contract that the legacy backend snapshot builder defines.
 
-The engine consumes the same ``_ticks()`` fixture as the runtime test but stops
-right after the AGGRESSION-LONG bar (t306) so the final snapshot's decision
-state IS the state at the moment the LONG fired — the projected state is the
-WS state the frontend would receive at that moment.
+The engine consumes the same ``_session_ticks()`` fixture as the paper-protocol
+test but stops right after the approved AGGRESSION-LONG bar (t168) so the final
+snapshot's decision state IS the state at the moment the LONG fired — the
+projected state is the WS state the frontend would receive at that moment.
 """
 
 from tests.helpers.synthetic import SyntheticGateway
@@ -34,7 +34,9 @@ from tests.system.test_paper_protocol import _session_ticks
 def _run_ws():
     from quant.execution.risk import SessionRisk
     SessionRisk(storage=None, symbol="SYM").reset_session()
-    eng = QuantEngine(SyntheticGateway(_session_ticks()[:170]), "SYM",
+    # 172 ticks closes the approved t168 bar (t166's breakout was dropped as a
+    # thin stop, so the approval slipped one displacement bar forward).
+    eng = QuantEngine(SyntheticGateway(_session_ticks()[:172]), "SYM",
                       interval_seconds=2)
     eng.run()
     from quant.state import project_state
