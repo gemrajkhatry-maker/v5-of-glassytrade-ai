@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
+from quant.amt.bias.bias_resolver import BiasDirection
 from quant.bars import Bar
 from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.enums import MarketState
@@ -134,3 +135,7 @@ class DecisionContext:
     vars_result: Any | None = None
     # Rolling history of recent decisions and rationales (last 3-5 bars)
     recent_decisions: Tuple[Dict[str, Any], ...] = ()
+    # 15-min bias direction and confidence from BiasResolver (Fabio top-down layer 1).
+    # Defaults to NEUTRAL / 0.0 so existing callers that don't supply bias continue to work.
+    bias_direction: BiasDirection = BiasDirection.NEUTRAL
+    bias_confidence: float = 0.0
