@@ -129,23 +129,16 @@ def test_zero_risk_on_invalid_inputs(bullish_forecast):
     assert res_neg_entry.quantity == 0.0
 
 
-def test_session_risk_delegation_to_timesfm(bullish_forecast):
-    # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
+def test_session_risk_sizing_is_deterministic():
+    # Sizing is the deterministic House Money Protocol: SessionRisk is the single
+    # authority and TimesFM forecasts feed exits/UI only. The former
+    # forecast=parameter was never read and was deleted (2026-09-17 convergence).
+    # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an
+    # unpinned day makes this assertion calendar-dependent.
     risk = SessionRisk(starting_equity=100000.0, day_of_week=1)
-    # Standard rule sizing without forecast
-    qty_rule = risk.position_size(entry=8000.0, sl=7980.0, lot_size=10.0)
-    assert qty_rule >= 0
-
-    # Dynamic sizing with forecast
-    qty_dyn = risk.position_size(
-        entry=8000.0,
-        sl=7980.0,
-        lot_size=10.0,
-        forecast=bullish_forecast,
-        side="LONG",
-    )
-    assert qty_dyn > 0
-    assert qty_dyn % 10.0 == 0  # snapped to lot_size
+    qty_rule = risk.position_size(entry=8000.0, sl=7980.0, lot_size=10.0, side="LONG")
+    assert qty_rule > 0
+    assert qty_rule % 10.0 == 0  # snapped to lot_size
 
 
 def test_structural_target_and_minimum_rr(bullish_forecast):
