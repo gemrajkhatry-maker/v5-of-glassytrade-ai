@@ -7,7 +7,9 @@ from quant.decision.context import DecisionContext
 
 
 def _bar(close=100.0):
-    return Bar(time="t", open=close, high=close + 1.0, low=close - 1.0, close=close, volume=100.0)
+    # Full-body bullish bar: the Gate-3 1-min candle-acceptance guard requires a
+    # >=60% body in the trade direction with the close near the extreme.
+    return Bar(time="t", open=close - 0.8, high=close + 0.25, low=close - 1.0, close=close, volume=100.0)
 
 
 def _ctx(agent_direction="LONG", market_state="IMBALANCED", **kw):
@@ -27,6 +29,7 @@ def _ctx(agent_direction="LONG", market_state="IMBALANCED", **kw):
         cvd_slope=kw.get("cvd_slope", 0.0),
         absorption_side=kw.get("absorption_side", ""),
         obi=kw.get("obi", 0.0),
+        leg_lvn=kw.get("leg_lvn", 0.0),
         risk_halted=kw.get("risk_halted", False),
         triple_a_phase=kw.get("triple_a_phase", ""),
         triple_a_signal=kw.get("triple_a_signal", ""),
@@ -42,21 +45,26 @@ def test_aggression_long_approved():
         triple_a_signal="LONG",
         cvd_slope=1.0,
         close=110.0,
+        leg_lvn=110.0,
     )
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None and d.signal.type == "LONG"
     assert d.reason == "Triple-A"
 
 
-def test_aggression_approved_in_balanced_market():
+def test_aggression_approved_in_imbalanced_market():
+    # D2 (2026-09-17): IMBALANCED -> TREND, so a Triple-A AGGRESSION is approved.
+    # The former balanced-market variant is no longer valid: the model router
+    # blocks trend setups in a BALANCED auction (see test_model_router_enforcement).
     ctx = _ctx(
         agent_direction="LONG",
-        market_state="BALANCED",
+        market_state="IMBALANCED",
         triple_a_phase="AGGRESSION",
         triple_a_signal="LONG",
         cvd_slope=1.0,
         close=110.0,
         val=98.0,
+        leg_lvn=110.0,
     )
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None and d.signal.type == "LONG"
@@ -69,13 +77,17 @@ def test_aggression_blocked_in_dead_market():
 
 
 def test_va_fade_fallback():
-    ctx = _ctx(agent_direction="LONG", close=99.6, poc=101.0, val=100.0, tick_size=0.5, cvd_slope=50.0)
+    # A VA fade is the MEAN_REVERSION model, so the auction must be BALANCED
+    # (IMBALANCED -> TREND, where the router blocks a counter-trend fade).
+    ctx = _ctx(agent_direction="LONG", market_state="BALANCED",
+               close=99.6, poc=101.0, val=100.0, tick_size=0.5, cvd_slope=50.0)
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None and d.reason in ("VA_FADE", "Triple-A")
 
 
 def test_va_fade_thin_stop_rejected():
-    ctx = _ctx(agent_direction="LONG", close=99.6, poc=101.0, val=100.0, tick_size=0.05, cvd_slope=50.0)
+    ctx = _ctx(agent_direction="LONG", market_state="BALANCED",
+               close=99.6, poc=101.0, val=100.0, tick_size=0.05, cvd_slope=50.0)
     d = DecisionService().evaluate(ctx)
     # thin stop is rejected if not passing other gates
     assert d.reason in ("NO_EDGE", "Triple-A", "VA_FADE")
@@ -118,6 +130,7 @@ def test_approved_signal_carries_model_label():
         triple_a_signal="LONG",
         cvd_slope=1.0,
         close=110.0,
+        leg_lvn=110.0,
     )
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None

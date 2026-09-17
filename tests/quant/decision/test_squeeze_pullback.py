@@ -16,8 +16,14 @@ from quant.decision.gates_edge import gate_triple_a_edge
 
 def _base_ctx(direction="LONG", cvd_slope=0.3, close=100.0, squeeze_dir="LONG",
               trapped=100.0, tick_size=0.05, allow_trend=True) -> DecisionContext:
-    bar = Bar(time="t", open=close, high=close + 0.2, low=close - 0.2,
-              close=close, volume=100.0)
+    # Full-body bar in the trade direction: the Gate-3 1-min candle-acceptance
+    # guard needs a >=60% body with the close near the extreme.
+    if str(direction).upper() == "SHORT":
+        bar = Bar(time="t", open=close + 0.12, high=close + 0.15, low=close - 0.05,
+                  close=close, volume=100.0)
+    else:
+        bar = Bar(time="t", open=close - 0.12, high=close + 0.05, low=close - 0.15,
+                  close=close, volume=100.0)
     return DecisionContext(
         state=None, bar=bar, symbol="SYM", time_str="t",
         agent_direction=direction,

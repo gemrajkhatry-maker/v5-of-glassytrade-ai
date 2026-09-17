@@ -8,6 +8,8 @@ QuantDecision is consumed by the backend wiring (quant signal → domain Signal
 """
 
 from __future__ import annotations
+import logging
+
 from quant.contracts.constants import CONFIDENCE_HIGH_THRESHOLD
 from quant.contracts.enums import MarketState
 
@@ -16,11 +18,14 @@ from typing import Optional
 
 from quant.contracts.instrument_registry import is_option_contract
 from quant.decision.context import DecisionContext
+from quant.decision.model_router import allows, select_model
 from quant.decision.pipeline import GatePipeline
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import Signal, SignalBuilder, is_min_stop_met
 from quant.decision.va_fade import detect_va_fade
 from quant.decision.data_quality import conviction_allowed
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -94,19 +99,32 @@ class DecisionService:
         results = tuple(
             GatePipeline().evaluate(ctx, allow_positioned=allow_positioned)
         )
+        active_model = select_model(ctx)
+        gate3_key = next(
+            (r.setup_key for r in results if r.gate == 3 and r.passed),
+            "",
+        )
         blocked = _block_reasons(results)
         if all(r.passed for r in results):
-            label = _label_from_gate_results(results)
-            sig, drop_why = SignalBuilder().build_or_reason(ctx, results, model_label=label)
-            if sig is not None:
-                return QuantDecision(
-                    True, sig, label, "", results,
-                    model_label=label,
+            if gate3_key and not allows(gate3_key, active_model):
+                _log.info(
+                    "Model router blocked %s (active model=%s, state=%s)",
+                    gate3_key, active_model,
+                    getattr(ctx.market_state, "value", ctx.market_state),
                 )
-            return QuantDecision(
-                False, None, "GATE_REJECTED", "", results,
-                blocked + (f"SIGNAL_BUILDER: {drop_why}",),
-            )
+                # fall through to the reversion fallback
+            else:
+                label = _label_from_gate_results(results)
+                sig, drop_why = SignalBuilder().build_or_reason(ctx, results, model_label=label)
+                if sig is not None:
+                    return QuantDecision(
+                        True, sig, label, "", results,
+                        model_label=label,
+                    )
+                return QuantDecision(
+                    False, None, "GATE_REJECTED", "", results,
+                    blocked + (f"SIGNAL_BUILDER: {drop_why}",),
+                )
         # If Gate 1 (session/spread) or Gate 2 (position/cooldown) failed, hard reject —
         # no trades or fades allowed. Identified by gate NUMBER, never list position:
         # positional indexing silently coupled fade eligibility to pipeline order
@@ -122,6 +140,10 @@ class DecisionService:
         # the POC and requires price OUTSIDE the value area, so it never fires
         # in balanced rotation; a dead market refuses even the reversion.
         if ctx.market_state == MarketState.DEAD:
+            return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
+        # The reversion fallback only exists for the MEAN_REVERSION model; in a
+        # trend (IMBALANCED) auction a fade would be counter-trend.
+        if not allows("VA_FADE", active_model):
             return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
         fade = detect_va_fade(ctx)
         if fade:

@@ -148,6 +148,11 @@ def _check_guards(ctx: DecisionContext) -> GateResult | None:
     return None
 
 
+def _pass(reason: str, setup_key: str = "") -> GateResult:
+    """A passing Gate-3 result tagged with the setup that fired (model router)."""
+    return GateResult(3, True, reason, setup_key=setup_key)
+
+
 def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | None:
     """Check each setup path (evidence, Triple-A, drive, LVN, initiative)."""
     if getattr(ctx, "setup_evidence", None) is not None:
@@ -155,7 +160,7 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         if ev.is_complete():
             if ev.direction and ev.direction != ctx.agent_direction:
                 return GateResult(3, False, f"Evidence direction {ev.direction} conflicts with trade direction {ctx.agent_direction}")
-            return GateResult(3, True, f"{ev.setup_type} confirmed")
+            return _pass(f"{ev.setup_type} confirmed", str(ev.setup_type or "").upper())
     phase = getattr(ctx, "triple_a_phase", "") or ""
     tsignal = getattr(ctx, "triple_a_signal", "") or ""
     if phase == "AGGRESSION" and tsignal == ctx.agent_direction:
@@ -170,9 +175,9 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         lvn_near = leg_lvn > 0 and abs(price - leg_lvn) <= _LVN_PROXIMITY_TICKS * tick
         if not lvn_near:
             return GateResult(3, False, f"Triple-A AGGRESSION without LVN proximity (leg_lvn={leg_lvn:.2f}, price={price:.2f})")
-        return GateResult(3, True, f"Triple-A AGGRESSION {tsignal} @ LVN {leg_lvn:.2f}")
+        return _pass(f"Triple-A AGGRESSION {tsignal} @ LVN {leg_lvn:.2f}", "TRIPLE_A")
     if ctx.drive_entry_valid:
-        return GateResult(3, True, "Second Drive reclaim confirmed")
+        return _pass("Second Drive reclaim confirmed", "SECOND_DRIVE")
     leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0
     if leg_lvn > 0 and ctx.bar:
         tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
@@ -184,22 +189,22 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
             if absorbed == "LONG" and ctx.agent_direction == "LONG" and cvd_slope >= -0.2:
                 if not getattr(ctx, "allow_trend", True):
                     return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
-                return GateResult(3, True, f"LVN Sniper LONG @ {leg_lvn:.2f}")
+                return _pass(f"LVN Sniper LONG @ {leg_lvn:.2f}", "LVN_SNIPER")
             if absorbed == "SHORT" and ctx.agent_direction == "SHORT" and cvd_slope <= 0.2:
                 if not getattr(ctx, "allow_trend", True):
                     return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
-                return GateResult(3, True, f"LVN Sniper SHORT @ {leg_lvn:.2f}")
+                return _pass(f"LVN Sniper SHORT @ {leg_lvn:.2f}", "LVN_SNIPER")
     break_dir = getattr(ctx, "break_direction", "") or ""
     break_type = getattr(ctx, "break_type", "") or ""
     if break_type == "INITIATIVE":
         if break_dir == "UP" and ctx.agent_direction == "LONG" and cvd_slope > -0.2:
             if not getattr(ctx, "allow_trend", True):
                 return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
-            return GateResult(3, True, "Initiative upside breakout confirmed")
+            return _pass("Initiative upside breakout confirmed", "INITIATIVE")
         if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
             if not getattr(ctx, "allow_trend", True):
                 return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
-            return GateResult(3, True, "Initiative downside breakdown confirmed")
+            return _pass("Initiative downside breakdown confirmed", "INITIATIVE")
     # Fabio Playbook #4: trapped-volume squeeze -> enter on first retest of trapped level
     sq_dir = getattr(ctx, "squeeze_direction", "") or ""
     if sq_dir and ctx.agent_direction == sq_dir:
@@ -210,11 +215,11 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
             if ctx.agent_direction == "LONG" and cvd_slope >= -0.1:
                 if not getattr(ctx, "allow_trend", True):
                     return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
-                return GateResult(3, True, f"Squeeze {sq_dir} retest @{trapped:.2f}")
+                return _pass(f"Squeeze {sq_dir} retest @{trapped:.2f}", "SQUEEZE")
             if ctx.agent_direction == "SHORT" and cvd_slope <= 0.1:
                 if not getattr(ctx, "allow_trend", True):
                     return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
-                return GateResult(3, True, f"Squeeze {sq_dir} retest @{trapped:.2f}")
+                return _pass(f"Squeeze {sq_dir} retest @{trapped:.2f}", "SQUEEZE")
     return None
 
 

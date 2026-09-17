@@ -20,6 +20,9 @@ class GateResult:
     passed: bool
     reason: str = ""
     extra: str = ""      # e.g. the computed R:R or the failing metric
+    # Which Fabio setup path produced the approval (model router input). Empty
+    # for non-setup results. See quant/decision/model_router.py.
+    setup_key: str = ""
 
     @property
     def name(self) -> str:
