@@ -16,6 +16,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 
 from quant.contracts.constants import FALLBACK_EQUITY
+from quant.contracts.enums import MarketState
 from quant.decision.context import DecisionContext
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ def _extract_market_state_str(market_state: Any) -> str:
     """Convert market_state enum or value to string."""
     if hasattr(market_state, "value"):
         return market_state.value
-    return str(market_state or "BALANCED")
+    return str(market_state or MarketState.BALANCED.value)
 
 
 def _extract_data_quality_str(data_quality: Any) -> str:

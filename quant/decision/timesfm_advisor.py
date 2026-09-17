@@ -20,6 +20,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
+from quant.contracts.enums import MarketState
 from quant.decision.context import DecisionContext
 from quant.decision.timesfm_client import (
     DEFAULT_SERVICE_URL,
@@ -94,7 +95,7 @@ def build_decision_payload(
             reason = None
             active_pos = None
 
-    regime = ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED")
+    regime = ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or MarketState.BALANCED.value)
     timing = str(ctx.session_phase or "REGULAR")
 
     return {
