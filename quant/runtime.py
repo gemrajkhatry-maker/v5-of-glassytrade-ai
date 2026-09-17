@@ -1176,7 +1176,13 @@ class QuantEngine:
         and pass through unchanged. Stale forecasts never reach exits or
         sizing — callers get None and fall back to deterministic behavior.
         """
-        tfm_fc = getattr(self._strategy, "get_latest_forecast", lambda s: None)(self.symbol)
+        from quant.decision.forecast_provider import fresh_forecast
+        tfm_fc = fresh_forecast(
+            getattr(self, "_advisor", None),
+            getattr(self, "_strategy", None),
+            symbol=self.symbol,
+            bar_index=self._bar_index,
+        )
         asof = getattr(tfm_fc, "asof_bar", -1)
         try:
             asof = int(asof)
