@@ -385,7 +385,6 @@ class SessionRisk:
         max_rupee_risk_cap: float | None = None,
         is_expiry: bool = False,
         max_lots: int | None = None,
-        forecast: Any | None = None,
         side: str = "LONG",
         freeze_limit: float | None = None,
     ) -> float:
@@ -483,7 +482,6 @@ class SessionRisk:
         lot_size: float = 1.0,
         is_expiry: bool = False,
         max_lots: int | None = None,
-        forecast: Any | None = None,
         side: str = "LONG",
         freeze_limit: float | None = None,
     ) -> float:
@@ -494,7 +492,7 @@ class SessionRisk:
 
         base = self.position_size(
             entry, sl, lot_size=lot_size, is_expiry=is_expiry, max_lots=max_lots,
-            forecast=forecast, side=side, freeze_limit=freeze_limit,
+            side=side, freeze_limit=freeze_limit,
         )
         if lot_size and lot_size > 1.0:
             lots = int(base // lot_size)

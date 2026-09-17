@@ -144,36 +144,26 @@ def test_model_sizing_failure_refuses_instead_of_deploying_50pct(monkeypatch):
     class _Fc:
         forecast_steps = ["LONG"] * 32
 
-    qty = risk.position_size(100.0, 99.0, lot_size=1.0, forecast=_Fc(), side="LONG")
+    qty = risk.position_size(100.0, 99.0, lot_size=1.0, side="LONG")
     assert qty == 0.0
 
 
 def test_forecast_path_applies_expiry_and_day_of_week_cuts():
     """D-12: the expiry halving and the Mon/Fri multiplier were applied only
     on the static branches, so they never applied on the E2E (forecast) path."""
-    import numpy as np
-
-    from quant.decision.timesfm_agents import TimesFMForecast
     from quant.execution.risk import SessionRisk
 
-    p50 = np.linspace(100.0, 104.0, 32)
-    fc = TimesFMForecast(
-        horizon=32, p50_path=p50, p10_path=p50 - 1.0, p90_path=p50 + 1.0,
-        q_spread=2.0, mean_forecast=float(p50[-1]), pct_change=0.04,
-        forecast_steps=["LONG"] * 32, curr_price=100.0, lat_ms=1.0,
-    )
-
     normal = SessionRisk(storage=None, symbol="SYM", day_of_week=2)   # Wednesday
-    qty_normal = normal.position_size(100.0, 99.0, lot_size=1.0, forecast=fc, side="LONG")
+    qty_normal = normal.position_size(100.0, 99.0, lot_size=1.0, side="LONG")
 
     expiry = SessionRisk(storage=None, symbol="SYM", day_of_week=2)
-    qty_expiry = expiry.position_size(100.0, 99.0, lot_size=1.0, forecast=fc,
+    qty_expiry = expiry.position_size(100.0, 99.0, lot_size=1.0,
                                       side="LONG", is_expiry=True)
 
     assert qty_expiry == pytest.approx(qty_normal * 0.5)
 
     monday = SessionRisk(storage=None, symbol="SYM", day_of_week=0)
-    qty_monday = monday.position_size(100.0, 99.0, lot_size=1.0, forecast=fc, side="LONG")
+    qty_monday = monday.position_size(100.0, 99.0, lot_size=1.0, side="LONG")
     assert qty_monday == pytest.approx(qty_normal * 0.5)
 
 
@@ -197,7 +187,7 @@ def test_model_sizing_failure_counted_and_still_refuses(monkeypatch):
     class _Fc:
         forecast_steps = ["LONG"] * 32
 
-    qty = risk.position_size(100.0, 99.0, lot_size=1.0, forecast=_Fc(), side="LONG")
+    qty = risk.position_size(100.0, 99.0, lot_size=1.0, side="LONG")
     assert qty == 0.0
     assert risk.model_sizing_failures == 1
 
@@ -210,30 +200,20 @@ def test_forecast_path_snaps_to_lots_before_expiry_cut():
     factor). Pinned with lot_size=75: the model returns 24975 (333 lots);
     snapping first then halving gives an exact 0.5 cut (12487.5), whereas the
     old snap-last order floored the halved value to 12450."""
-    import numpy as np
-
-    from quant.decision.timesfm_agents import TimesFMForecast
     from quant.execution.risk import SessionRisk
 
-    p50 = np.linspace(100.0, 104.0, 32)
-    fc = TimesFMForecast(
-        horizon=32, p50_path=p50, p10_path=p50 - 1.0, p90_path=p50 + 1.0,
-        q_spread=2.0, mean_forecast=float(p50[-1]), pct_change=0.04,
-        forecast_steps=["LONG"] * 32, curr_price=100.0, lat_ms=1.0,
-    )
-
     normal = SessionRisk(storage=None, symbol="SYM", day_of_week=2)  # Wednesday
-    qty_normal = normal.position_size(100.0, 99.0, lot_size=75.0, forecast=fc, side="LONG")
+    qty_normal = normal.position_size(100.0, 99.0, lot_size=75.0, side="LONG")
     assert qty_normal == 24975.0  # snapped model size: 333 lots x 75
 
     expiry = SessionRisk(storage=None, symbol="SYM", day_of_week=2)
-    qty_expiry = expiry.position_size(100.0, 99.0, lot_size=75.0, forecast=fc,
+    qty_expiry = expiry.position_size(100.0, 99.0, lot_size=75.0,
                                       side="LONG", is_expiry=True)
     # Snap first, then halve -> an exact 0.5 cut on the snapped value.
     assert qty_expiry == 12487.5
 
     monday = SessionRisk(storage=None, symbol="SYM", day_of_week=0)
-    qty_monday = monday.position_size(100.0, 99.0, lot_size=75.0, forecast=fc, side="LONG")
+    qty_monday = monday.position_size(100.0, 99.0, lot_size=75.0, side="LONG")
     assert qty_monday == 12487.5
 
 
@@ -247,7 +227,7 @@ def test_model_sizing_failures_reset_with_session():
 
     risk = SessionRisk(storage=None, symbol="SYM", day_of_week=1)
     with patch.object(sizing, "TimesFMPositionSizer", lambda: Boom()):
-        assert risk.position_size(100.0, 99.0, forecast=object()) == 0.0
+        assert risk.position_size(100.0, 99.0) == 0.0
     assert risk.model_sizing_failures == 1
     risk.reset_session()
     assert risk.model_sizing_failures == 0
