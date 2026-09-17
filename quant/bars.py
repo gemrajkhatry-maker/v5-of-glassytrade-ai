@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 DEFAULT_INTERVAL_SEC = 300  # canonical default bar interval (5 minutes)
+BIAS_INTERVAL_SEC = 900  # 15-minute bias layer (Fabio top-down: 15m → 5m → 1m)
 
 
 @dataclass(frozen=True)
