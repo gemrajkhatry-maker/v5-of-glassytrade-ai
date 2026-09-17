@@ -69,18 +69,20 @@ def _positioned_engine(ticks, symbol, side="LONG", entry=100.0):
 def _short_approval_ticks():
     """Exact mirror of the load-bearing organic approval recipe in
     tests/quant/runtime/test_positive_approval.py, flipped bearish:
-      - ~150 quiet alternating bars with sell-dominant volume (negative CVD
-        drift),
-      - one zero-range 50x-volume BUY_ABSORBED spike (buyers absorbed ->
-        bearish pending),
-      - two displacement-down closes validating the absorption,
-      - continued fall into Triple-A AGGRESSION SHORT -> full approval.
+      - ~150 quiet alternating bars (100.05/99.75) with sell-dominant volume
+        (negative CVD drift) and a thin 100.0 leg gap between them,
+      - one zero-range 50x-volume BUY_ABSORBED spike at 100.0 (buyers absorbed
+        -> bearish pending),
+      - a displacement-down close below the absorb candle's low AND on the leg
+        LVN (100.0) within gate 3's 5-tick proximity window -> validated
+        BUY_ABSORBED pulse -> AGGRESSION SHORT and absorption+LVN evidence ->
+        full SHORT approval (LVN_Sniper).
     """
-    out = [Tick(f"t{i}", 99.95 if i % 2 == 0 else 100.05, 10, 1, 9)
+    out = [Tick(f"t{i}", 100.05 if i % 2 == 0 else 99.75, 10, 1, 9)
            for i in range(300)]
     out.append(Tick("t300", 100.0, 500, 320, 180))   # BUY_ABSORBED spike
     out.append(Tick("t301", 100.0, 10, 4, 6))        # close the spike bar
-    out.append(Tick("t302", 99.6, 20, 6, 14))        # displacement down -> APPROVES SHORT
+    out.append(Tick("t302", 99.75, 30, 10, 20))      # displacement down @ leg LVN 100.0
     return out
 
 
@@ -139,17 +141,8 @@ def test_contrary_approval_flattens_position():
 def test_same_direction_approval_holds():
     """Mirror-bullish data (positive_approval recipe) approves LONG — the
     SAME direction as the held LONG — so the position must survive."""
-    bullish = [Tick(f"t{i}", 99.95 if i % 2 == 0 else 100.05, 10, 9, 1)
-               for i in range(300)]
-    bullish += [
-        Tick("t300", 100.0, 500, 180, 320),   # SELL_ABSORBED spike (bullish)
-        Tick("t301", 100.0, 10, 6, 4),
-        Tick("t302", 100.4, 20, 14, 6),       # displacement up (validates)
-        Tick("t303", 100.6, 20, 14, 6),
-        Tick("t304", 100.8, 10, 9, 1),
-        Tick("t305", 101.0, 10, 9, 1),
-        Tick("t306", 101.2, 10, 9, 1),
-    ]
+    from tests.quant.runtime.test_positive_approval import _organic_approval_ticks
+    bullish = list(_organic_approval_ticks())
     eng = _positioned_engine(bullish, "HOLD", side="LONG", entry=99.90)
 
     eng.run()
