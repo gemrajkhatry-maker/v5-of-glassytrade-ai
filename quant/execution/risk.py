@@ -442,7 +442,21 @@ class SessionRisk:
                 qty = snap_to_lot(raw_qty, lot_size)
                 if self._capital_deployment_pct is not None:
                     deployment_capital = max(0.0, sizing_equity * self._capital_deployment_pct)
-                    deployment_lots = int(deployment_capital // (entry * lot_size)) if entry > 0 else 0
+                    # ponytail: derivatives use margin (~15% of notional), not full cash
+                    _DERIVATIVE_MARGIN_FRACTION = 0.15
+                    margin_per_lot = entry * lot_size * _DERIVATIVE_MARGIN_FRACTION
+                    if margin_per_lot > 0:
+                        deployment_lots = int(deployment_capital // margin_per_lot)
+                    else:
+                        deployment_lots = 0
+                    # Cap deployment by risk budget (risk_per_lot may exceed budget)
+                    risk_per_lot = loss_per_unit * lot_size
+                    if risk_per_lot > 0:
+                        risk_max_lots = int(risk_amount // risk_per_lot)
+                        deployment_lots = min(deployment_lots, risk_max_lots)
+                    # Floor at 1 lot when stop-loss risk fits within risk budget
+                    if deployment_lots == 0 and risk_per_lot > 0 and risk_per_lot <= risk_amount:
+                        deployment_lots = 1
                     qty = min(qty, float(deployment_lots * lot_size))
                 if max_lots is not None and max_lots > 0:
                     qty = min(qty, float(max_lots * lot_size))
