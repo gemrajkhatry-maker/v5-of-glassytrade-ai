@@ -105,11 +105,6 @@ class SessionRisk:
         else:
             self._day_of_week = day_of_week
         self._load_status: RiskLoadStatus = RiskLoadStatus.MEMORY_ONLY
-        # Finding 1 (review of D-12): a TimesFM sizing failure refuses the
-        # entry (returns 0.0) — indistinguishable from a genuine budget-zero
-        # unless we count it. Per-instance so callers can attribute the
-        # refusal to THIS call, plus a process-level global for /v1/metrics.
-        self._model_sizing_failures = 0
         self._load()
 
     def _key(self) -> str:
@@ -119,15 +114,6 @@ class SessionRisk:
     def load_status(self) -> RiskLoadStatus:
         """How this session's initial state was established — for telemetry."""
         return self._load_status
-
-    @property
-    def model_sizing_failures(self) -> int:
-        """Count of TimesFM entry-sizing failures that refused an entry.
-
-        Finding 1 (review of D-12): callers must be able to tell a broken
-        sizer from a genuinely unaffordable trade.
-        """
-        return self._model_sizing_failures
 
     def _load(self) -> None:
         if self._storage is None:
@@ -514,7 +500,6 @@ class SessionRisk:
             self._consecutive_losses = 0
             self._consecutive_wins = 0
             self._trades_today = 0
-            self._model_sizing_failures = 0
             self._halted = False
             self._halt_reason = ""
             self._equity = self._starting_equity

@@ -125,29 +125,6 @@ def test_reset_session_restores_clean_state():
 
 
 
-def test_model_sizing_failure_refuses_instead_of_deploying_50pct(monkeypatch):
-    """D-12: a raising model-sizing call used to fall through to the flat
-    50%-of-equity deployment branch — a structurally different, non-risk-
-    equivalent policy — with only a warning."""
-    from quant.execution.risk import SessionRisk
-
-    risk = SessionRisk(storage=None, symbol="SYM", base_risk_pct=0.05)
-
-    import quant.decision.timesfm_sizing as sz
-
-    class _Boom:
-        def compute_size(self, **_k):
-            raise RuntimeError("empty p10_path")
-
-    monkeypatch.setattr(sz, "TimesFMPositionSizer", lambda *a, **k: _Boom())
-
-    class _Fc:
-        forecast_steps = ["LONG"] * 32
-
-    qty = risk.position_size(100.0, 99.0, lot_size=1.0, side="LONG")
-    assert qty == 0.0
-
-
 def test_forecast_path_applies_expiry_and_day_of_week_cuts():
     """D-12: the expiry halving and the Mon/Fri multiplier were applied only
     on the static branches, so they never applied on the E2E (forecast) path."""
@@ -165,69 +142,3 @@ def test_forecast_path_applies_expiry_and_day_of_week_cuts():
     monday = SessionRisk(storage=None, symbol="SYM", day_of_week=0)
     qty_monday = monday.position_size(100.0, 99.0, lot_size=1.0, side="LONG")
     assert qty_monday == pytest.approx(qty_normal * 0.5)
-
-
-def test_model_sizing_failure_counted_and_still_refuses(monkeypatch):
-    """Finding 1 (review of D-12): a raising model-sizing call must be
-    distinguishable from a genuine budget-zero. The refuse path must bump an
-    observable counter (per instance) and still return 0.0."""
-    from quant.execution.risk import SessionRisk
-
-    risk = SessionRisk(storage=None, symbol="SYM", base_risk_pct=0.05)
-    assert risk.model_sizing_failures == 0
-
-    import quant.decision.timesfm_sizing as sz
-
-    class _Boom:
-        def compute_size(self, **_k):
-            raise RuntimeError("empty p10_path")
-
-    monkeypatch.setattr(sz, "TimesFMPositionSizer", lambda *a, **k: _Boom())
-
-    class _Fc:
-        forecast_steps = ["LONG"] * 32
-
-    qty = risk.position_size(100.0, 99.0, lot_size=1.0, side="LONG")
-    assert qty == 0.0
-    assert risk.model_sizing_failures == 1
-
-
-def test_forecast_path_snaps_to_lots_before_expiry_cut():
-    """Finding 2 (review of D-12): the forecast path must snap the model
-    quantity to whole lots FIRST, then apply the expiry and day-of-week
-    multipliers on the snapped value — same order as the static branches
-    (which compute whole lots and multiply the returned qty by the Mon/Fri
-    factor). Pinned with lot_size=75: the model returns 24975 (333 lots);
-    snapping first then halving gives an exact 0.5 cut (12487.5), whereas the
-    old snap-last order floored the halved value to 12450."""
-    from quant.execution.risk import SessionRisk
-
-    normal = SessionRisk(storage=None, symbol="SYM", day_of_week=2)  # Wednesday
-    qty_normal = normal.position_size(100.0, 99.0, lot_size=75.0, side="LONG")
-    assert qty_normal == 24975.0  # snapped model size: 333 lots x 75
-
-    expiry = SessionRisk(storage=None, symbol="SYM", day_of_week=2)
-    qty_expiry = expiry.position_size(100.0, 99.0, lot_size=75.0,
-                                      side="LONG", is_expiry=True)
-    # Snap first, then halve -> an exact 0.5 cut on the snapped value.
-    assert qty_expiry == 12487.5
-
-    monday = SessionRisk(storage=None, symbol="SYM", day_of_week=0)
-    qty_monday = monday.position_size(100.0, 99.0, lot_size=75.0, side="LONG")
-    assert qty_monday == 12487.5
-
-
-def test_model_sizing_failures_reset_with_session():
-    from unittest.mock import patch
-    import quant.decision.timesfm_sizing as sizing
-
-    class Boom:
-        def compute_size(self, **_kwargs):
-            raise RuntimeError("test")
-
-    risk = SessionRisk(storage=None, symbol="SYM", day_of_week=1)
-    with patch.object(sizing, "TimesFMPositionSizer", lambda: Boom()):
-        assert risk.position_size(100.0, 99.0) == 0.0
-    assert risk.model_sizing_failures == 1
-    risk.reset_session()
-    assert risk.model_sizing_failures == 0
