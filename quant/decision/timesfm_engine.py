@@ -15,6 +15,7 @@ import logging
 import os
 import threading
 import time
+import types
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -22,6 +23,7 @@ import numpy as np
 from quant.decision.context import DecisionContext
 from quant.contracts.vocabulary import absorption_direction, is_opening_phase
 from quant.decision.timesfm_forecast_factory import build_forecast
+from quant.decision.result_factory import build_decision_result, build_gate_results
 from quant.session_gates import session_allow_entry
 
 logger = logging.getLogger(__name__)
@@ -392,109 +394,94 @@ class TimesFMEngine:
         is_blocked_by_time = bool(ctx.time_str and not session_allow_entry(ctx.time_str, ctx.market))
         if (not ctx.session_open) or is_blocked_by_time:
             time_msg = f" at {ctx.time_str}" if ctx.time_str else ""
-            return {
-                "role": "SCANNING",
-                "action": "FLAT",
-                "direction": "FLAT",
-                "setup": "NO_EDGE",
-                "reason": "SESSION_GATE_BLOCKED",
-                "confidence": "Low",
-                "confidenceScore": 0.0,
-                "rationale": f"Session gate blocked entry for {symbol}{time_msg} (market={ctx.market}).",
-                "forecastSteps": ["FLAT"] * self.target_horizon,
-                "quantileSpread": 0.0,
-                "meanForecast": float(ctx.bar.close if ctx.bar else 0.0),
-                "gateResults": [
-                    {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": False, "message": "Session gate blocked"},
-                    {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": True, "message": ""},
-                    {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": False, "message": "No trade"},
-                    {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": False, "message": "No trade"},
-                ],
-                "activePosition": None,
-                "dynamicTrailStop": None,
-                "modelVersions": {"timesfm": "3.0", "engine": "native_direct"},
-                "source": "TIMESFM_3.0_NATIVE",
-                "latencyMs": 0.1,
-                "modelLabel": "TimesFM-SessionGateBlocked",
-                "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
-                "timing": str(ctx.session_phase or "REGULAR"),
-                "sizeFraction": 0.0,
-                "latencyUs": 100,
-                "contextBarsUsed": context_bars_used,
-                "eventsProcessed": events_processed,
-                "inferenceWindow": self.target_horizon,
-            }
+            result = build_decision_result(
+                role="SCANNING",
+                action="FLAT",
+                direction="FLAT",
+                setup="NO_EDGE",
+                reason="SESSION_GATE_BLOCKED",
+                confidence="Low",
+                confidence_score=0.0,
+                rationale=f"Session gate blocked entry for {symbol}{time_msg} (market={ctx.market}).",
+                forecast=None,
+                gate_results=build_gate_results(
+                    g1_passed=False, g1_msg="Session gate blocked",
+                    g2_passed=True, g2_msg="",
+                    g3_passed=False, g3_msg="No trade",
+                    g4_passed=False, g4_msg="No trade",
+                ),
+                active_position=None,
+                symbol=symbol,
+                entry_price=float(ctx.bar.close if ctx.bar else 0.0),
+                market_state=ctx.market_state,
+                session_phase=ctx.session_phase,
+                model_label="TimesFM-SessionGateBlocked",
+            )
+            result["contextBarsUsed"] = context_bars_used
+            result["eventsProcessed"] = events_processed
+            result["inferenceWindow"] = self.target_horizon
+            return result
 
         # Session & Risk Guards
         if ctx.risk_halted:
-            return {
-                "role": "POSITION_MANAGEMENT" if ctx.position_open else "SCANNING",
-                "action": "FLAT",
-                "direction": "FLAT",
-                "setup": "NO_EDGE",
-                "reason": "RISK_HALTED",
-                "confidence": "Low",
-                "confidenceScore": 0.0,
-                "rationale": "Daily risk threshold reached; trading engine halted.",
-                "forecastSteps": ["FLAT"] * self.target_horizon,
-                "quantileSpread": 0.0,
-                "meanForecast": float(ctx.bar.close if ctx.bar else 0.0),
-                "gateResults": [
-                    {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": True, "message": ""},
-                    {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": False, "message": "Risk halted"},
-                    {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": False, "message": "No trade"},
-                    {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": False, "message": "Risk halted"},
-                ],
-                "activePosition": None,
-                "dynamicTrailStop": None,
-                "modelVersions": {"timesfm": "3.0", "engine": "native_direct"},
-                "source": "TIMESFM_3.0_NATIVE",
-                "latencyMs": 0.1,
-                "modelLabel": "TimesFM-RiskHalted",
-                "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
-                "timing": str(ctx.session_phase or "REGULAR"),
-                "sizeFraction": 0.0,
-                "latencyUs": 100,
-                "contextBarsUsed": context_bars_used,
-                "eventsProcessed": events_processed,
-                "inferenceWindow": self.target_horizon,
-            }
+            result = build_decision_result(
+                role="POSITION_MANAGEMENT" if ctx.position_open else "SCANNING",
+                action="FLAT",
+                direction="FLAT",
+                setup="NO_EDGE",
+                reason="RISK_HALTED",
+                confidence="Low",
+                confidence_score=0.0,
+                rationale="Daily risk threshold reached; trading engine halted.",
+                forecast=None,
+                gate_results=build_gate_results(
+                    g1_passed=True, g1_msg="",
+                    g2_passed=False, g2_msg="Risk halted",
+                    g3_passed=False, g3_msg="No trade",
+                    g4_passed=False, g4_msg="Risk halted",
+                ),
+                active_position=None,
+                symbol=symbol,
+                entry_price=float(ctx.bar.close if ctx.bar else 0.0),
+                market_state=ctx.market_state,
+                session_phase=ctx.session_phase,
+                model_label="TimesFM-RiskHalted",
+            )
+            result["contextBarsUsed"] = context_bars_used
+            result["eventsProcessed"] = events_processed
+            result["inferenceWindow"] = self.target_horizon
+            return result
 
         session_phase = str(ctx.session_phase or "").upper()
         is_opening = is_opening_phase(session_phase)
         if is_opening:
-            return {
-                "role": "SCANNING",
-                "action": "FLAT",
-                "direction": "FLAT",
-                "setup": "NO_EDGE",
-                "reason": "OPENING_NOISE",
-                "confidence": "Low",
-                "confidenceScore": 0.1,
-                "rationale": f"Opening noise / warmup phase active on {symbol} ({session_phase}) — no trade execution allowed.",
-                "forecastSteps": ["FLAT"] * self.target_horizon,
-                "quantileSpread": 0.0,
-                "meanForecast": float(ctx.bar.close if ctx.bar else 0.0),
-                "gateResults": [
-                    {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": False, "message": f"Opening noise ({session_phase})"},
-                    {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": True, "message": ""},
-                    {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": False, "message": "Waiting for primary"},
-                    {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": False, "message": "No setup"},
-                ],
-                "activePosition": None,
-                "dynamicTrailStop": None,
-                "modelVersions": {"timesfm": "3.0", "engine": "native_direct"},
-                "source": "TIMESFM_3.0_NATIVE",
-                "latencyMs": 0.1,
-                "modelLabel": "TimesFM-OpeningNoise",
-                "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
-                "timing": str(ctx.session_phase or "REGULAR"),
-                "sizeFraction": 0.0,
-                "latencyUs": 100,
-                "contextBarsUsed": context_bars_used,
-                "eventsProcessed": events_processed,
-                "inferenceWindow": self.target_horizon,
-            }
+            result = build_decision_result(
+                role="SCANNING",
+                action="FLAT",
+                direction="FLAT",
+                setup="NO_EDGE",
+                reason="OPENING_NOISE",
+                confidence="Low",
+                confidence_score=0.1,
+                rationale=f"Opening noise / warmup phase active on {symbol} ({session_phase}) — no trade execution allowed.",
+                forecast=None,
+                gate_results=build_gate_results(
+                    g1_passed=False, g1_msg=f"Opening noise ({session_phase})",
+                    g2_passed=True, g2_msg="",
+                    g3_passed=False, g3_msg="Waiting for primary",
+                    g4_passed=False, g4_msg="No setup",
+                ),
+                active_position=None,
+                symbol=symbol,
+                entry_price=float(ctx.bar.close if ctx.bar else 0.0),
+                market_state=ctx.market_state,
+                session_phase=ctx.session_phase,
+                model_label="TimesFM-OpeningNoise",
+            )
+            result["contextBarsUsed"] = context_bars_used
+            result["eventsProcessed"] = events_processed
+            result["inferenceWindow"] = self.target_horizon
+            return result
 
         # 2. Run TimesFM 3.0 inference (with graceful fallback)
         try:
@@ -623,35 +610,38 @@ class TimesFMEngine:
                 ),
             }
 
-        return {
-            "role": "POSITION_MANAGEMENT" if ctx.position_open else "SCANNING",
-            "action": "HOLD" if ctx.position_open else (f"ENTER_{direction}" if direction != "FLAT" else "FLAT"),
-            "direction": direction,
-            "setup": "RULE_BASED_FALLBACK",
-            "reason": "TIMESFM_FALLBACK",
-            "confidence": "Low",
-            "confidenceScore": 0.2,
-            "rationale": f"TimesFM unavailable ({error_msg[:100]}) — using rule-based AMT signals.",
-            "forecastSteps": forecast_steps,
-            "quantileSpread": 0.0,
-            "meanForecast": curr_price,
-            "gateResults": [
-                {"gate_no": 1, "gate_name": "SESSION_PHASE", "passed": True, "message": ""},
-                {"gate_no": 2, "gate_name": "POSITION_COOLDOWN", "passed": True, "message": ""},
-                {"gate_no": 3, "gate_name": "TRIPLE_A_EDGE", "passed": False, "message": "Fallback mode"},
-                {"gate_no": 4, "gate_name": "RISK_REWARD", "passed": False, "message": "Fallback mode"},
-            ],
-            "activePosition": active_position,
-            "dynamicTrailStop": None,
-            "modelVersions": {"timesfm": "unavailable", "engine": "rule_based_fallback"},
-            "source": "TIMESFM_FALLBACK",
-            "latencyMs": 0.1,
-            "modelLabel": "TimesFM-Fallback",
-            "regime": ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or "BALANCED"),
-            "timing": str(ctx.session_phase or "REGULAR"),
-            "sizeFraction": 0.0,
-            "latencyUs": 100,
-            "contextBarsUsed": context_bars_used,
-            "eventsProcessed": events_processed,
-            "inferenceWindow": self.target_horizon,
-        }
+        result = build_decision_result(
+            role="POSITION_MANAGEMENT" if ctx.position_open else "SCANNING",
+            action="HOLD" if ctx.position_open else (f"ENTER_{direction}" if direction != "FLAT" else "FLAT"),
+            direction=direction,
+            setup="RULE_BASED_FALLBACK",
+            reason="TIMESFM_FALLBACK",
+            confidence="Low",
+            confidence_score=0.2,
+            rationale=f"TimesFM unavailable ({error_msg[:100]}) — using rule-based AMT signals.",
+            forecast=types.SimpleNamespace(
+                forecast_steps=forecast_steps,
+                q_spread=0.0,
+                mean_forecast=curr_price,
+                lat_ms=0.1,
+            ),
+            gate_results=build_gate_results(
+                g1_passed=True, g1_msg="",
+                g2_passed=True, g2_msg="",
+                g3_passed=False, g3_msg="Fallback mode",
+                g4_passed=False, g4_msg="Fallback mode",
+            ),
+            active_position=active_position,
+            symbol=str(ctx.symbol or "UNKNOWN"),
+            entry_price=curr_price,
+            market_state=ctx.market_state,
+            session_phase=ctx.session_phase,
+            model_label="TimesFM-Fallback",
+        )
+        # Fallback-specific overrides (factory defaults assume live model)
+        result["source"] = "TIMESFM_FALLBACK"
+        result["modelVersions"] = {"timesfm": "unavailable", "engine": "rule_based_fallback"}
+        result["contextBarsUsed"] = context_bars_used
+        result["eventsProcessed"] = events_processed
+        result["inferenceWindow"] = self.target_horizon
+        return result
