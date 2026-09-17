@@ -69,7 +69,8 @@ def test_aggression_blocked_in_dead_market():
 
 
 def test_va_fade_fallback():
-    ctx = _ctx(agent_direction="LONG", close=99.6, poc=101.0, val=100.0, tick_size=0.5, cvd_slope=50.0)
+    # probed below VAL (bar low 99.4) and closed back INSIDE the VA at 100.4
+    ctx = _ctx(agent_direction="LONG", close=100.4, poc=101.0, val=100.0, tick_size=0.5, cvd_slope=50.0)
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None and d.reason in ("VA_FADE", "Triple-A")
 
