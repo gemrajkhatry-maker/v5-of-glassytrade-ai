@@ -316,9 +316,9 @@ class TimesFMEngine:
             prices_for_inference — exactly `target_horizon` values for the model
             context_bars_used   — raw buffer depth (including historical seed)
 
-        Idempotent per bar: when the advisor and the strategy share one engine
-        (TIMESFM_END_TO_END + native advisor) both call this for the same
-        DecisionContext, and the price must be recorded exactly once.
+        Idempotent per bar: the advisor and the forecast provider share one
+        engine and both call this for the same DecisionContext, so the price
+        must be recorded exactly once.
         """
         symbol = str(ctx.symbol or "DEFAULT")
         price = float(ctx.bar.close if ctx.bar else (ctx.state.poc if ctx.state else 100.0))

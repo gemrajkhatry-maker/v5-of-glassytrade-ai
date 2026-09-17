@@ -316,7 +316,16 @@ Every trading decision must pass through a strict, sequential gating sequence ex
      - **Accumulation:** Footprint/CVD stabilization showing passive accumulation.
      - **Aggression:** Aggressive market orders breaking back across Session VWAP or local structure.
    - Also accepts the **LVN Sniper** setup (rejection and spring off a Low Volume Node).
-   - **Tier-2 Fallback:** If Gate 3 fails to detect a Triple-A breakout, the engine checks for a **Value Area Fade** (`quant/decision/va_fade.py`), buying rejections below VAL or shorting rejections above VAH targeting mean-reversion back to the VPOC.
+   - Every approval carries a `GateResult.setup_key`; the **model router**
+     (`quant/decision/model_router.py`, enforced in `DecisionService`) decides
+     whether that setup's model (TREND vs MEAN_REVERSION) is active:
+     `IMBALANCED → TREND`, `BALANCED → MEAN_REVERSION`, with certified evidence
+     allowed to override a lagging VA label.
+   - **MEAN_REVERSION path:** the **Value Area fade** (`quant/decision/va_fade.py`)
+     requires a failed probe reclaimed back *inside* the VA and targets the VPOC.
+   - The entry authority is single: `AmtScalpingStrategy` → `DecisionService` →
+     `GatePipeline`. TimesFM is a forecast provider for exits/UI only and never
+     approves an entry.
 4. **Gate 4: Risk-to-Reward (R:R) Gate** (`quant/decision/gates_rr.py`):
    - Structural Stop Loss is pinned behind the invalidation level (e.g., behind the absorption bar or outside VAL/VAH).
    - Target 1 (TP1) is anchored to the opposite Value Area boundary or VPOC.

@@ -141,23 +141,39 @@ If no path fires → "No Triple-A edge: no valid setup"
 
 ---
 
-## VA-Fade Fallback
+## Model Router (Fabio two models)
 
-**File**: `quant/decision/decision_service.py` → `DecisionService.evaluate()` (L106-128)
+**File**: `quant/decision/model_router.py` — the ONE place that maps auction state to model.
 
-**Purpose**: The balance-returning reversion trade. Fires when Gates 3-4 fail but price is outside the value area and reverting toward POC.
+- `IMBALANCED → TREND`; `BALANCED → MEAN_REVERSION`.
+- A *complete* `SetupEvidence` snapshot or a certified `INITIATIVE` break overrides
+  a lagging VA label (`select_model(ctx)`).
+- `DecisionService.evaluate()` enforces it once: a Gate-3 approval whose
+  `GateResult.setup_key` belongs to the other model is blocked, and the VA-fade
+  fallback runs only when `allows("VA_FADE", active_model)`.
+
+## VA-Fade / MEAN_REVERSION path
+
+**File**: `quant/decision/va_fade.py` → `detect_va_fade()` (called from `DecisionService.evaluate()`)
+
+**Purpose**: The balance-returning reversion trade (Fabio Model 2): price probes
+beyond the VA, fails to hold, and closes back INSIDE the VA — a failed auction.
+Price still outside the VA is a trend, not a fade, and yields no signal.
 
 ### Conditions
 
-1. Market is NOT dead (`market_state != DEAD`)
-2. `detect_va_fade(ctx)` returns a valid fade (price outside VA, direction toward POC)
-3. Fade direction matches `agent_direction` (or `agent_direction` is None)
-4. Fade R:R ≥ `min_rr` (default 0.0 for DecisionService, effectively uncapped at this level)
-5. Minimum stop distance met (`is_min_stop_met(entry, sl)`)
+1. Market is NOT dead (`market_state != DEAD`) and `allows("VA_FADE", active_model)`
+2. A probe beyond the VA edge was rejected: `session_extreme_low < VAL` /
+   `session_extreme_high > VAH`, or a complete `VA_FADE` evidence packet
+3. Price CLOSES back inside the value area (`val <= close <= vah`)
+4. Direction agrees with order flow (CVD sign, or a VARS reclaim)
+5. Fade direction matches `agent_direction` (or `agent_direction` is None)
+6. Minimum stop distance met (`is_min_stop_met(entry, sl)`)
 
 ### Output
 
-- Approved with `reason="VA_FADE"`, `model_label="VA_Fade"`
+- Approved with `reason="VA_FADE"`, `model_label="VA_Fade"`, stop beyond the full
+  probe extreme, and **target = POC** (100% exit at balance).
 
 ---
 
