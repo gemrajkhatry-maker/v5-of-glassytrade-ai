@@ -1,7 +1,7 @@
 """Audit probe: is the shared TimesFMEngine's per-bar dedup thread-safe?
 
-In TIMESFM_END_TO_END mode the advisor (worker thread) and the E2E strategy
-(engine thread) share ONE TimesFMEngine. add_context() dedups with a
+In the shared-model design the advisor (worker thread) and the forecast
+consumer (engine thread) share ONE TimesFMEngine. add_context() dedups with a
 check-then-act:
 
     if bar_index >= 0 and self._last_context_bar.get(symbol) == bar_index:

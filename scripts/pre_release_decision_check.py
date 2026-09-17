@@ -281,8 +281,8 @@ def check_engine_dedup_thread_safe():
     """Shared-engine per-bar dedup must survive concurrent consumers.
 
     D-10 (2026-09-10 audit): add_context() dedups with check-then-act and no
-    lock. The advisor worker thread and the strategy engine thread share ONE
-    TimesFMEngine in TIMESFM_END_TO_END, so both can pass the check and append
+    lock. The advisor worker thread and the forecast consumer share ONE
+    TimesFMEngine, so both can pass the check and append
     -> the model window contains the bar twice (reproduced, twice).
     """
     import threading

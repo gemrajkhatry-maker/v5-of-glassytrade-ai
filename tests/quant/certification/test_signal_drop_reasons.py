@@ -68,6 +68,7 @@ def minimal_ctx_factory():
             cvd_slope=1.0,
             triple_a_phase="AGGRESSION",
             triple_a_signal="LONG",
+            leg_lvn=entry,  # Fabio Trend Model: pullback to the impulse LVN
             session_open=True,
             warmup_complete=True,
             position_open=False,

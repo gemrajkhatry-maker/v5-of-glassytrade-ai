@@ -1,6 +1,8 @@
 # Pre-Release Readiness Checklist — Decision Integrity
 
-> Run before any paper or live session on `TIMESFM_END_TO_END`.
+> Run before any paper or live session. The entry authority is the
+> deterministic Fabio AMT gate pipeline (`AmtScalpingStrategy` -> `DecisionService`);
+> TimesFM is a forecast provider for exits/UI only (2026-09-17 single-authority cutover).
 > Question this answers: **does every model get complete, correct information,
 > and does exactly one authority decide, with no competing flow that can
 > disagree?**
@@ -51,7 +53,7 @@ residuals section below for what remains accepted rather than fixed.
 | `DecisionService` (gates 1–4) | `bar`, `session_open`, `warmup_complete`, `position_open`, `cooldown_remaining_sec`, `risk_halted`, `poc/vah/val`, `cvd_slope`, `absorption_side`, `stacked_imbalance_*`, `obi`, `drive_number`, `data_quality`, `market_state` | `DecisionContextBuilder.build()` ← AMT DTO |
 | `TimesFMScanningAgent` | above + `session_phase`, `allow_trend/reversion`, `equity`, `npoc_above/below`, `prior_poc` | same |
 | `TimesFMPositionAgent` (advisory) | `position_*` set, `position_bars_held`, `position_sl/tp`, `cvd_slope`, `absorption_side` | `DecisionContextBuilder._extract_position()` |
-| `TimesFMRiskAuthority` (real exits) | `TimesFMForecast.p10_path/p90_path/p50_path`, `asof_bar` | `TimesFMTradingStrategy.get_latest_forecast()` |
+| `TimesFMRiskAuthority` (real exits) | `TimesFMForecast.p10_path/p90_path/p50_path`, `asof_bar` | `TimesFMEngine.last_forecast_for()` (via `forecast_provider.fresh_forecast`) |
 | `TimesFMPositionSizer` | `forecast`, `equity`, structural targets | `DecisionContext` + scanner payload |
 
 Automated:
@@ -92,10 +94,10 @@ all read it. Any field change must be re-checked here.
 ### 3.1 Entry
 
 - [ ] Exactly one entry seam: `strategy.should_enter(ctx)`; the runtime never calls `DecisionService.evaluate()` directly. *(automated: PASS)*
-- [ ] In `TIMESFM_END_TO_END` the TimesFM scanner decision is followed through; the canonical AMT `GatePipeline` is not consulted for E2E approval. *(automated: PASS)*
+- [ ] **SUPERSEDED 2026-09-17:** single entry authority — `AmtScalpingStrategy` (deterministic Fabio AMT gates) approves every entry; TimesFM is a forecast provider for exits/UI only. The E2E `should_enter` path and its `scripts/audit_e2e_entry_probe.py` probe were deleted.
 - [ ] Gates 1–2 are hard rejects for the deterministic `DecisionService` path.
-- [ ] **Verified:** the E2E strategy **does** honour `session_open`, `warmup_complete`, `OPENING`/`PRE_OPEN`/`CLOSE`/`POST_MARKET` phases. No bypass. (Re-run `scripts/audit_e2e_entry_probe.py` after any strategy change.)
-- [ ] Momentum entries (`MODEL_MOMENTUM`) enter on the model's decision without a canonical AMT setup. *(automated: PASS)*
+- [ ] The model router (`quant/decision/model_router.py`) is the only state→model selector; `DecisionService` enforces it from `GateResult.setup_key`.
+- [ ] Momentum entries (`MODEL_MOMENTUM`) enter on the model's decision without a canonical AMT setup. *(automated: PASS; note: the MODEL_MOMENTUM scanner is no longer an entry authority)*
 - [ ] `DATA_QUALITY_BLOCKED` fires for inferred/proxy provenance at conviction `0.65` on the **deterministic** path; the E2E model path is not gated on provenance.
 
 ### 3.2 Exit
@@ -184,7 +186,7 @@ Run these on the **first session** of the release and tick each.
 - [ ] First `amt_dto` after bar 15: `poc`/`valueAreaHigh`/`valueAreaLow` non-zero.
 - [ ] `cvdSlope` non-zero once order flow is present.
 - [ ] `absorptionSide` ∈ {`BUY_ABSORBED`, `SELL_ABSORBED`, `""`} — never bare.
-- [ ] Env confirms the intended path: `TIMESFM_END_TO_END`, `TIMESFM_ADVISOR_ENABLED`, `TIMESFM_NATIVE`, `LLM_ADVISOR_ENABLED`, `QUANT_EXECUTION_MODE`, `TRADING_MODE`.
+- [ ] Env confirms the intended path: `TIMESFM_ADVISOR_ENABLED`, `TIMESFM_NATIVE`, `LLM_ADVISOR_ENABLED`, `QUANT_EXECUTION_MODE`, `TRADING_MODE` (the `TIMESFM_END_TO_END` switch no longer exists — the AMT gates are always the entry authority).
 - [ ] **D-10:** grep the session log for the model input line and confirm no bar price appears twice in the window.
 - [ ] Every approved entry has a matching `TIMESFM APPROVAL ... Model: TimesFM-<setup>` line.
 - [ ] Every approved entry has `valueAreaHigh > valueAreaLow > 0` on the same bar (D-4 guard).
@@ -200,7 +202,7 @@ Run these on the **first session** of the release and tick each.
 | Gate | Command / evidence | Result | Date | By |
 |---|---|---|---|---|
 | Code-level audit | `docs/reviews/2026-09-10-pre-release-code-audit.md` | 3 blocking, 10 high, 12 med/low | 2026-09-10 | agent |
-| Entry-gate probe | `scripts/audit_e2e_entry_probe.py` | no bypass (hypothesis disproven) | 2026-09-10 | agent |
+| Entry-gate probe | `scripts/audit_e2e_entry_probe.py` | removed 2026-09-17 with the E2E entry path it probed (superseded by single-authority cutover) | 2026-09-17 | agent |
 | Engine double-feed probe | `scripts/audit_engine_race_probe.py` | **2 double-feeds reproduced (D-10)** | 2026-09-10 | agent |
 | Static + behaviour probes | `scripts/pre_release_decision_check.py --skip-suites` | ☐ | | |
 | Decision + strategy + exit + runtime suites | `pytest tests/quant/decision tests/quant/strategies tests/quant/execution/test_exit_source.py tests/quant/runtime/test_runtime.py` | ☐ | | |

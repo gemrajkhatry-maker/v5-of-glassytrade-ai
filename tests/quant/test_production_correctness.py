@@ -213,6 +213,7 @@ def test_triple_a_aggression_is_required_for_playbook_a():
         triple_a_phase=AGGRESSION,
         triple_a_signal="LONG",
         cvd_slope=1.0,
+        leg_lvn=110.0,  # Fabio Trend Model: pullback to the impulse LVN
     )
     r = gate_triple_a_edge(ctx)
     assert r.passed is True
