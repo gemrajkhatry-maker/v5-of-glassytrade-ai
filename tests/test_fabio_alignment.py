@@ -2,11 +2,12 @@
 
 These tests validate that the implementation is aligned with Fabio's model:
   * 2-state market model (BALANCED / IMBALANCED) — no NO_TRADE/PROBING.
-  * The Triple-A edge (absorption -> accumulation -> aggression) fires in both
-    BALANCED and IMBALANCED auctions; only a DEAD market (volume collapse)
-    rejects (Fabio: absorption then VWAP breakout — the state tells you where
-    the market is, not whether to trade).
-  * The reversion (VA-fade) tier targets the POC and refuses dead markets.
+  * The Triple-A edge requires a trend pullback to the impulse LVN; Gate 3 does
+    NOT know the market state, because the model router (BALANCED ->
+    MEAN_REVERSION, IMBALANCED -> TREND; evidence may override) is enforced once
+    in DecisionService (2026-09-17 decision D2).
+  * The reversion (VA-fade) tier requires a failed probe reclaimed back inside
+    the VA and targets the POC; it refuses dead markets.
   * Session phases cover the full trading day.
 """
 import pytest
@@ -72,23 +73,30 @@ def _ctx(**kw):
         triple_a_phase=kw.get("triple_a_phase", "AGGRESSION"),
         triple_a_signal=kw.get("triple_a_signal", kw.get("agent_direction", "LONG")),
         cvd_slope=kw.get("cvd_slope", 1.0),
+        leg_lvn=kw.get("leg_lvn", 100.0),
     )
 
 
-def test_triple_a_edge_fires_in_both_states():
-    balanced = gate_triple_a_edge(_ctx(market_state="BALANCED"))
-    assert balanced.passed
+def test_triple_a_edge_requires_lvn_proximity():
+    # Gate 3 is state-agnostic (the model router lives in DecisionService), but
+    # the trend trigger is a pullback to the impulse LVN (Fabio Trend Model).
+    at_lvn = gate_triple_a_edge(_ctx())
+    assert at_lvn.passed
 
-    imbalanced = gate_triple_a_edge(_ctx(market_state="IMBALANCED"))
-    assert imbalanced.passed
+    away = gate_triple_a_edge(_ctx(leg_lvn=90.0))
+    assert not away.passed
 
+
+def test_dead_market_refused_by_gate3():
     dead = gate_triple_a_edge(_ctx(market_state="DEAD"))
     assert not dead.passed and "dead" in dead.reason.lower()
 
 
-def test_balanced_market_trades_on_valid_edge_end_to_end():
+def test_balanced_market_does_not_approve_trend_edge_end_to_end():
+    # D2: BALANCED selects MEAN_REVERSION, so a trend Triple-A edge is not
+    # approved at the service level even though Gate 3 itself would pass.
     d = DecisionService().evaluate(_ctx(market_state="BALANCED"))
-    assert d.approved and d.reason == "Triple-A"
+    assert not (d.approved and d.reason == "Triple-A")
 
 
 def test_dead_market_no_trade():
