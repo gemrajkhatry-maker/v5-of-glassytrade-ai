@@ -56,7 +56,7 @@ cd "$FRONTEND_DIR"
 export PATH="/opt/homebrew/bin:$PATH"
 export VITE_BACKEND_PORT=8090
 nohup node node_modules/.bin/vite --host 0.0.0.0 --port 5191 \
-  < /dev/null > "$FRONTEND_DIR/frontend.log" 2>&1 &
+  > "$FRONTEND_DIR/frontend.log" 2>&1 &
 FRONTEND_PID=$!
 disown $FRONTEND_PID 2>/dev/null || true
 echo "Frontend PID: $FRONTEND_PID"

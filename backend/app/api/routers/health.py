@@ -273,6 +273,7 @@ async def readiness_check(request: Request):
             or (isinstance(v, str) and v.startswith("ok"))
             or v == "degraded"
             or v == "DEGRADED_NO_NEW_ENTRIES"
+            or v == "READY"
         )
         for k, v in checks.items()
         if k

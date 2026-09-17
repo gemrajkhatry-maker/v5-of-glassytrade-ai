@@ -402,6 +402,12 @@ class TimesFMScanningAgent:
 
         return action, direction, setup, confidence, confidence_score, rationale
 
+
+def _safe_float(value, default: float = 0.0) -> float:
+    """Coerce *value* to float, falling back to *default* when falsy."""
+    return float(value or default)
+
+
 class TimesFMPositionAgent:
     """Agent 2: Manages active positions according to Fabio AMT rules and TimesFM quantiles."""
 
@@ -453,19 +459,28 @@ class TimesFMPositionAgent:
         return cp, cp, cp
 
     @staticmethod
+    def _poc_val(ctx: DecisionContext, fallback: float) -> float:
+        """Resolve POC from ctx.poc, ctx.state.poc, or fallback."""
+        return float(ctx.poc or (ctx.state.poc if ctx.state else fallback))
+
+    @staticmethod
+    def _is_risk_free(side: str, sl: float, entry: float) -> bool:
+        """True when stop loss has been ratcheted to or past cost basis."""
+        if side == "LONG":
+            return sl >= entry
+        return sl > 0 and sl <= entry
+
+    @staticmethod
     def _extract_state(ctx: DecisionContext, forecast: TimesFMForecast) -> Dict[str, Any]:
         """Pull all position-related values out of *ctx* / *forecast* once."""
         bar_close, bar_low, bar_high = TimesFMPositionAgent._bar_vals(ctx, forecast)
-        _f = lambda v, d=0.0: float(v or d)  # noqa: E731
+        _f = _safe_float
         side = str(ctx.position_side or "LONG").upper()
         entry_price = _f(ctx.position_entry_price, forecast.curr_price)
-        poc_raw = ctx.poc or (ctx.state.poc if ctx.state else bar_close)
-        poc = float(poc_raw)
         sl_val = _f(ctx.position_sl)
         risk = abs(entry_price - sl_val) if sl_val > 0 else (bar_close * 0.005)
         profit = (bar_close - entry_price) if side == "LONG" else (entry_price - bar_close)
         rr_achieved = profit / max(risk, 1e-4)
-        is_risk_free = (sl_val >= entry_price) if side == "LONG" else (sl_val > 0 and sl_val <= entry_price)
         return {
             "symbol": str(ctx.symbol or "UNKNOWN"), "side": side,
             "entry_price": entry_price, "curr_price": bar_close,
@@ -476,8 +491,10 @@ class TimesFMPositionAgent:
             "cvd_slope": _f(ctx.cvd_slope),
             "absorption": str(ctx.absorption_side or "").upper(),
             "stacked_imb": str(getattr(ctx, "stacked_imbalance_direction", "") or "").upper(),
-            "poc": poc, "risk": risk, "profit": profit,
-            "rr_achieved": rr_achieved, "is_risk_free": is_risk_free,
+            "poc": _f(TimesFMPositionAgent._poc_val(ctx, bar_close)),
+            "risk": risk, "profit": profit,
+            "rr_achieved": rr_achieved,
+            "is_risk_free": TimesFMPositionAgent._is_risk_free(side, sl_val, entry_price),
         }
 
     # ------------------------------------------------------------------
@@ -606,57 +623,44 @@ class TimesFMPositionAgent:
     @staticmethod
     def _is_absorption_opposed(side: str, absorption: str) -> bool:
         """True when the absorption print opposes the position side."""
-        opp = absorption_direction(absorption)
-        return (side == "LONG" and opp == "SHORT") or (side == "SHORT" and opp == "LONG")
+        return {"LONG": "SHORT", "SHORT": "LONG"}.get(absorption_direction(absorption)) == side
 
     @staticmethod
     def _thesis_flip_triggered(s: Dict[str, Any], forecast: TimesFMForecast) -> bool:
         """Return True when any thesis-flip condition is met."""
-        side, absorption = s["side"], s["absorption"]
+        side = s["side"]
+        if TimesFMPositionAgent._is_absorption_opposed(side, s["absorption"]):
+            return True
         stacked_imb, cvd_slope = s["stacked_imb"], s["cvd_slope"]
         entry_price, risk = s["entry_price"], s["risk"]
-        if TimesFMPositionAgent._is_absorption_opposed(side, absorption):
-            return True
-        if (side == "LONG" and stacked_imb == "SELL" and cvd_slope < -1.0) or (side == "SHORT" and stacked_imb == "BUY" and cvd_slope > 1.0):
-            return True
-        if (side == "LONG" and cvd_slope <= -2.5) or (side == "SHORT" and cvd_slope >= 2.5):
-            return True
-        if side == "LONG" and forecast.mean_forecast < entry_price - (0.5 * risk):
-            return True
-        if side == "SHORT" and forecast.mean_forecast > entry_price + (0.5 * risk):
-            return True
-        return False
+        if side == "LONG":
+            return (stacked_imb == "SELL" and cvd_slope < -1.0) or cvd_slope <= -2.5 or forecast.mean_forecast < entry_price - 0.5 * risk
+        return (stacked_imb == "BUY" and cvd_slope > 1.0) or cvd_slope >= 2.5 or forecast.mean_forecast > entry_price + 0.5 * risk
+
+    @staticmethod
+    def _cvd_or_forecast_adverse(s: Dict[str, Any], forecast: TimesFMForecast) -> bool:
+        """True when CVD/stacked-imbalance or forecast breakdown invalidates the thesis."""
+        side, stacked_imb, cvd_slope = s["side"], s["stacked_imb"], s["cvd_slope"]
+        entry_price, risk = s["entry_price"], s["risk"]
+        if side == "LONG":
+            return (stacked_imb == "SELL" and cvd_slope < -1.0) or cvd_slope <= -2.5 or forecast.mean_forecast < entry_price - 0.5 * risk
+        return (stacked_imb == "BUY" and cvd_slope > 1.0) or cvd_slope >= 2.5 or forecast.mean_forecast > entry_price + 0.5 * risk
 
     @staticmethod
     def _build_thesis_flip_rationale(s: Dict[str, Any], forecast: TimesFMForecast) -> str:
         """Build the human-readable rationale for a thesis-flip exit."""
-        side, absorption = s["side"], s["absorption"]
-        stacked_imb, cvd_slope = s["stacked_imb"], s["cvd_slope"]
-        entry_price, risk = s["entry_price"], s["risk"]
-        symbol = s["symbol"]
-        if TimesFMPositionAgent._is_absorption_opposed(side, absorption):
-            if side == "LONG":
-                return "Heavy buy absorption cluster — sellers in control."
-            return "Heavy sell absorption cluster — buyers in control."
-        if side == "LONG" and ((stacked_imb == "SELL" and cvd_slope < -1.0) or cvd_slope <= -2.5):
+        side, symbol = s["side"], s["symbol"]
+        absorption = s["absorption"]
+        cvd_slope = s["cvd_slope"]
+        _opp = {"LONG": "SHORT", "SHORT": "LONG"}
+        if _opp.get(absorption_direction(absorption)) == side:
+            return "Heavy buy absorption cluster — sellers in control." if side == "LONG" else "Heavy sell absorption cluster — buyers in control."
+        if TimesFMPositionAgent._cvd_or_forecast_adverse(s, forecast):
+            label = "LONG" if side == "LONG" else "SHORT"
+            flow_label = "seller" if side == "LONG" else "buyer"
             return (
-                f"Thesis flip on {symbol} LONG: Opposing order flow (CVD slope {cvd_slope:+.1f}) "
-                f"and seller pressure — exiting before stop loss hit."
-            )
-        if side == "SHORT" and ((stacked_imb == "BUY" and cvd_slope > 1.0) or cvd_slope >= 2.5):
-            return (
-                f"Thesis flip on {symbol} SHORT: Opposing order flow (CVD slope {cvd_slope:+.1f}) "
-                f"and buyer pressure — exiting before stop loss hit."
-            )
-        if side == "LONG" and forecast.mean_forecast < entry_price - (0.5 * risk):
-            return (
-                f"Thesis flip on {symbol} LONG: TimesFM 32-step trajectory breakdown "
-                f"(projected {forecast.mean_forecast:.2f} breaches 0.5R envelope) — exiting before stop loss hit."
-            )
-        if side == "SHORT" and forecast.mean_forecast > entry_price + (0.5 * risk):
-            return (
-                f"Thesis flip on {symbol} SHORT: TimesFM 32-step trajectory breakdown "
-                f"(projected {forecast.mean_forecast:.2f} breaches 0.5R envelope) — exiting before stop loss hit."
+                f"Thesis flip on {symbol} {label}: Opposing order flow (CVD slope {cvd_slope:+.1f}) "
+                f"and {flow_label} pressure — exiting before stop loss hit."
             )
         return (
             f"Thesis flip on {symbol} {side}: Invalidation of market structure — "
