@@ -55,6 +55,29 @@ def test_futures_sizing_allows_multiple_lots_when_affordable():
     assert qty >= 75.0  # at least 1 lot
 
 
+def test_lot_snapping_respects_rupee_risk_cap_after_rounding():
+    """Nearest-lot snapping must not push realized rupee risk above the cap.
+
+    risk_amount is pre-capped to ₹1,000, but snap_to_lot rounds 1000/105=9.52
+    up to 10 lots = ₹1,050 realized risk. The post-snap re-cap must clamp to 9
+    lots (₹945) so the hard cap is never breached by rounding.
+    """
+    risk = SessionRisk(
+        starting_equity=1_000_000,
+        base_risk_pct=0.005,
+        day_of_week=1,  # mid-week: no defensive halving
+    )
+    qty = risk.position_size(
+        entry=100.0,
+        sl=93.0,  # 7 points = 105 risk per 15-lot
+        lot_size=15.0,
+        max_rupee_risk_cap=1_000.0,
+    )
+    realized = abs(100.0 - 93.0) * qty
+    assert qty == 9 * 15
+    assert realized <= 1_000.0
+
+
 def test_equity_stocks_unchanged_behavior():
     """Non-derivative (lot_size=1) sizing should not change."""
     risk = SessionRisk(

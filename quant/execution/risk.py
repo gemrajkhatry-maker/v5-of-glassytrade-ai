@@ -473,6 +473,10 @@ class SessionRisk:
             if lot_size and lot_size > 1.0:
                 qty = float(int(qty // lot_size) * lot_size)
 
+            if max_rupee_risk_cap is not None and max_rupee_risk_cap > 0 and loss_per_unit > 0 and lot_size > 1.0:
+                _cap_lots = int(max_rupee_risk_cap // (loss_per_unit * lot_size))
+                qty = min(qty, float(_cap_lots * lot_size))
+
             return float(qty)
 
     def pyramid_position_size(
