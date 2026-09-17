@@ -74,3 +74,30 @@ Net diff: **48 files, +673 / −1410 (net −737 lines)**.
 Revert the four merge commits in reverse order (WS-C → WS-B → WS-A → WS-D). The
 superseded half-built `analyzer_setup_type` router is preserved in `git stash`
 (`stash@{0}`) if it is ever needed as reference.
+
+---
+
+## Follow-up: pre-existing failure cleanup (same day)
+
+The 38 failures reported above were then driven to zero with three parallel
+workstreams (`3300db91` WS-G, `ea94ced0` WS-R, `8729f1b3` WS-A3):
+
+| Stream | Scope | Result |
+|---|---|---|
+| WS-G guards | deleted dead duplicate `Tick`/`Bar`/`Signal` from `quant/contracts/value_objects.py`; replaced 4 raw `"BALANCED"` fallbacks with `MarketState.BALANCED.value`; repointed the exception-logging scan at `DecisionLoop` | guards green |
+| WS-R risk/sizing | **PROD FIX**: re-cap after lot snapping so `max_rupee_risk_cap` is honoured (`risk.py:462-464`); base-tier expectations updated; pruned the vestigial `_model_sizing_failures` machinery | execution suite green |
+| WS-A3 runtime | fixed the organic leg-LVN fixture (now asserts the real `LVN_Sniper` label), valid 1-min acceptance candle, `ExitManager` seam patches, constructor advisor injection, `t168` paper constants | runtime/system green |
+
+**Final: 2516 passed, 11 skipped, 0 real failures.** Two
+`test_submission_handler_performance.py` latency tests flake under full-suite
+load and pass in isolation (environment-bound timing thresholds, not a
+regression).
+
+Production bugs fixed in this pass: (1) `max_rupee_risk_cap` could be exceeded
+after nearest-lot rounding; (2) dead duplicate `Bar`/`Signal` types.
+
+Open follow-ups (reported, not changed — no clear correctness win):
+- `SignalBuilder` drops a valid breakout when the structural anchor (leg-VA
+  clamped VAH) is too near entry, instead of re-anchoring deeper.
+- `trace_compare._VOLATILE_KEYS` lacks `StopMoved.position_id`, so a post-fill
+  trace comparison can diverge.
