@@ -271,7 +271,9 @@ def _spy_pipeline(eng):
         captured["dto"] = amt_dto
         return object()  # opaque ctx; the stub ignores it
 
-    eng._build_context = fake_build
+    # The flip now builds its context through ExitManager._build_context (its
+    # own bound method), not the engine's thin wrapper.
+    eng._exit_manager._build_context = fake_build
 
     def should_enter(ctx, *, allow_positioned=False):
         captured["ctx"] = ctx
@@ -346,9 +348,12 @@ def test_put_option_holds_on_short_and_flips_on_long():
     from quant.bars import Bar
     und_bar = Bar(time="u1", open=50000.0, high=50100.0, low=49900.0, close=50050.0, volume=10)
 
-    # 1. Engine with PUT contract symbol
+    # 1. Engine with PUT contract symbol. ExitManager captured the symbol at
+    # construction, so rebind both the engine's public symbol and the
+    # ExitManager's private copy (the flip reads _exit_manager._symbol).
     eng = _option_mode_engine(side="LONG", entry=100.0)
     eng.symbol = "SILVERM 24 SEP 235000 PUT"
+    eng._exit_manager._symbol = "SILVERM 24 SEP 235000 PUT"
     eng._underlying_amt_dto = {"marketState": "BALANCED"}
     eng._last_underlying_bar = und_bar
 
