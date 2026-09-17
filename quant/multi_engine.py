@@ -1266,7 +1266,7 @@ class QuantCoordinator:
         if callable(cb):
             try:
                 cb(where, exc)
-            except Exception:
+            except Exception:  # silent-except - watchdog callback must never raise
                 pass
 
     def _eod_watchdog_loop(self, poll_sec: float = 30.0) -> None:
@@ -1528,7 +1528,7 @@ class QuantCoordinator:
                 _ts = float(getattr(self, "_tfm_forecast_cache_ts", 0.0) or 0.0)
             if _cache and (_now - _ts) < _ttl and all(r in _cache for r in roots):
                 return {r: _cache[r] for r in roots if r in _cache}
-        except Exception:
+        except Exception:  # silent-except - cache read failure falls through to recompute
             pass
 
         try:
@@ -1612,7 +1612,7 @@ class QuantCoordinator:
                     _prev.update(forecasts)
                     self._tfm_forecast_cache = _prev
                     self._tfm_forecast_cache_ts = time.time()
-            except Exception:
+            except Exception:  # silent-except - cache write failure should not block main flow
                 pass
         return forecasts
 
