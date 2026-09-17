@@ -18,10 +18,13 @@ from quant.bars import Bar
 
 
 def _make_dummy_bar(price: float = 100.0) -> Bar:
+    # Full-body bullish 1-min acceptance candle: close sits at 91% of the
+    # bar's range (close-low)/span, above the 75% extreme threshold, with a
+    # positive body — otherwise gate 3's _candle_acceptance rejects it.
     return Bar(
         time="2026-08-19T10:00:00+05:30",
-        open=price - 0.5,
-        high=price + 1.0,
+        open=price - 0.8,
+        high=price + 0.1,
         low=price - 1.0,
         close=price,
         volume=1000.0,

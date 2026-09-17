@@ -50,9 +50,11 @@ INTERVAL_SECONDS = 2
 # The engine's BarAggregator (interval_seconds=1) pairs consecutive ticks into a
 # bar whose time is the FIRST tick's epoch, so bar i of the session surfaces in
 # the engine with time "t{2*i}". The approved bars in the fixture:
-#   t166  = AGGRESSION-LONG (Triple-A, bar 83)
+#   t166  = first displacement close (Triple-A evidence) but the structural
+#           stop resolves razor-thin (SignalBuilder drops it as "thin stop")
+#   t168  = continuation close — AGGRESSION/INITIATIVE approval (Triple-A)
 #   t340  = VAL-bounce fade (VA_FADE, bar 170)
-AGGRESSION_BAR = "t166"
+AGGRESSION_BAR = "t168"
 FADE_BAR = "t340"
 
 
@@ -165,7 +167,9 @@ def test_no_trade_without_approved_decision():
         assert abs(signal.entry - decision.signal.entry) <= 1e-9
         assert signal.timestamp == t
 
-    # The 1 Triple-A trade opens (t166 aggression breakout).
+    # The 1 Triple-A trade opens at t168 (t166's breakout was dropped by
+    # SignalBuilder as a thin stop, so the approval slips to the next
+    # displacement close).
     # The t184 absorbing breakout is now correctly rejected because Path A2 (Anti-whipsaw violation) was removed.
     # The VA-fade candidate (t340) is present in the session but is correctly rejected
     # by the MIN_STOP_DISTANCE_PCT guard, so no VA-fade position opens.
@@ -318,7 +322,7 @@ def test_fills_follow_fill_price_convention():
     # spot-check the approved fills map to their exact signal bar close; the
     # VA-fade (t340) is rejected by the min-stop guard, so it never fills
     assert len(opens) >= 1
-    assert opens[0].position.open_price == bars[AGGRESSION_BAR].close == 100.6
+    assert opens[0].position.open_price == bars[AGGRESSION_BAR].close == 100.9
     # First exit is the structural TP: fills AT the signal's TP level (the
     # fill-at-level contract asserted above), NOT at the bar close.
     assert closes[0].fill.position.open_time == AGGRESSION_BAR
@@ -395,7 +399,7 @@ def test_ws_contract_carries_quant_decision_on_approved_bars():
         if evt.time == AGGRESSION_BAR:
             assert ws["amt"]["marketState"] == "IMBALANCED"
             assert ws["quantDecision"]["reason"] == "Triple-A"
-            assert ws["quantDecision"]["signal"]["entry"] == 100.6
+            assert ws["quantDecision"]["signal"]["entry"] == 100.9
     # 1 Triple-A bar is approved; the VA-fade (t340) is rejected by the
     # min-stop guard and never surfaces as an approved WS decision
     assert checks >= 1

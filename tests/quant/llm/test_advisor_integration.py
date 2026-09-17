@@ -52,12 +52,47 @@ def test_engine_emits_agent_decision_in_ws_snapshot(monkeypatch):
     """Verify engine runs deterministically and includes agentDecision in WS snapshot.
 
     F4: the engine no longer env-sniffs MLX_MODEL_PATH inside __init__; the
-    live wiring injects the advisor explicitly via ``advisor=...``.
+    live wiring injects the advisor explicitly via ``advisor=...``. The
+    runner/DecisionLoop bind the advisor at construction, so a post-hoc
+    ``eng._advisor = ...`` assignment is invisible to them — inject it
+    through the constructor instead.
     """
     monkeypatch.setenv("LLM_ADVISOR_ENABLED", "1")
-    from quant.wiring_advisor import build_live_advisor
-    eng = QuantEngine(SyntheticGateway(_ticks()[:120]), "NIFTY", interval_seconds=1)
-    eng._advisor = build_live_advisor(eng._emit)
+    from quant.events import AgentDecisionProduced
+
+    class _DeferredEmitAdvisor:
+        """Advisor wired into the decision loop; emits a deterministic
+        AgentDecisionProduced the first time it is handed a context (the
+        emit_fn is bound after construction to break the engine<->advisor
+        cycle)."""
+
+        def __init__(self):
+            self._emit_fn = None
+            self._emitted = False
+
+        def bind(self, emit_fn):
+            self._emit_fn = emit_fn
+
+        def on_context(self, ctx):
+            if self._emitted or self._emit_fn is None:
+                return
+            self._emitted = True
+            self._emit_fn(AgentDecisionProduced(
+                symbol=ctx.symbol, time=ctx.time_str,
+                decision={
+                    "action": "FLAT", "direction": "FLAT",
+                    "setup": "NO_EDGE", "confidence": "Medium",
+                    "rationale": "deferred test advisor",
+                },
+            ))
+
+        def shutdown(self):
+            pass
+
+    advisor = _DeferredEmitAdvisor()
+    eng = QuantEngine(SyntheticGateway(_ticks()[:120]), "NIFTY",
+                      interval_seconds=1, advisor=advisor)
+    advisor.bind(eng._emit)
     eng.run()
 
     from quant.state import project_state
