@@ -101,3 +101,23 @@ Open follow-ups (reported, not changed — no clear correctness win):
   clamped VAH) is too near entry, instead of re-anchoring deeper.
 - `trace_compare._VOLATILE_KEYS` lacks `StopMoved.position_id`, so a post-fill
   trace comparison can diverge.
+
+## Follow-up 2: both addressed (`b73ed705`)
+
+1. **Structural anchor no longer returns a noise-thin level.**
+   `quant/decision/stops.py::structural_anchor` now walks the structural levels
+   nearest-first and returns the first one whose stop is at least
+   `min_stop_distance` from entry (>= 2 ticks and >= 0.1% of price); if every
+   level is inside the noise band it places the stop at that floor. Because
+   Gate 4 and SignalBuilder share this helper, Gate 4's R:R now matches the
+   stop actually emitted. Effect: the paper protocol's first certified breakout
+   is traded at `t166` (previously dropped as "thin stop" and slipped to `t168`);
+   the `is_stop_too_thin` guard remains as the last-resort for high-priced
+   instruments where even the fallback (5 ticks) is inside the 0.1% band.
+2. **`StopMoved.position_id` is now treated as volatile** in
+   `tests/quant/certification/trace_compare.py` (it is `str(position._id)`, a
+   run-local uuid), so trace-on vs trace-off comparison no longer diverges on a
+   post-fill stop move.
+
+Verification: full suite **2525 passed, 11 skipped, 0 failed**; pre-release
+decision check **13/13**.
