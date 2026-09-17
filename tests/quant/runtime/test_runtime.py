@@ -497,9 +497,8 @@ def test_runtime_clamps_thin_stop_quantity_to_max():
 
 def test_runtime_leaves_healthy_stop_quantity_unclamped():
     opened = _run_with_signal(_healthy_stop_signal())
-    # 10M (SessionRisk default) * 0.25% (CONSERVATIVE tier) / 20.0 = 1250 units, under the ceiling.
-    # Fabio cushion system starts trades in CONSERVATIVE tier at 0.25%.
-    assert opened.position.order.quantity == pytest.approx(1_000_000.0 * 0.0025 / 20.0)
+    # 1M (SessionRisk default) * 0.5% (flat base tier) / 20.0 = 250 units, under the ceiling.
+    assert opened.position.order.quantity == pytest.approx(1_000_000.0 * 0.005 / 20.0)
 
 
 def test_engine_rolls_prior_session_levels_on_date_change():
