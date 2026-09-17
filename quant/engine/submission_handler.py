@@ -169,8 +169,10 @@ class SubmissionHandler:
             and _ist is not None and _ist.date() == self._contract_expiry
         )
 
-        # If strategy provides a TimesFM forecast, pass it for dynamic Kelly & VaR sizing
-        tfm_fc = self._fresh_forecast()
+        # Sizing is deterministic (House Money Protocol, SessionRisk is the
+        # single authority). TimesFM forecasts feed exits/UI only — they must
+        # not silently change position size.
+        self._fresh_forecast()
 
         # Distinguish a model-sizing REFUSAL from a genuine budget-zero
         sizing_failures_before = _as_counter(
@@ -181,7 +183,6 @@ class SubmissionHandler:
                 signal.entry, signal.sl, lot_size=self._oms.lot_size,
                 is_expiry=contract_is_expiry,
                 max_lots=self._max_lots,
-                forecast=tfm_fc,
                 side=signal.type,
             )
         )
