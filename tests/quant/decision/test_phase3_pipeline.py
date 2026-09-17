@@ -24,9 +24,9 @@ from tests.helpers.synthetic import SyntheticGateway
 def _bar(close=100.0):
     return Bar(
         time="2026-08-28T10:00:00+05:30",
-        open=close,
-        high=close + 1.0,
-        low=close - 1.0,
+        open=close - 1.2,
+        high=close + 0.5,
+        low=close - 1.5,
         close=close,
         volume=500.0,
         buy_volume=300.0,
@@ -123,6 +123,7 @@ def test_all_setup_paths_pass_gate3():
         triple_a_signal="LONG",
         cvd_slope=0.8,
         vwap_upper_2=105.0,
+        leg_lvn=100.0,
     )
     res_aaa = gate_triple_a_edge(ctx_aaa)
     assert res_aaa.passed and "Triple-A AGGRESSION" in res_aaa.reason
