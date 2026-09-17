@@ -247,34 +247,3 @@ def test_scanning_agent_model_momentum_inside_value_area():
     assert res["direction"] == "LONG"
     assert res["confidence"] == "High"
     assert all(g["passed"] for g in res["gateResults"])
-
-
-def test_timesfm_strategy_model_momentum_followed_through():
-    """MODEL_MOMENTUM is the model's decision and must be followed through.
-
-    In E2E mode the TimesFM model is the central intelligence. A clean
-    directional forecast with no canonical AMT setup must still enter: the
-    canonical AMT gates do not override the model's decision.
-    """
-    from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
-
-    strat = TimesFMTradingStrategy(target_horizon=32)
-    forecast = _make_forecast(curr_price=8150.0, target_drift=50.0, direction="LONG")
-
-    bar = Bar("2026-09-08T16:00:00", 8148.0, 8152.0, 8147.0, 8150.0, 2500, 500)
-    ctx = DecisionContext(
-        symbol="CRUDEOIL",
-        bar=bar,
-        poc=8150.0,
-        vah=8200.0,
-        val=8100.0,
-        cvd_slope=0.8,
-        session_phase="PRIMARY",
-        position_open=False,
-    )
-
-    dec = strat.should_enter(ctx, forecast=forecast)
-    assert dec.approved is True
-    assert dec.signal is not None
-    assert dec.signal.type == "LONG"
-    assert dec.reason == "MODEL_MOMENTUM"

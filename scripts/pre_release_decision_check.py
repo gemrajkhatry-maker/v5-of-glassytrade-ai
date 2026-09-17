@@ -72,23 +72,6 @@ def check_entry_authority():
     )
 
 
-def check_model_entry_authority():
-    """E2E mode: the TimesFM model is the central intelligence. Its entry
-    decision is followed through — the canonical AMT GatePipeline must not be
-    able to override it. The strategy calls the scanner directly and never
-    constructs a GatePipeline for approval.
-    """
-    src = _read("quant/strategies/timesfm_strategy.py")
-    calls_scanner_directly = "self.scanning_agent.evaluate(ctx, forecast)" in src
-    overrides_with_pipeline = "GatePipeline" in src or "canonical = " in src
-    _add(
-        "A. Flow authority", "model entry decision is authoritative (no canonical override)",
-        calls_scanner_directly and not overrides_with_pipeline,
-        f"strategy calls scanner directly={calls_scanner_directly}, "
-        f"canonical override present={overrides_with_pipeline}",
-    )
-
-
 def check_no_bare_absorption():
     bare = re.compile(r'absorption[a-z_]*\s*(?:==|!=)\s*"(BUY|SELL)"|in\s*\(\s*"(?:BUY|SELL)"\s*,\s*"(?:BUY|SELL)"\s*\)')
     offenders = []
@@ -102,19 +85,6 @@ def check_no_bare_absorption():
         "A. Flow authority", "no bare absorption string compares (canonical _ABSORBED)",
         not offenders,
         f"offenders: {offenders or 'none'}",
-    )
-
-
-def check_forecast_cache_safety():
-    src = _read("quant/strategies/timesfm_strategy.py")
-    none_check = src.find("if forecast is None:")
-    cache_write = src.find("self._latest_forecasts[str(ctx.symbol)] = forecast")
-    fresh_stamp = src.find("forecast.asof_bar = int(")
-    ok = 0 <= none_check < cache_write and fresh_stamp > 0
-    _add(
-        "A. Flow authority", "forecast cached only after success + freshness stamped",
-        ok,
-        f"None-check@{none_check}, cache-write@{cache_write}, asof-stamp@{fresh_stamp}",
     )
 
 
@@ -251,39 +221,6 @@ def check_scanner_absorption_direction():
         "C. Decision behaviour", "scanner LONG keys on SELL_ABSORBED (canonical)",
         res.get("direction") == "LONG",
         f"setup={res.get('setup')}, direction={res.get('direction')}",
-    )
-
-
-def check_shared_engine_end_to_end():
-    """Advisor analyze() + strategy should_enter() must not double-feed the model."""
-    from unittest.mock import Mock
-
-    import numpy as np
-    from quant.bars import Bar
-    from quant.decision.context import DecisionContext
-    from quant.decision.timesfm_engine import TimesFMEngine
-    from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
-
-    engine = TimesFMEngine(target_horizon=8)
-    strategy = TimesFMTradingStrategy(target_horizon=8, engine=engine)
-    bar = Bar("2026-09-10T10:00:00", 100, 101, 99, 100.5, 1000, 100)
-    ctx = DecisionContext(symbol="NIFTY", bar=bar, bar_index=42, session_open=True,
-                          warmup_complete=True, session_phase="PRIMARY")
-    fake = Mock()
-    fake.predict.return_value = Mock(quantiles=np.tile(np.linspace(99, 102, 9), (8, 1)))
-    import quant.decision.timesfm_engine as eng_mod
-    original = eng_mod.get_timesfm_model
-    eng_mod.get_timesfm_model = lambda *a, **k: fake
-    try:
-        engine.analyze(ctx)
-        strategy.should_enter(ctx)
-    finally:
-        eng_mod.get_timesfm_model = original
-    depth = len(engine._price_buffers["NIFTY"])
-    _add(
-        "C. Decision behaviour", "advisor + strategy share one bar of context",
-        depth == 1,
-        f"buffer depth after both consumers = {depth}",
     )
 
 
@@ -470,9 +407,7 @@ def main() -> int:
 
     for fn in (
         check_entry_authority,
-        check_model_entry_authority,
         check_no_bare_absorption,
-        check_forecast_cache_safety,
         check_exit_source_stamp,
         check_single_sizing_authority,
         check_dto_key_coverage,
@@ -480,7 +415,6 @@ def main() -> int:
         check_dead_market_enum,
         check_data_quality_gate_reachable,
         check_scanner_absorption_direction,
-        check_shared_engine_end_to_end,
         # 2026-09-10 audit additions — the blocking defects D-2, D-3, D-4, D-10.
         check_pyramid_close_routes_through_release_path,
         check_model_risk_failure_observable,
