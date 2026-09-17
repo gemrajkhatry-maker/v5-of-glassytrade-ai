@@ -41,12 +41,7 @@ def test_audited_dead_methods_are_gone():
 
 
 def test_strategies_satisfy_the_protocol():
-    """TradingStrategy is runtime_checkable and the shipped strategy satisfies it.
-
-    NOTE: TimesFMTradingStrategy is intentionally NOT imported here — another
-    lane owns quant/strategies/timesfm_strategy.py, so asserting on it would
-    couple this test to a file outside this lane's ownership.
-    """
+    """TradingStrategy is runtime_checkable and the shipped strategy satisfies it."""
     from quant.strategies.amt_scalping import AmtScalpingStrategy
     from quant.strategy import TradingStrategy
 

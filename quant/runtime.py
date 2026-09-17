@@ -506,23 +506,17 @@ class QuantEngine:
             time_stop_bars = max(1, int(time_stop_minutes) * 60 // _interval_sec)
         # ponytail: mirror BE constant; tune from journal replay later
         self._exits = ExitEngine(time_stop_bars=time_stop_bars, cvd_kill_threshold=CVD_KILL_THRESHOLD)
-        # Strategy — pluggable entry/exit logic. Defaults to the AMT scalping
-        # playbook (Fabio Valentini) or TimesFM autonomous management.
+        # Strategy — single entry authority (decision 2026-09-17): the
+        # deterministic Fabio AMT gate pipeline. An explicitly injected strategy
+        # (tests/replay) still wins; nothing else may swap the entry authority.
         if strategy is not None:
             self._strategy = strategy
         else:
-            use_timesfm_e2e = os.getenv("TIMESFM_END_TO_END", "").strip().lower() in ("1", "true", "yes")
-            if use_timesfm_e2e:
-                from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
-                logger.info("Initializing QuantEngine with TimesFMTradingStrategy (End-to-End Autonomous Management)")
-                tfm_native = getattr(advisor, "_native_engine", None) if advisor else None
-                self._strategy = TimesFMTradingStrategy(engine=tfm_native)
-            else:
-                from quant.strategies.amt_scalping import AmtScalpingStrategy
-                self._strategy = AmtScalpingStrategy(
-                    decision_service=self._decision_service,
-                    exit_engine=self._exits,
-                )
+            from quant.strategies.selection import build_strategy
+            self._strategy = build_strategy(
+                decision_service=self._decision_service,
+                exit_engine=self._exits,
+            )
         # SessionLevelStore now exposes kv_get/kv_set (its JSON file), so the
         # daily-loss budget survives restart through the same port that already
         # persists prior-session POC/VAH/VAL.
@@ -1182,7 +1176,13 @@ class QuantEngine:
         and pass through unchanged. Stale forecasts never reach exits or
         sizing — callers get None and fall back to deterministic behavior.
         """
-        tfm_fc = getattr(self._strategy, "get_latest_forecast", lambda s: None)(self.symbol)
+        from quant.decision.forecast_provider import fresh_forecast
+        tfm_fc = fresh_forecast(
+            getattr(self, "_advisor", None),
+            getattr(self, "_strategy", None),
+            symbol=self.symbol,
+            bar_index=self._bar_index,
+        )
         asof = getattr(tfm_fc, "asof_bar", -1)
         try:
             asof = int(asof)

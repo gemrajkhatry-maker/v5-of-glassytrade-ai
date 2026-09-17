@@ -306,31 +306,6 @@ def test_add_context_is_idempotent_within_a_stamped_bar():
     assert list(engine._price_buffers["NIFTY"]) == [100.5, 101.5]
 
 
-def test_shared_engine_advisor_plus_strategy_records_bar_once():
-    """Regression: TIMESFM_END_TO_END + native advisor share one engine, so
-    engine.analyze() and strategy.should_enter() both run for the same bar."""
-    from unittest.mock import Mock
-    import numpy as np
-    from quant.strategies.timesfm_strategy import TimesFMTradingStrategy
-
-    engine = TimesFMEngine(target_horizon=8)
-    strategy = TimesFMTradingStrategy(target_horizon=8, engine=engine)
-    bar = Bar("2026-09-10T10:00:00", 100, 101, 99, 100.5, 1000, 100)
-    ctx = DecisionContext(
-        symbol="NIFTY", bar=bar, bar_index=42, session_open=True,
-        warmup_complete=True, session_phase="PRIMARY",
-    )
-    fake = Mock()
-    fake.predict.return_value = Mock(
-        quantiles=np.tile(np.linspace(99, 102, 9), (8, 1))
-    )
-    with patch("quant.decision.timesfm_engine.get_timesfm_model", return_value=fake):
-        engine.analyze(ctx)
-        strategy.should_enter(ctx)
-
-    assert len(engine._price_buffers["NIFTY"]) == 1
-
-
 def test_native_advisor_scanner_call_uses_model_gates():
     """The advisor's UI gate payload is the scanner's own model gates — the same
     source that drives the E2E entry decision (model is authoritative). The
@@ -479,3 +454,12 @@ def test_seed_history_does_not_suppress_a_later_live_bar():
     bar = Bar("2026-09-10T10:00:00", 103, 104, 102, 103.0, 1000, 100)
     engine.add_context(DecisionContext(symbol="NIFTY", bar=bar, bar_index=1))
     assert list(engine._price_buffers["NIFTY"]) == [100.0, 101.0, 102.0, 103.0]
+
+
+def test_last_forecast_for_returns_recorded():
+    from quant.decision.timesfm_engine import TimesFMEngine
+    eng = TimesFMEngine.__new__(TimesFMEngine)
+    eng._forecast_cache = {}
+    sentinel = object()
+    eng.record_forecast("NIFTY", 7, sentinel)
+    assert eng.last_forecast_for("NIFTY") is sentinel
