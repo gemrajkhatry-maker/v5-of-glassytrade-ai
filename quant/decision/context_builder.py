@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 
+from quant.amt.bias.bias_resolver import BiasDirection, BiasResult
 from quant.contracts.enums import MarketState
 from quant.contracts.instrument_registry import is_option_contract
 from quant.contracts.vocabulary import absorption_direction
@@ -33,6 +34,31 @@ DEFAULT_OPTION_DELTA = 0.50
 # threshold). The decision-critical path is 100% deterministic by design — no
 # model inference is involved, so _decide never waits on external calls.
 _DETERMINISTIC_CONVICTION = 0.7
+
+# ponytail: Fabio's 15m bias overrides direction only when confidence >= 0.6
+_BIAS_OVERRIDE_THRESHOLD = 0.6
+
+
+def _apply_bias_override(current_direction: str, bias: BiasResult) -> str:
+    """Apply 15-min bias as direction override.
+
+    Bias overrides only when:
+    1. Bias confidence >= threshold
+    2. Current direction is neutral/flat, OR bias agrees with current direction
+    """
+    if bias.direction == BiasDirection.NEUTRAL:
+        return current_direction
+    if bias.confidence < _BIAS_OVERRIDE_THRESHOLD:
+        return current_direction
+
+    bias_side = "LONG" if bias.direction == BiasDirection.LONG_BIAS else "SHORT"
+
+    if current_direction in ("FLAT", "NEUTRAL", ""):
+        return bias_side
+    if current_direction == bias_side:
+        return current_direction
+    # Bias opposes current AMT direction — AMT wins (more specific)
+    return current_direction
 
 
 def _print_levels_from_dto(amt_dto: dict, bar) -> tuple[float, float]:
