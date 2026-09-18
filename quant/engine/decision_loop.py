@@ -29,6 +29,7 @@ from quant.events import (
     SignalBlocked,
 )
 from quant.execution.execution_model import ExecutionModel
+from quant.decision.data_quality import DataQuality, normalize_data_quality
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,8 @@ class DecisionLoop:
         self._contract = deps.get("contract")
         self._underlying_gateway = deps.get("underlying_gateway")
         self._execution_enabled: bool = deps.get("execution_enabled", True)
+        live_mode = config.get("live_mode", deps.get("live_mode", False))
+        self._live_mode = live_mode if callable(live_mode) else bool(live_mode)
         self._get_underlying_symbol = deps.get("get_underlying_symbol")
 
         # --- Mutable state accessors/mutators ---
@@ -226,6 +229,21 @@ class DecisionLoop:
         decision, ctx, amt_dto, risk_st = self._build_decision(
             amt_dto, bar, execution_bar, cooldown_remaining_sec,
         )
+
+        quality = normalize_data_quality(ctx.data_quality)
+        is_live = self._live_mode() if callable(self._live_mode) else self._live_mode
+        if is_live and quality in {DataQuality.CANDLE_DISTRIBUTED, DataQuality.UNAVAILABLE}:
+            decision = _dc_replace(
+                decision, approved=False, signal=None,
+                reason="PROXY_FLOW_BLOCKED",
+                block_reasons=("Live AMT entry requires TICK_EXACT evidence",),
+                metadata={"data_quality": quality.value},
+            )
+        elif quality is not DataQuality.TICK_EXACT:
+            decision = _dc_replace(
+                decision,
+                metadata={**decision.metadata, "mode": "PROXY_MODE"},
+            )
 
         # S1: record the decision itself — gates with pass/fail and reasons.
         self._record_cert_decision(decision, bar)
@@ -533,6 +551,7 @@ class DecisionLoop:
                     "rr": float(decision.signal.rr),
                 } if decision.signal else None,
                 "position_size": None,
+                "metadata": dict(decision.metadata),
             })
         except Exception as e:
             logger.debug(f"Certification decision record failed: {e}")

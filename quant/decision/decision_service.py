@@ -41,6 +41,7 @@ class QuantDecision:
     # Which Fabio playbook produced the approval — matches Signal.model_label.
     # "Triple-A" | "LVN_Sniper" | "VA_Fade" | "" (not approved)
     model_label: str = ""
+    metadata: dict = field(default_factory=dict)
 
 
 def _block_reasons(results) -> tuple[str, ...]:

@@ -850,6 +850,7 @@ class QuantEngine:
             "contract": self._contract,
             "underlying_gateway": self._underlying_gateway,
             "execution_enabled": self._execution_enabled,
+            "live_mode": lambda: self._oms.__class__.__name__ == "LiveOMS",
             "get_underlying_symbol": self._underlying if self._underlying_gateway is not None else None,
         }
         state = {
