@@ -149,3 +149,48 @@ def test_status_only_broker_snapshot_keeps_startup_unresolved_and_blocks_entry()
     assert engine.exposure_state.status is ExposureStatus.RECONCILIATION_REQUIRED
     assert engine.exposure_state.can_open_new_position is False
     assert "o1" in coordinator._unresolved_startup
+
+
+def test_coordinator_start_restores_inflight_order_without_changing_startup_state_type(
+    monkeypatch, tmp_path
+):
+    from quant.multi_engine import QuantCoordinator
+
+    class Storage:
+        def load_open_positions(self):
+            return []
+
+        def load_inflight_orders(self):
+            return [{
+                "symbol": "NIFTY 26 AUG 24000 CALL",
+                "order_id": "o1",
+                "quantity": 1,
+            }]
+
+    class MarketData:
+        pass
+
+    coordinator = QuantCoordinator(
+        MarketData(),
+        storage=Storage(),
+        config={
+            "underlyings": ["NIFTY"],
+            "n": 1,
+            "contracts_file": str(tmp_path / "contracts.json"),
+        },
+    )
+    coordinator._scan = lambda: ["NIFTY 26 AUG 24000 CALL"]
+    coordinator._refresh_gex = lambda: None
+    coordinator._start_eod_watchdog = lambda: None
+    coordinator._start_engine_loop = lambda engine: None
+
+    with monkeypatch.context() as patch:
+        patch.setattr("quant.multi_engine.is_trading_day", lambda: True)
+        coordinator.start()
+
+    engine = coordinator._engines["NIFTY 26 AUG 24000 CALL"]
+    assert coordinator.started is True
+    assert isinstance(coordinator._unresolved_startup, set)
+    assert "o1" in coordinator.unresolved_startup_issues()
+    assert engine.exposure_state.status is ExposureStatus.RECONCILIATION_REQUIRED
+    assert engine._startup_issue_fn() is True

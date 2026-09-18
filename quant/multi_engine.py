@@ -504,7 +504,7 @@ class QuantCoordinator:
                 self._storage, active_universe=set(symbols)
             ).reconcile()
             self._unresolved_startup = set()
-            self._unresolved_startup = self._load_inflight_orders_for_startup()
+            self._load_inflight_orders_for_startup()
             self._quarantined = {
                 q.symbol for q in self._reconciliation_result.quarantined
             }

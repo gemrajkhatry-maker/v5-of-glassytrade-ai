@@ -73,3 +73,10 @@
 - TDD green: the same test after the minimal fix -> `1 passed`.
 - Focused reconciliation plus restored CHOP regressions: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/execution/test_exposure_state.py tests/quant/execution/test_live_partial_fill_reconciliation.py tests/quant/execution/test_restart_reconciliation.py tests/quant/execution/test_close_identity.py tests/quant/test_position_management_amt_rules.py -q` -> `21 passed`.
 - No live-readiness claim is made. Known unrelated DTO and broader dirty-baseline failures remain.
+
+## Startup Type Correction
+
+- Red: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/execution/test_restart_reconciliation.py::test_coordinator_start_restores_inflight_order_without_changing_startup_state_type -q` -> `1 failed, 0 passed`; `start()` replaced `_unresolved_startup` with the inflight row list, so `_load_inflight_orders_for_startup()` raised `AttributeError: 'list' object has no attribute 'update'` before the entry guard could be installed.
+- Green: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/execution/test_restart_reconciliation.py::test_coordinator_start_restores_inflight_order_without_changing_startup_state_type -q` -> `1 passed` after keeping `_unresolved_startup` as a set and retaining the loader's list return value for engine restoration.
+- The coordinator startup test uses a real `QuantCoordinator`, storage fixture, engine construction, and an inflight row. It verifies startup completes, the unresolved issue remains in a set, the restored exposure is `RECONCILIATION_REQUIRED`, and the engine startup issue callback blocks entry before run decisions.
+- This test does not provide live-readiness evidence: it uses a storage fixture and no live broker/readiness environment. No live-readiness claim is made.
