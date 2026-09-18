@@ -869,7 +869,9 @@ class QuantEngine:
             "set_open_trade_risk": lambda v: setattr(self, "_open_trade_risk", v),
             "get_exposure_state": lambda: getattr(self, "exposure_state", None),
             "get_startup_block": lambda: bool(
-                getattr(self, "_startup_issue_fn", lambda: False)()
+                self.persistence_degraded
+                or self.reconciliation_required
+                or getattr(self, "_startup_issue_fn", lambda: False)()
             ),
             "set_exposure_state": lambda v: setattr(self, "exposure_state", v),
             "set_entry_time_epoch": lambda v: setattr(self, "_entry_time_epoch", v),
@@ -1256,8 +1258,10 @@ class QuantEngine:
                     self._recent_decisions.append(entry)
                 else:
                     self._recent_decisions[-1] = entry
-            self._bus.publish(event)
-            self._trace.append(event)
+            lifecycle_event = isinstance(event, (PositionOpened, PositionReduced, PositionClosed))
+            if not lifecycle_event:
+                self._bus.publish(event)
+                self._trace.append(event)
             # Track latest event-derived values for the WS snapshot
             if isinstance(event, AmtUpdated):
                 self._latest_amt = event.amt
@@ -1278,11 +1282,11 @@ class QuantEngine:
                 exc = self.persistence_health.failure
                 if exc is None:
                     exc = RuntimeError("event append failed without an error")
-                if self._is_paper_runtime:
+                if lifecycle_event or self._is_paper_runtime:
                     self.persistence_degraded = True
                     self.reconciliation_required = True
                     self.persistence_failure = exc
-                if self._is_paper_runtime:
+                if lifecycle_event and self._is_paper_runtime:
                     from quant.execution.exposure import ExposureStatus, ExposureState
                     if self.exposure_state.status is ExposureStatus.NONE:
                         self.exposure_state = ExposureState(
@@ -1296,12 +1300,13 @@ class QuantEngine:
                     "re-syncs on startup)",
                     self.symbol, type(event).__name__,
                 )
-            if not append_failed or not isinstance(
-                event, (PositionOpened, PositionReduced, PositionClosed)
-            ):
+            if not append_failed or not lifecycle_event:
                 # Lifecycle state is canonical only after durable append. Other
                 # telemetry/market events may still update the operational cache.
                 self.state = apply_event(self.state, event)
+            if lifecycle_event and not append_failed:
+                self._bus.publish(event)
+                self._trace.append(event)
 
     def _underlying(self) -> str:
         from quant.contracts.exchange_config import ExchangeConfig

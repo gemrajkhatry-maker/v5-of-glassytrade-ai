@@ -1030,7 +1030,7 @@ class QuantCoordinator:
         portfolio["positions"] = fold_positions
         open_pnl = self._recompute_portfolio_equity(portfolio)
         agent_dec = self._align_agent_decision(
-            engine.latest_agent_decision, fold_positions, live, symbol, vs,
+            getattr(engine, "latest_agent_decision", None), fold_positions, live, symbol, vs,
         )
         vs = self._compose_view_state(vs, symbol, portfolio, live, engine, agent_dec)
         self._emit_hotpath_trace(symbol, fold_positions, open_pnl, live)

@@ -85,3 +85,41 @@ claim exact Fabio parity.
 - The full Task 4 implementation is intentionally fail-closed for canonical
   lifecycle snapshots; operational fields may still be present, but consumers
   must honor the explicit degraded marker before permitting live entries.
+
+## Review Follow-up
+
+Focused red run after the review findings:
+
+```text
+PYTHONPATH=backend:. .venv/bin/python -m pytest tests/architecture/test_gap_architecture_contract.py tests/quant/runtime/test_eventstore_failure_consistency.py tests/quant/runtime/test_snapshot_projection.py -q
+5 failed, 7 passed in 0.52s
+```
+
+The failures covered missing rendered durable SVG topology, pre-append lifecycle
+publication, live-mode entry blocking, unmatched close handling, and absent
+optional snapshot fields.
+
+Focused green run:
+
+```text
+PYTHONPATH=backend:. .venv/bin/python -m pytest tests/architecture/test_gap_architecture_contract.py tests/quant/runtime/test_eventstore_failure_consistency.py tests/quant/runtime/test_snapshot_projection.py -q
+13 passed in 0.40s
+```
+
+Task 4 regression set:
+
+```text
+PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/runtime/test_eventstore_failure_consistency.py tests/quant/runtime/test_snapshot_projection.py tests/architecture/test_gap_architecture_contract.py tests/quant/test_event_store_roundtrip_real.py tests/quant/test_event_appender_boundary.py tests/quant/test_ws_contract.py tests/quant/runtime/test_ws_adapter.py tests/quant/execution/test_paper_failure_modes.py -q
+43 passed in 0.83s
+```
+
+The HTML contract now parses rendered `data-node-id`, `data-edge-from`, and
+`data-edge-to` attributes against the JSON topology; the narrative edge remains
+dashed and advisory-only. Lifecycle events append before bus/journal publication,
+and failed lifecycle appends set the shared entry guard in every execution mode.
+Unmatched closes are replay-tolerant with structured `order_id` diagnostics.
+Degraded snapshots use optional engine fields safely and retain the explicit
+degraded marker.
+
+Remaining limitations: this follow-up does not claim live readiness; the existing
+broader dirty-worktree failures and known DTO failures remain outside this change.

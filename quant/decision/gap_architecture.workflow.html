@@ -5068,6 +5068,14 @@
         <path data-edge-from="risk" data-edge-to="signal" data-edge-label="qty" data-edge-key="7" data-edge-id="risk-signal" data-composition-points="256,269;256,296;878.8,296;878.8,269" d="M 256 269 L 256 296 L 878.8 296 L 878.8 269" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="signal" data-edge-to="exit" data-edge-label="position" data-edge-key="8" data-edge-id="signal-exit" data-composition-points="938.8,243;983.2,243;983.2,367;948.8,367" d="M 938.8 243 L 983.2 243 L 983.2 367 L 948.8 367" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="stacked" data-edge-to="exit" data-edge-label="tighten SL" data-edge-key="9" data-edge-id="stacked-tighten" data-composition-points="677.8,393;677.8,409;878.8,409;878.8,393" d="M 677.8 393 L 677.8 409 L 878.8 409 L 878.8 393" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="signal" data-edge-to="durable-intent" data-edge-id="signal-durable-intent" class="a-emphasis"/>
+        <path data-edge-from="durable-intent" data-edge-to="oms-broker" data-edge-id="durable-intent-oms-broker" class="a-default"/>
+        <path data-edge-from="oms-broker" data-edge-to="normalized-fill" data-edge-id="oms-broker-normalized-fill" class="a-default"/>
+        <path data-edge-from="normalized-fill" data-edge-to="reconciliation" data-edge-id="normalized-fill-reconciliation" class="a-default"/>
+        <path data-edge-from="reconciliation" data-edge-to="position-manager" data-edge-id="reconciliation-position-manager" class="a-default"/>
+        <path data-edge-from="position-manager" data-edge-to="event-store" data-edge-id="position-manager-event-store" class="a-default"/>
+        <path data-edge-from="event-store" data-edge-to="canonical-projection" data-edge-id="event-store-canonical-projection" class="a-emphasis"/>
+        <path data-edge-from="canonical-projection" data-edge-to="websocket-ui" data-edge-id="canonical-projection-websocket-ui" class="a-emphasis"/>
 
         <!-- Nodes -->
         <g id="node-bar" data-node-id="bar" data-node-label="Bar Close" tabindex="0" role="button" aria-label="Focus Bar Close, OHLCV + footprint, Market + AMT › Analyze" aria-pressed="false" data-node-kind="external" data-node-sublabel="OHLCV + footprint" data-node-context="Market + AMT › Analyze">
@@ -5184,6 +5192,14 @@
           <text data-node-label="" data-detail-anchor="" x="878.8" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">ExitEngine</text>
           <text data-detail="context" x="878.8" y="379" class="t-muted" font-size="8" text-anchor="middle">stacked imbalance tighten</text>
         </g>
+        <g id="node-durable-intent" data-node-id="durable-intent" data-node-label="Durable Order Intent" data-node-kind="database"/>
+        <g id="node-oms-broker" data-node-id="oms-broker" data-node-label="OMS / Broker" data-node-kind="backend"/>
+        <g id="node-normalized-fill" data-node-id="normalized-fill" data-node-label="Normalized Fill" data-node-kind="backend"/>
+        <g id="node-reconciliation" data-node-id="reconciliation" data-node-label="Reconciliation" data-node-kind="security"/>
+        <g id="node-position-manager" data-node-id="position-manager" data-node-label="Position Manager" data-node-kind="backend"/>
+        <g id="node-event-store" data-node-id="event-store" data-node-label="EventStore" data-node-kind="database"/>
+        <g id="node-canonical-projection" data-node-id="canonical-projection" data-node-label="Canonical Projection" data-node-kind="backend"/>
+        <g id="node-websocket-ui" data-node-id="websocket-ui" data-node-label="WebSocket / UI" data-node-kind="external"/>
 
         <!-- Edge labels -->
         <g data-detail="context" data-edge-from="amt-dto" data-edge-to="ctx" data-edge-label="context builder" data-edge-key="0" data-edge-id="amt-ctx">

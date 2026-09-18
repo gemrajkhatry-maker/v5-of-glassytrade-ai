@@ -39,3 +39,20 @@ def test_snapshot_marks_append_degraded_state(monkeypatch):
 
     snapshot = coordinator.snapshot("NIFTY")
     assert snapshot["riskState"]["canonicalState"] == "DEGRADED_EVENT_APPEND_FAILED"
+
+
+def test_degraded_snapshot_tolerates_optional_engine_projection_fields():
+    coordinator = object.__new__(QuantCoordinator)
+    coordinator._lock = __import__("threading").RLock()
+    engine = type("Engine", (), {})()
+    from quant.event_store import EventStore
+    engine.event_store = EventStore()
+    engine.persistence_degraded = True
+    engine.persistence_failure = OSError("disk full")
+    engine.live_cache = type("Cache", (), {"snapshot": lambda self, symbol: type("Live", (), {
+        "ltp": None, "oi": None, "depth": None, "tick": None,
+    })()})()
+    coordinator._engines = {"NIFTY": engine}
+
+    snapshot = coordinator.snapshot("NIFTY")
+    assert snapshot["riskState"]["canonicalState"] == "DEGRADED_EVENT_APPEND_FAILED"

@@ -277,13 +277,29 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
 
         # Base position close: ID must match.
         if state.position is None:
-            raise ValueError("No position to close")
-        if closed_id != state.position.id:
-            raise ValueError(
-                f"PositionClosed id {closed_id!r} does not match open "
-                f"position {state.position.id!r} — close would be silently "
-                f"dropped otherwise"
+            logger.warning(
+                "unmatched lifecycle event",
+                extra={
+                    "event_type": type(event).__name__,
+                    "symbol": event.symbol,
+                    "position_id": closed_id,
+                    "order_id": getattr(event.fill, "order_id", None),
+                    "sequence": state.sequence + 1,
+                },
             )
+            return state
+        if closed_id != state.position.id:
+            logger.warning(
+                "unmatched lifecycle event",
+                extra={
+                    "event_type": type(event).__name__,
+                    "symbol": event.symbol,
+                    "position_id": closed_id,
+                    "order_id": getattr(event.fill, "order_id", None),
+                    "sequence": state.sequence + 1,
+                },
+            )
+            return state
         return replace(
             state.without_position(),
             realized_pnl=realized,
