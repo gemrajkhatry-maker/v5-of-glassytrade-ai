@@ -274,6 +274,15 @@ class DhanBrokerAdapter(IBroker):
                 # the cancel already succeeded, so only a race fill can have
                 # happened and the fresh read above is the authority.
                 post_cancel = self._safe_order_status(placed_order_id)
+                if post_cancel is None:
+                    self._persist_order_terminal(
+                        signal, "RECONCILIATION_REQUIRED", broker_order_id=placed_order_id
+                    )
+                    raise ReconciliationRequiredError(
+                        "broker order status unavailable after cancel",
+                        order_id=placed_order_id,
+                        requested_qty=qty,
+                    )
                 if post_cancel is not None and self._is_terminal(post_cancel.status):
                     if self._is_filled(post_cancel):
                         logger.info("Order %s filled despite cancel — honoring the fill", placed_order_id)
@@ -507,6 +516,12 @@ class DhanBrokerAdapter(IBroker):
                     logger.debug("Failed to cancel timed-out close order %s", placed_order_id, exc_info=True)
                 # A fill can race the cancel — the post-cancel state decides.
                 final_order = self._safe_order_status(placed_order_id)
+                if final_order is None:
+                    raise ReconciliationRequiredError(
+                        "close order status unavailable after cancel",
+                        order_id=placed_order_id,
+                        requested_qty=quantity,
+                    )
                 if final_order is not None and self._is_filled(final_order):
                     pass  # honored below via the normal filled path
                 elif collared and (

@@ -44,3 +44,21 @@ def test_close_fallback_has_one_economic_identity():
         for call in broker.place_order.call_args_list
     ]
     assert ids[0] == ids[1]
+
+
+def test_live_oms_partial_close_preserves_economic_identity():
+    from quant.execution.live_oms import LiveOMS
+    from quant.execution.order import Order, Position
+    from tests.quant.test_submission_handler_integration import make_signal
+
+    broker = MagicMock()
+    broker.close_position.return_value = SimpleNamespace(entry_price=98.0, size=-2)
+    position = Position(Order(make_signal(), 4), 100.0, "t", 4.0, _id="position-1")
+    oms = LiveOMS(broker, Portfolio.create_default())
+
+    oms.close_partial(position, 0.5, 100.0, "t", "TP1")
+    first = broker.close_position.call_args.kwargs.get("close_intent_id")
+    oms.close_partial(position, 0.5, 100.0, "t", "TP1")
+    second = broker.close_position.call_args.kwargs.get("close_intent_id")
+
+    assert first == second

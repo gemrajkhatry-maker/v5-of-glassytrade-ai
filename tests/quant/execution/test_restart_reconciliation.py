@@ -1,4 +1,5 @@
 from quant.execution.exposure import ExposureState, ExposureStatus
+import pytest
 
 
 def test_restart_restores_unresolved_exposure_before_entry_decisions():
@@ -28,3 +29,16 @@ def test_reconciliation_can_restore_open_or_flat_outcome():
     assert opened.filled_qty == 4
     assert opened.fill_price == 101
     assert state.reconcile({"status": "FLAT"}) == ExposureState.none()
+
+
+def test_startup_storage_failure_is_not_converted_to_empty_recovery():
+    from quant.multi_engine import QuantCoordinator
+
+    coordinator = object.__new__(QuantCoordinator)
+    coordinator._storage = type(
+        "BrokenStorage", (),
+        {"load_inflight_orders": lambda self: (_ for _ in ()).throw(OSError("db down"))},
+    )()
+
+    with pytest.raises(OSError):
+        coordinator._load_inflight_orders_for_startup()

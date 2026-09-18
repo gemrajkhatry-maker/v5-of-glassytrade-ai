@@ -531,6 +531,23 @@ def test_close_timeout_fill_racing_cancel_is_honored():
     broker.place_order.assert_called_once()  # no fallback — the fill won the race
 
 
+def test_entry_cancel_status_uncertainty_is_reconciliation_required():
+    broker = MagicMock()
+    broker.place_order.return_value = SimpleNamespace(order_id="ORD-UNKNOWN", quantity=4)
+    broker.get_order_status.side_effect = RuntimeError("status unavailable")
+    adapter = _make_adapter(broker)
+    adapter._order_poll_timeout = 0.01
+    signal, _ = _make_signal_once(metadata={"order_quantity": 4})
+
+    from quant.execution.live_oms import ReconciliationRequiredError
+
+    with pytest.raises(ReconciliationRequiredError):
+        adapter.execute_order(signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert adapter._safe_order_status("ORD-UNKNOWN") is None
+    assert broker.cancel_order.called
+
+
 def test_close_uncollared_miss_has_no_fallback():
     """C7: the MARKET guarantee is collar-specific. A plain MARKET close that
     ends unfilled is a broker-side anomaly — the engine retry path handles it."""
@@ -589,10 +606,12 @@ def test_partial_fill_times_out_and_cancels_remainder():
     adapter._order_poll_timeout = 0.05  # fast timeout for the test
     signal, _ = _make_signal_once(metadata={"order_quantity": 4})
 
-    pos = adapter.execute_order(signal, Portfolio.create_default(),
-                                "CRUDEOIL 17 AUG 7200 CALL")
+    from quant.execution.live_oms import ReconciliationRequiredError
 
-    assert pos is None
+    with pytest.raises(ReconciliationRequiredError):
+        adapter.execute_order(signal, Portfolio.create_default(),
+                              "CRUDEOIL 17 AUG 7200 CALL")
+
     broker.cancel_order.assert_called_once_with("ORD-1")
 
 

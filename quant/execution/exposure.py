@@ -62,6 +62,12 @@ class ExposureState:
             return self
         if broker_state is None:
             return self
+        snapshot_symbol = broker_state.get("symbol")
+        snapshot_order_id = broker_state.get("order_id") or broker_state.get("broker_order_id")
+        if snapshot_symbol is not None and str(snapshot_symbol) != self.symbol:
+            return self
+        if snapshot_order_id is not None and str(snapshot_order_id) != self.order_id:
+            return self
         status = str(broker_state.get("status", "")).upper()
         if status == "OPEN":
             return replace(

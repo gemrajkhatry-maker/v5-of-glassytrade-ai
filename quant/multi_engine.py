@@ -77,6 +77,7 @@ from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.enums import MarketState
 from quant.contracts.contracts import ContractRef
+from quant.contracts.ports.telemetry import ITelemetry
 from quant.contracts.instrument_registry import (
     DEFAULT_REGISTRY,
     is_futures_contract,
@@ -277,6 +278,11 @@ _DEFAULT_CONFIG = {
     # and must not participate in trading decisions. Set to True only for
     # experimental/experimental runs where LLM narrative is desired.
     "advisor_enabled": False,
+    # Spec §4: ATR-dynamic range bars. When True, the engine's main aggregator
+    # uses DynamicRangeBarAggregator so range_size tracks ATR(14) from
+    # completed bars instead of fixed-interval candles. Opt-in: default
+    # False preserves existing time-based candle behavior.
+    "use_range_bars": False,
     # Default paper execution economics. The coordinator always supplies an
     # explicit profile to the cost-aware OMS factory, including lightweight
     # test/replay coordinators that do not receive backend configuration.
@@ -372,12 +378,23 @@ class QuantCoordinator:
     # =========================================================================
     # 1. LIFECYCLE — start, stop, rescan, symbol rotation
     # =========================================================================
-    def __init__(self, market_data, broker=None, config=None, strategy=None, storage=None) -> None:
+    def __init__(
+        self,
+        market_data,
+        broker=None,
+        config=None,
+        strategy=None,
+        storage=None,
+        telemetry: ITelemetry | None = None,
+    ) -> None:
         self.market_data = market_data
         self.broker = broker
         self.config = {**_DEFAULT_CONFIG, **(config or {})}
         self._strategy = strategy  # TradingStrategy — None means engine uses default
         self._storage = storage
+        # Activity sink handed to every engine this coordinator spawns. The
+        # host supplies the adapter; quant only ever sees the port.
+        self._telemetry = telemetry
         self._contracts_file = self.config.get("contracts_file") or _DEFAULT_CONTRACTS_FILE
         # Shared across all engines (one file, one lock) so prior levels are
         # consistent and NPOC records dedupe per session.
@@ -497,14 +514,7 @@ class QuantCoordinator:
                 self._storage, active_universe=set(symbols)
             ).reconcile()
             self._unresolved_startup = set()
-            if self._storage is not None and hasattr(self._storage, "load_inflight_orders"):
-                try:
-                    self._unresolved_startup = {
-                        str(row.get("order_id") or "unknown-order")
-                        for row in (self._storage.load_inflight_orders() or [])
-                    }
-                except Exception:
-                    self._unresolved_startup = {"order-storage-unavailable"}
+            self._unresolved_startup = self._load_inflight_orders_for_startup()
             self._quarantined = {
                 q.symbol for q in self._reconciliation_result.quarantined
             }
@@ -710,6 +720,9 @@ class QuantCoordinator:
             # 2. Check Stale / Dead Market Stagnation
             last_tick_wall = float(getattr(engine, "_last_tick_wall", now) or now)
             is_stale = (now - last_tick_wall) > stale_sec
+            # ``engine.last_amt_dto`` is the QuantEngine accessor for its own
+            # symbol's AMT output (an AMTEngine-private read here returned None
+            # for every real engine, so rotation-on-dead never fired).
             amt_dto = getattr(engine, "last_amt_dto", None) or {}
             is_dead_state = str(amt_dto.get("marketState", "")).upper() in (MarketState.DEAD.value, "DEAD_MARKET")
 
@@ -902,6 +915,21 @@ class QuantCoordinator:
             (sl_px >= entry_px) if pos_side == "LONG"
             else (sl_px > 0 and sl_px <= entry_px)
         )
+        market_state = str((vs.amt or {}).get("marketState") or "").upper()
+        if market_state == "CHOP":
+            decision = QuantCoordinator._synthesize_position_mgmt(
+                open_p, agent_dec, symbol, vs,
+                entry_px, curr_px, sl_px, tp_px, pos_side, pnl, is_risk_free,
+            )
+            decision["action"] = "EXIT" if pnl <= 0 else "TIGHTEN_SL"
+            decision["reason"] = "CHOP_EXIT" if pnl <= 0 else "CHOP_TIGHTEN"
+            decision["confidence"] = "High"
+            decision["confidenceScore"] = 0.85
+            decision["rationale"] = (
+                f"AMT CHOP detected on {symbol}: do not hold through a non-directional auction. "
+                f"Protect/exit the {pos_side} position at {curr_px:,.2f}."
+            )
+            return decision
         if (
             agent_dec and isinstance(agent_dec, dict)
             and agent_dec.get("role") == "POSITION_MANAGEMENT"
@@ -1064,6 +1092,22 @@ class QuantCoordinator:
             if now - last > threshold_sec:
                 stale.append(sym)
         return sorted(stale)
+
+    def feed_queue_depths(self) -> dict[str, int]:
+        """Return per-symbol tick queue depths from the multiplexed feed.
+
+        Exposed for the /metrics/summary endpoint so operators can monitor
+        feed health. High or growing depths indicate the engine is not
+        consuming ticks fast enough (or the feed is outrunning the consumer).
+        """
+        try:
+            return self._feed.all_queue_depths() if hasattr(self._feed, 'all_queue_depths') else {}
+        except Exception:
+            return {}
+
+    def feed_queue_depth_total(self) -> int:
+        """Total tick backlog across all symbol queues."""
+        return sum(self.feed_queue_depths().values())
 
     def emergency_halt(self, reason: str = "emergency halt", *, force_close: bool = False) -> int:
         """Externally halt every engine's SessionRisk (SIGTERM flatten path).
@@ -1344,8 +1388,28 @@ class QuantCoordinator:
                 if risk is not None and hasattr(risk, "unhalt"):
                     risk.unhalt()
                     unhalted += 1
+                if getattr(eng, "_latest_quant_decision", None) and eng._latest_quant_decision.get("reason") == "HALTED":
+                    eng._latest_quant_decision = None
+                if getattr(eng, "_latest_agent_decision", None) and eng._latest_agent_decision.get("reason") == "RISK_HALTED":
+                    eng._latest_agent_decision = None
         logger.info("unhalt_all: cleared risk halts across %d engine(s)", unhalted)
         return unhalted
+
+    def reset_all_risk(self) -> int:
+        """Reset session risk (P&L, consecutive losses, trades today, halt) across all engines."""
+        reset_count = 0
+        with self._lock:
+            for eng in self._engines.values():
+                risk = getattr(eng, "_risk", None)
+                if risk is not None and hasattr(risk, "reset_session"):
+                    risk.reset_session()
+                    reset_count += 1
+                if getattr(eng, "_latest_quant_decision", None) and eng._latest_quant_decision.get("reason") == "HALTED":
+                    eng._latest_quant_decision = None
+                if getattr(eng, "_latest_agent_decision", None) and eng._latest_agent_decision.get("reason") == "RISK_HALTED":
+                    eng._latest_agent_decision = None
+        logger.info("reset_all_risk: reset session risk across %d engine(s)", reset_count)
+        return reset_count
 
 
     def journal_consecutive_failures(self) -> int:
@@ -1839,6 +1903,16 @@ class QuantCoordinator:
         # may infer identity independently from a display symbol.
         contract = self._contract_for(symbol)
 
+        # GLASSYTRADE_USE_RANGE_BARS env var overrides config (opt-in spec §4
+        # ATR-dynamic range bars). Follows the GLASSYTRADE_SEED_INTERVAL_SEC
+        # pattern: env wins over YAML/config for operator convenience.
+        _env_range_bars = os.environ.get("GLASSYTRADE_USE_RANGE_BARS", "").strip().lower()
+        if _env_range_bars in ("1", "true", "yes", "on"):
+            _use_range_bars = True
+        elif _env_range_bars in ("0", "false", "no", "off"):
+            _use_range_bars = False
+        else:
+            _use_range_bars = self.config.get("use_range_bars", False)
         engine = QuantEngine(
             gateway,
             symbol,
@@ -1846,6 +1920,7 @@ class QuantCoordinator:
             history_source=self.market_data,
             lot_size=self._resolve_lot_size(symbol),
             tick_size=self._resolve_tick_size(symbol),
+            use_range_bars=_use_range_bars,
             market=self._session_profile_for(symbol),
             session_levels=self._session_levels,
             underlying_gateway=underlying_gateway,
@@ -1871,6 +1946,7 @@ class QuantCoordinator:
                 if "max_lots" in self.config
                 else (2 if self._session_profile_for(symbol) == "MCX" else 10)
             ),
+            telemetry=self._telemetry,
         )
         if advisor is not None:
             # Route advisor emissions through the engine's own bus exactly as
@@ -1941,14 +2017,11 @@ class QuantCoordinator:
         # Always attach storage (position persistence, restart book).
         if self._storage is not None:
             engine.attach_storage(self._storage)
-            try:
-                inflight = self._storage.load_inflight_orders() or []
-            except Exception:
-                logger.exception("load_inflight_orders failed for %s", symbol)
-                inflight = []
+            inflight = self._load_inflight_orders_for_startup()
             for row in inflight:
                 if row.get("symbol") == symbol:
                     engine.restore_unresolved_order(row)
+                    self._reconcile_restored_order(engine, row)
             # Only restore positions classified as OPEN by the reconciler.
             # Quarantined positions are preserved in storage but NOT loaded
             # into any engine (they are not in the active universe).
@@ -2016,6 +2089,75 @@ class QuantCoordinator:
                 self._underlying_gateways[symbol] = underlying_gateway
             self._threads[symbol] = self._start_engine_loop(engine)
         return engine
+
+    def _reconcile_restored_order(self, engine, row: dict) -> None:
+        """Reconcile restored broker exposure before the engine can decide."""
+        broker = self.broker
+        order_id = str(row.get("broker_order_id") or row.get("order_id") or "")
+        if broker is None or not order_id:
+            self._unresolved_startup.add(f"broker-reconciliation-unavailable:{order_id or engine.symbol}")
+            return
+        try:
+            if hasattr(broker, "reconcile_order"):
+                snapshot = broker.reconcile_order(order_id)
+            elif hasattr(broker, "get_order_status"):
+                snapshot = broker.get_order_status(order_id)
+            else:
+                self._unresolved_startup.add(f"broker-reconciliation-unavailable:{order_id}")
+                snapshot = None
+        except Exception:
+            logger.exception("broker reconciliation failed for %s", order_id)
+            self._unresolved_startup.add(f"broker-reconciliation-failed:{order_id}")
+            return
+        if snapshot is None:
+            self._unresolved_startup.add(f"broker-reconciliation-unresolved:{order_id}")
+            return
+        if not isinstance(snapshot, dict):
+            status = str(getattr(snapshot, "status", "")).upper()
+            filled = float(getattr(snapshot, "filled_quantity", 0.0) or 0.0)
+            requested = float(getattr(snapshot, "quantity", row.get("quantity", 0.0)) or 0.0)
+            if status in {"FILLED", "OPEN", "PARTIALLY_FILLED", "PARTIAL"}:
+                normalized = {
+                    "status": "OPEN",
+                    "symbol": row.get("symbol"),
+                    "order_id": order_id,
+                    "filled_qty": filled or requested,
+                    "fill_price": float(getattr(snapshot, "average_fill_price", 0.0) or 0.0),
+                }
+            elif status in {"CANCELLED", "REJECTED", "CLOSED", "EXPIRED"}:
+                normalized = {"status": "FLAT", "symbol": row.get("symbol"), "order_id": order_id}
+            else:
+                normalized = None
+        else:
+            normalized = dict(snapshot)
+            normalized.setdefault("symbol", row.get("symbol"))
+            normalized.setdefault("order_id", order_id)
+        engine.reconcile_unresolved_order(normalized)
+        if not row.get("risk_reserved") and not row.get("reserved_risk"):
+            self._unresolved_startup.add(f"risk-reservation-unavailable:{order_id}")
+        if engine.exposure_state.status.name != "RECONCILIATION_REQUIRED":
+            self._unresolved_startup.discard(order_id)
+
+    def _load_inflight_orders_for_startup(self) -> list[dict]:
+        """Load durable inflight rows without converting storage failure to flat."""
+        issues = getattr(self, "_unresolved_startup", None)
+        if issues is None:
+            issues = self._unresolved_startup = set()
+        if self._storage is None or not hasattr(self._storage, "load_inflight_orders"):
+            if getattr(self, "config", {}).get("live_oms_enabled"):
+                issues.add("order-storage-unavailable")
+            return []
+        try:
+            rows = self._storage.load_inflight_orders()
+        except Exception:
+            issues.add("order-storage-unavailable")
+            raise
+        rows = list(rows or [])
+        issues.update(
+            str(row.get("broker_order_id") or row.get("order_id") or "unknown-order")
+            for row in rows
+        )
+        return rows
 
     def _stop_engine(self, symbol: str) -> None:
         with self._lock:

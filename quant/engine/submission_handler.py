@@ -21,6 +21,13 @@ from quant.events import Event, PositionOpened, SignalApproved
 from quant.execution.execution_model import ExecutionModel, signal_matches_contract
 from quant.session_gates import bar_epoch_ms as _bar_epoch_ms, ist_dt as _ist_dt
 
+# Dashboard metrics — incremented on decision pipeline outcomes
+try:
+    from app.core.metrics import trades_executed
+    _dash_metrics_available = True
+except ImportError:
+    _dash_metrics_available = False  # not running under backend (tests/replay)
+
 logger = logging.getLogger(__name__)
 
 
@@ -208,6 +215,8 @@ class SubmissionHandler:
                             fill_price=exc.fill_price,
                         )
                     )
+                else:
+                    raise
                 logger.error("[RECONCILIATION REQUIRED] %s: broker outcome unknown", self._symbol)
                 return False
             # C3: a broker/OMS submission failure must not kill the engine
@@ -254,6 +263,7 @@ class SubmissionHandler:
                 paper_fill.filled_quantity,
                 paper_fill.requested_quantity,
             )
+            return False
 
         logger.info(
             "[SIGNAL EXECUTED] %s: %s %s @ %.2f (SL=%.2f, TP=%.2f, RR=%.2f) — %s | "
@@ -272,6 +282,10 @@ class SubmissionHandler:
 
         # Emit SignalApproved only after a successful submit
         self._emit(SignalApproved(symbol=self._symbol, time=bar.time, signal=signal))
+
+        # Dashboard metric: trade executed
+        if _dash_metrics_available:
+            trades_executed.inc()
 
         # Update engine state
         self._set_entry_bar_index(self._get_bar_index())

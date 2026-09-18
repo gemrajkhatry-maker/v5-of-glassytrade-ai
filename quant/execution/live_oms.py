@@ -258,7 +258,7 @@ class LiveOMS:
             )
 
         try:
-            close_intent_id = f"close:{position.id}:{reason}"
+            close_intent_id = f"close:{position.id}"
             broker_pos = self._broker.close_position(
                 symbol=position.order.signal.symbol,
                 side=close_side,
@@ -384,6 +384,7 @@ class LiveOMS:
             )
 
         try:
+            close_intent_id = f"close:{position.id}"
             broker_pos = self._broker.close_position(
                 symbol=position.order.signal.symbol,
                 side=close_side,
@@ -391,17 +392,30 @@ class LiveOMS:
                 portfolio=self._portfolio,
                 reference_price=price,
                 contract_ref=self._contract,
+                close_intent_id=close_intent_id,
             )
         except TypeError as exc:
             if "contract_ref" not in str(exc):
                 raise
-            broker_pos = self._broker.close_position(
-                symbol=position.order.signal.symbol,
-                side=close_side,
-                quantity=qty,
-                portfolio=self._portfolio,
-                reference_price=price,
-            )
+            try:
+                broker_pos = self._broker.close_position(
+                    symbol=position.order.signal.symbol,
+                    side=close_side,
+                    quantity=qty,
+                    portfolio=self._portfolio,
+                    reference_price=price,
+                    close_intent_id=close_intent_id,
+                )
+            except TypeError as compatibility_exc:
+                if "close_intent_id" not in str(compatibility_exc):
+                    raise
+                broker_pos = self._broker.close_position(
+                    symbol=position.order.signal.symbol,
+                    side=close_side,
+                    quantity=qty,
+                    portfolio=self._portfolio,
+                    reference_price=price,
+                )
 
         if broker_pos is None:
             raise RuntimeError(
@@ -430,6 +444,7 @@ class LiveOMS:
             close_time=time,
             reason=reason,
             pnl=partial_pnl,
+            logical_id=close_intent_id,
         )
 
         remaining = Position(

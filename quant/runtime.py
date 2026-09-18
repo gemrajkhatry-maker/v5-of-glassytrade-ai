@@ -1381,6 +1381,10 @@ class QuantEngine:
             fill_price=float(row.get("avg_fill_price") or 0.0),
         )
 
+    def reconcile_unresolved_order(self, snapshot) -> None:
+        """Apply one broker snapshot without clearing an unavailable outcome."""
+        self.exposure_state = self.exposure_state.reconcile(snapshot)
+
     def periodic_reconcile(self) -> PeriodicReconciliationResult:
         """Periodic reconciliation between cached state and event store.
 

@@ -31,3 +31,12 @@ def test_engine_entry_guards_block_reconciliation_required_exposure():
     blocked, cooldown = engine._entry_guards(type("Bar", (), {"time": "t"})())
     assert blocked is True
     assert cooldown == 0.0
+
+
+def test_reconciliation_rejects_snapshot_for_different_order_or_symbol():
+    state = ExposureState.none().unknown_entry(
+        symbol="MCX", order_id="o1", requested_qty=10, filled_qty=4, fill_price=100
+    )
+
+    assert state.reconcile({"status": "OPEN", "symbol": "OTHER", "order_id": "o1"}) == state
+    assert state.reconcile({"status": "OPEN", "symbol": "MCX", "order_id": "o2"}) == state

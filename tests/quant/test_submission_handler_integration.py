@@ -293,7 +293,7 @@ class TestPartialFillScenarios:
 
         result = handler.submit(signal, bar, {}, MagicMock(), "Triple-A")
 
-        assert result is True
+        assert result is False
         assert oms.last_fill.status == "partial"
         assert oms.last_fill.filled_quantity == oms.last_fill.requested_quantity * 0.5
         # Exposure state should be set for reconciliation
@@ -308,7 +308,7 @@ class TestPartialFillScenarios:
 
         result = handler.submit(signal, bar, {}, MagicMock(), "Triple-A")
 
-        assert result is True
+        assert result is False
         assert oms.last_fill.filled_quantity == pytest.approx(
             oms.last_fill.requested_quantity * 0.3, rel=1e-6
         )
@@ -322,7 +322,7 @@ class TestPartialFillScenarios:
 
         result = handler.submit(signal, bar, {}, MagicMock(), "Triple-A")
 
-        assert result is True
+        assert result is False
         assert oms.last_fill.filled_quantity == pytest.approx(
             oms.last_fill.requested_quantity * 0.9, rel=1e-6
         )

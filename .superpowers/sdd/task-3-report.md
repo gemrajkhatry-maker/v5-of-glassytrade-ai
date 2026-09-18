@@ -30,3 +30,26 @@
 - Live broker reconciliation still depends on the host supplying an actual broker status query and invoking `ExposureState.reconcile()` with its normalized result.
 - The broader suite has unrelated failures from concurrent dirty baseline changes; no live-readiness claim is made.
 - `tests/quant/execution/test_pyramid_integration.py` had an unrelated pre-existing modification and was not touched.
+
+## Review Follow-up
+
+### Red / Green Evidence
+
+- Red: `PYTHONPATH=backend:. .venv/bin/python -m pytest backend/tests/unit/infrastructure/test_dhan_broker_adapter.py -k 'status_uncertainty' -q` -> `1 failed, 37 deselected`; the adapter returned without raising reconciliation after post-cancel status failure.
+- Red: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/execution/test_live_partial_fill_reconciliation.py tests/quant/execution/test_exposure_state.py tests/quant/execution/test_close_identity.py tests/quant/execution/test_restart_reconciliation.py -q` -> `4 failed, 9 passed`; lifecycle events were emitted, missing exposure setter was swallowed, identity was unchecked, and the fail-closed startup seam was absent.
+- Green focused: `PYTHONPATH=backend:. .venv/bin/python -m pytest backend/tests/unit/infrastructure/test_dhan_broker_adapter.py tests/quant/execution/test_live_partial_fill_reconciliation.py tests/quant/execution/test_exposure_state.py tests/quant/execution/test_close_identity.py tests/quant/execution/test_restart_reconciliation.py tests/quant/execution/test_live_oms.py tests/quant/execution/test_execution_state_machine.py backend/tests/unit/infrastructure/test_close_order_idempotency.py tests/quant/test_submission_handler_integration.py -q` -> `95 passed`.
+
+### Lifecycle Decisions
+
+- Post-submit or post-cancel status uncertainty is `RECONCILIATION_REQUIRED`; it cannot become `CANCELLED`, `REJECTED`, or flat.
+- Partial entry retains the portfolio-risk reservation and reconciliation obligation, returns blocked/false from `SubmissionHandler`, and emits neither `SignalApproved` nor `PositionOpened`.
+- An unknown outcome without an exposure setter raises `ReconciliationRequiredError` so the caller cannot continue with an untracked obligation.
+- Restart restores durable inflight exposure, queries the broker before decisions where the broker seam exists, and retains explicit startup issues for missing/failing storage, broker reconciliation, or risk-reservation data.
+- Reconciliation snapshots must match the persisted symbol and broker order identity before they can resolve exposure.
+- Full and partial closes use `close:{position.id}` as the economic close identity; reason changes and broker retry IDs do not create another economic intent.
+
+### Remaining Limitations
+
+- The current storage schema does not durably persist portfolio-risk reservation amount. Restart therefore marks `risk-reservation-unavailable:<order_id>` and remains blocked unless a future storage contract supplies `risk_reserved` or `reserved_risk`.
+- A broker status provider that returns an unrecognized or unavailable status leaves the restored exposure unresolved and readiness degraded; no live-readiness claim is made.
+- The broader dirty worktree suite remains outside this focused change and was not used as a release gate.
