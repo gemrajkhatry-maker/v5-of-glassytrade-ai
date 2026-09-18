@@ -98,6 +98,7 @@ from quant.reconciliation_service import canonical_key, partition_keys
 from quant.runtime import QuantEngine
 from quant.session_levels import SessionLevelStore
 from quant.state import project_state
+from quant.state_machine import EngineState
 from quant.ws_adapter import view_state_to_ws
 
 logger = logging.getLogger(__name__)
@@ -959,9 +960,9 @@ class QuantCoordinator:
             tick=live.tick if live.tick is not None else vs.tick,
             ltp=live.ltp if live.ltp is not None else vs.ltp,
             oi=live.oi if live.oi is not None else vs.oi,
-            depth=live.depth if live.depth is not None else (engine.latest_depth or vs.depth),
-            amt=engine.latest_amt,
-            quant_decision=engine.latest_quant_decision,
+            depth=live.depth if live.depth is not None else (getattr(engine, "latest_depth", None) or vs.depth),
+            amt=getattr(engine, "latest_amt", None),
+            quant_decision=getattr(engine, "latest_quant_decision", None),
             agent_decision=agent_dec,
         )
 
@@ -1001,10 +1002,27 @@ class QuantCoordinator:
             vs = project_state(engine.event_store.fold())
         except Exception as e:
             logger.warning(
-                "snapshot: EventStore.fold failed for %s (%s) — falling back to engine.state",
+                "snapshot: EventStore.fold failed for %s (%s) — canonical projection unavailable",
                 symbol, e,
             )
-            vs = project_state(engine.state)
+            vs = project_state(EngineState(symbol=symbol))
+            vs = replace(
+                vs,
+                risk_state={
+                    **(vs.risk_state or {}),
+                    "canonicalState": "DEGRADED_CANONICAL_FOLD_UNAVAILABLE",
+                    "canonicalError": type(e).__name__,
+                },
+            )
+        if getattr(engine, "persistence_degraded", False):
+            vs = replace(
+                vs,
+                risk_state={
+                    **(vs.risk_state or {}),
+                    "canonicalState": "DEGRADED_EVENT_APPEND_FAILED",
+                    "canonicalError": type(getattr(engine, "persistence_failure", None)).__name__,
+                },
+            )
         live = engine.live_cache.snapshot(symbol)
         fold_positions = list((vs.portfolio or {}).get("positions", []))
         fold_positions = self._patch_positions_with_live_ltp(fold_positions, live)

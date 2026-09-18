@@ -1272,7 +1272,9 @@ class QuantEngine:
             # skew) must never kill the caller mid-bookkeeping — the journal
             # and storage bridge already received the event via the bus, and
             # the reconcile layer re-syncs event-sourced drift on startup.
-            if self.event_appender.append(event) is None:
+            append_sequence = self.event_appender.append(event)
+            append_failed = append_sequence is None
+            if append_failed:
                 exc = self.persistence_health.failure
                 if exc is None:
                     exc = RuntimeError("event append failed without an error")
@@ -1294,7 +1296,12 @@ class QuantEngine:
                     "re-syncs on startup)",
                     self.symbol, type(event).__name__,
                 )
-            self.state = apply_event(self.state, event)
+            if not append_failed or not isinstance(
+                event, (PositionOpened, PositionReduced, PositionClosed)
+            ):
+                # Lifecycle state is canonical only after durable append. Other
+                # telemetry/market events may still update the operational cache.
+                self.state = apply_event(self.state, event)
 
     def _underlying(self) -> str:
         from quant.contracts.exchange_config import ExchangeConfig

@@ -21,6 +21,7 @@ REJECTED with ``ValueError`` instead of silently poisoning state:
 from __future__ import annotations
 
 import math
+import logging
 from dataclasses import replace
 
 from quant.contracts.timezones import epoch_to_iso
@@ -34,6 +35,8 @@ from quant.events import (
     RiskUpdated,
     StopMoved,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _validate_position_payload(pos) -> None:
@@ -241,6 +244,16 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
             return replace(state, pyramids=new_pyramids, sequence=state.sequence + 1)
         # Unknown id — fold never raises on an unmatched reduce (replay of a
         # stale/foreign partial must not poison the chain).
+        logger.warning(
+            "unmatched lifecycle event",
+            extra={
+                "event_type": type(event).__name__,
+                "symbol": event.symbol,
+                "position_id": rem_id,
+                "order_id": getattr(getattr(event, "fill", None), "order_id", None),
+                "sequence": state.sequence + 1,
+            },
+        )
         return state
 
     elif isinstance(event, PositionClosed):
