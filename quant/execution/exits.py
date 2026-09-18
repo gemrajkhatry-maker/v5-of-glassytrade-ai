@@ -149,8 +149,7 @@ class ExitEngine:
         global MODEL_RISK_FAILURES
         from quant.execution.exit_checks import (
             check_spread_blowout, check_cvd_kill,
-            check_stacked_imbalance_tighten, check_take_profit_tiers,
-            check_trailing_stop, check_time_stop,
+            check_take_profit_tiers, check_trailing_stop, check_time_stop,
         )
 
         self.last_exit_source = ""
@@ -166,10 +165,6 @@ class ExitEngine:
         if market_state == MarketState.DEAD:
             self.last_exit_source = "DETERMINISTIC:DEAD_MARKET"
             return ExitDecision(True, "DEAD_MARKET", close)
-        if str(getattr(market_state, "value", market_state)).upper() == "CHOP":
-            self.last_exit_source = "DETERMINISTIC:CHOP_MARKET"
-            return ExitDecision(True, "CHOP_MARKET", close)
-
         long = position.size > 0
         side = "LONG" if long else "SHORT"
         sl = float(position.order.signal.sl)
@@ -230,12 +225,6 @@ class ExitEngine:
                     exc_info=True,
                 )
                 MODEL_RISK_FAILURES += 1
-
-        # Rule 2b: Opposing stacked imbalance — tighten SL
-        r = check_stacked_imbalance_tighten(position, dto)
-        if r:
-            self.last_exit_source = f"DETERMINISTIC:{r.reason}"
-            return r
 
         # Rule 2: protective stop — the TIGHTEST of raw SL, breakeven floor and
         # active trail. The bar path previously checked the raw frozen SL first,

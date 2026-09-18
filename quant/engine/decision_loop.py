@@ -134,6 +134,7 @@ class DecisionLoop:
         self._get_open_trade_risk = state.get("get_open_trade_risk", lambda: 0.0)
         self._set_open_trade_risk = state.get("set_open_trade_risk")
         self._get_exposure_state = state.get("get_exposure_state")
+        self._get_startup_block = state.get("get_startup_block", lambda: False)
         self._set_exposure_state = state.get("set_exposure_state")
         self._set_entry_time_epoch = state.get("set_entry_time_epoch")
 
@@ -273,6 +274,9 @@ class DecisionLoop:
         """
         # Broker may hold partial exposure after a timeout/cancel race. Until
         # reconciled, this engine must stay flat and reject new entries.
+        if self._get_startup_block():
+            logger.error("[BLOCKED] %s: startup/storage/reconciliation health is unresolved", self._symbol)
+            return True, 0.0
         if self._get_exposure_state is not None:
             exposure = self._get_exposure_state()
             if exposure is not None and not exposure.can_open_new_position:

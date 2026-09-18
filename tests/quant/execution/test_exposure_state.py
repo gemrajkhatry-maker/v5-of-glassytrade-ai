@@ -40,3 +40,12 @@ def test_reconciliation_rejects_snapshot_for_different_order_or_symbol():
 
     assert state.reconcile({"status": "OPEN", "symbol": "OTHER", "order_id": "o1"}) == state
     assert state.reconcile({"status": "OPEN", "symbol": "MCX", "order_id": "o2"}) == state
+
+
+def test_reconciliation_requires_both_snapshot_identities():
+    state = ExposureState.none().unknown_entry(
+        symbol="MCX", order_id="o1", requested_qty=10
+    )
+
+    assert state.reconcile({"status": "OPEN", "symbol": "MCX"}) == state
+    assert state.reconcile({"status": "FLAT", "order_id": "o1"}) == state

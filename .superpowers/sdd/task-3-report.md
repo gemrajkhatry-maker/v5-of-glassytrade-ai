@@ -53,3 +53,12 @@
 - The current storage schema does not durably persist portfolio-risk reservation amount. Restart therefore marks `risk-reservation-unavailable:<order_id>` and remains blocked unless a future storage contract supplies `risk_reserved` or `reserved_risk`.
 - A broker status provider that returns an unrecognized or unavailable status leaves the restored exposure unresolved and readiness degraded; no live-readiness claim is made.
 - The broader dirty worktree suite remains outside this focused change and was not used as a release gate.
+
+## Final Review Follow-up
+
+- Red: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/execution/test_exposure_state.py tests/quant/execution/test_live_partial_fill_reconciliation.py tests/quant/execution/test_restart_reconciliation.py -q` -> `3 failed, 11 passed`; missing broker identities were accepted, partial-fill setter absence was swallowed, and the decision-loop startup seam was absent.
+- Green focused: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/execution/test_exposure_state.py tests/quant/execution/test_live_partial_fill_reconciliation.py tests/quant/execution/test_restart_reconciliation.py tests/quant/execution/test_close_identity.py -q` -> `18 passed`.
+- The actual entry guard now blocks on the coordinator's live unresolved-startup issue set, including storage, broker reconciliation, ledger, and `risk-reservation-unavailable` issues. Broker `OPEN`/`FLAT` snapshots must include both matching symbol and order identity.
+- Partial fills without an exposure setter now raise `ReconciliationRequiredError` rather than allowing an untracked obligation to continue. The late-fill collar/fallback test asserts one economic close identity.
+- History review isolated cc8baa9c's unrelated CHOP_MARKET, stacked-imbalance, AMT/chop tests, telemetry, range-bar/feed metrics, and risk-reset additions from this corrective change; pre-existing dirty worktree changes were preserved.
+- Known limitation: the repository still has unrelated dirty-baseline DTO and broader suite failures. No live-readiness claim is made.

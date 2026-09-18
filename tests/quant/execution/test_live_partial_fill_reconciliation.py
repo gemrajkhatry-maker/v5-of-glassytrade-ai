@@ -126,3 +126,23 @@ def test_unknown_entry_without_exposure_setter_fails_closed_loudly():
 
     with pytest.raises(ReconciliationRequiredError):
         handler.submit(make_signal(), FakeBar(), {}, type("RiskState", (), {"trades_today": 0, "equity": 1})(), "test")
+
+
+def test_partial_entry_without_exposure_setter_fails_closed_loudly():
+    from quant.execution.live_oms import ReconciliationRequiredError
+    from tests.quant.test_submission_handler_integration import FakeBar, FakePositionManager, make_signal
+
+    handler = SubmissionHandler(
+        config={"symbol": "NIFTY", "execution_enabled": True},
+        deps={"risk": Risk(), "oms": PartialOMS(), "get_position_manager": lambda: FakePositionManager()},
+        state={
+            "get_bar_index": lambda: 10, "get_entry_bar_index": lambda: 0,
+            "set_entry_bar_index": lambda value: None, "get_latch": lambda: {},
+            "set_latch": lambda key, value: None, "pop_latch": lambda key: None,
+        },
+        emit=lambda event: None, latch_or_signal_block=lambda *args: None,
+        notify_advisor_position=lambda *args: None,
+    )
+
+    with pytest.raises(ReconciliationRequiredError):
+        handler.submit(make_signal(), FakeBar(), {}, type("RiskState", (), {"trades_today": 0, "equity": 1})(), "test")

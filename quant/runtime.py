@@ -868,6 +868,9 @@ class QuantEngine:
             "get_open_trade_risk": lambda: getattr(self, "_open_trade_risk", 0.0),
             "set_open_trade_risk": lambda v: setattr(self, "_open_trade_risk", v),
             "get_exposure_state": lambda: getattr(self, "exposure_state", None),
+            "get_startup_block": lambda: bool(
+                getattr(self, "_startup_issue_fn", lambda: False)()
+            ),
             "set_exposure_state": lambda v: setattr(self, "exposure_state", v),
             "set_entry_time_epoch": lambda v: setattr(self, "_entry_time_epoch", v),
         }

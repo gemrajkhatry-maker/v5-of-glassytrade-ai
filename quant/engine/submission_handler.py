@@ -256,6 +256,15 @@ class SubmissionHandler:
                         fill_price=paper_fill.fill_price,
                     )
                 )
+            else:
+                from quant.execution.live_oms import ReconciliationRequiredError
+                raise ReconciliationRequiredError(
+                    "partial broker fill cannot be tracked",
+                    order_id=paper_fill.order_id,
+                    requested_qty=paper_fill.requested_quantity,
+                    filled_qty=paper_fill.filled_quantity,
+                    fill_price=paper_fill.fill_price,
+                )
             logger.error(
                 "[RECONCILIATION REQUIRED] %s: paper order %s partially filled (%s/%s)",
                 self._symbol,

@@ -16,7 +16,7 @@ def _status(status, filled_quantity, price=100.0):
     )
 
 
-def test_close_fallback_has_one_economic_identity():
+def test_late_fill_close_fallback_cannot_double_count_economic_identity():
     from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter
 
     broker = MagicMock()
