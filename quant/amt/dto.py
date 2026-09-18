@@ -20,7 +20,7 @@ from quant.decision.data_quality import DataQuality, normalize_data_quality
 def amt_result_to_dto(r) -> dict:
     """Convert a domain AMTResult to the camelCase WS DTO dict."""
     quality = normalize_data_quality(getattr(r, "data_quality", ""))
-    if quality is DataQuality.UNAVAILABLE:
+    if quality is DataQuality.UNAVAILABLE and not getattr(r, "data_quality", ""):
         quality = (
             DataQuality.CANDLE_DISTRIBUTED
             if getattr(r, "cvd_source", "") in ("underlying", "option")

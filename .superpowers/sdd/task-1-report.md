@@ -49,3 +49,51 @@ The worktree already contained unrelated edits in several approved Task 1 files.
 - The full focused command has one failure caused by pre-existing dirty-worktree DTO reads in `quant/execution/exit_checks.py` for four missing stacked-imbalance keys. That file is outside Task 1 and was not changed.
 - Existing unrelated edits remain interleaved in approved Task 1 production files and are preserved.
 - The broader plan's context-builder fields already exist and were not changed because Task 1 behavior is covered by the existing normalized `DataQuality` and flow fields.
+
+## Review Fix
+
+### Files
+
+- `quant/amt_engine.py` — pass the closed bar's deterministic signed delta as
+  `candidate_direction` before AMT scoring; zero delta remains directionless.
+- `quant/amt/dto.py` — only infer candle provenance when the DTO has no explicit
+  quality; an explicit unknown value remains `UNAVAILABLE`.
+- `tests/quant/amt/test_amt_engine_direction.py` — production engine handoff,
+  opposing-flow scoring, and context-direction regression coverage.
+- `tests/architecture/test_amt_dto_contract.py` — unknown provenance regression
+  coverage for underlying and option CVD sources.
+
+### Red/Green Results
+
+- `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/amt/test_amt_engine_direction.py tests/architecture/test_amt_dto_contract.py -k 'engine_handoff or unknown_provenance' -q`
+  - Initial red run: `2 failed`; the first failures exposed fixture issues
+    (`AggressionScorer` lacked the persistent scorer hook and `AMTResult` has no
+    `data_quality` field), then the corrected tests failed until the fixes were
+    implemented.
+  - Green run: `2 passed, 8 deselected`.
+- `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/amt/test_amt_engine_direction.py tests/quant/amt/orderflow/test_directional_compute.py tests/quant/amt/orderflow/test_analyzer_flow_propagation.py tests/architecture/test_amt_dto_contract.py -q`
+  - `13 passed, 1 failed`.
+  - The remaining failure is the pre-existing architecture DTO consumer failure
+    for four missing stacked-imbalance keys in `quant/execution/exit_checks.py`.
+
+### Implementation Rationale
+
+`AMTEngine.analyze()` runs before `DecisionContextBuilder`, so context-derived
+direction cannot be fed backward into AMT without a circular dependency. The
+closed bar's signed delta is already available at the engine boundary and is the
+earliest deterministic direction source. It is mapped to `LONG`/`SHORT` only
+when nonzero and passed through the existing analyzer/order-flow directional
+contract. The context path then remains LONG while opposing CVD is not credited.
+
+DTO provenance now distinguishes absent quality (legacy source inference) from
+explicit unknown quality (fail closed as `UNAVAILABLE`). No DTO consumers were
+changed for the unrelated stacked-imbalance failure.
+
+### Remaining Concerns
+
+- Pre-existing unrelated changes remain interleaved in approved Task 1 files,
+  including `quant/amt_engine.py` and `quant/amt/dto.py`; they were not reverted
+  and cannot be cleanly separated without reverting user work.
+- The architecture DTO test still fails on the known stacked-imbalance keys in
+  `quant/execution/exit_checks.py`; that unrelated consumer was intentionally
+  left untouched.

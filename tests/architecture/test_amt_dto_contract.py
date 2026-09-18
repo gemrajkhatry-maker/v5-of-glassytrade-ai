@@ -28,6 +28,7 @@ import ast
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -172,6 +173,20 @@ def test_footprint_presence_does_not_upgrade_provenance_to_tick_exact():
     )
 
     assert amt_result_to_dto(result)["dataQuality"] == "CANDLE_DISTRIBUTED"
+
+
+def test_unknown_provenance_remains_unavailable_for_cvd_sources():
+    for source in ("underlying", "option"):
+        base = AMTResult(
+            market_state=MarketState.BALANCED,
+            poc=0.0,
+            value_area_high=0.0,
+            value_area_low=0.0,
+            cvd_source=source,
+        )
+        result = SimpleNamespace(**vars(base), data_quality="future-unknown-quality")
+
+        assert amt_result_to_dto(result)["dataQuality"] == "UNAVAILABLE"
 
 
 def test_option_scale_merge_keys_are_real_dto_keys():

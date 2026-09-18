@@ -23,6 +23,7 @@ from quant.amt.orderflow.footprint import TickFootprintAccumulator
 from quant.amt.session.npoc import NPOCTracker
 from quant.bars import Bar
 from quant.config.constants import SEED_CACHE_TTL_SECONDS
+from quant.contracts.instrument_registry import is_option_contract
 from quant.contracts.value_objects import FloatOHLC
 from quant.session_levels import SessionLevelStore
 from quant.state import _epoch_to_iso, session_date_key
@@ -317,7 +318,11 @@ class AMTEngine:
                     for pc in prev_candles:
                         prev_inc.update(pc)
                     try:
-                        prev_res = self._amt_analyzer.analyze(prev_candles, incremental_profile=prev_inc)
+                        prev_res = self._amt_analyzer.analyze(
+                            prev_candles,
+                            incremental_profile=prev_inc,
+                            cvd_source="option" if is_option_contract(self.symbol) else "underlying",
+                        )
                         if prev_res.poc > 0:
                             self._prior = {
                                 "poc": float(prev_res.poc),
@@ -377,6 +382,10 @@ class AMTEngine:
                         option_tick=last_ohlc,
                         footprint_accumulator=self._footprint,
                         gex=self._gex,
+                        cvd_source="option" if is_option_contract(self.symbol) else "underlying",
+                        # History can end inside the current bucket, so the newest
+                        # candle here may still be open — never judge it as volume.
+                        latest_is_forming=True,
                     )
                     self._last_amt_dto = amt_result_to_dto(result)
                     self._last_underlying_close = float(last_ohlc.close)
@@ -475,6 +484,11 @@ class AMTEngine:
                 option_tick=ohlc,
                 footprint_accumulator=self._footprint,
                 gex=self._gex,
+                cvd_source="option" if is_option_contract(self.symbol) else "underlying",
+                candidate_direction=(
+                    "LONG" if ohlc.delta > 0 else
+                    "SHORT" if ohlc.delta < 0 else None
+                ),
             )
         except Exception:
             if not self._amt_fail_logged:
@@ -522,6 +536,3 @@ class AMTEngine:
         }
         if close > 0:
             self._last_underlying_close = float(close)
-
-
-
