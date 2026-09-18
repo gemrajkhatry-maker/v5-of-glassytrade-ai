@@ -24,6 +24,7 @@ import pytest
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import QuantDecision
 from quant.decision.result import GateResult
+from quant.contracts.ports.telemetry import NULL_TELEMETRY, ITelemetry
 from quant.decision.signal_builder import Signal
 from quant.engine.decision_loop import DecisionLoop, _as_counter
 from quant.events import (
@@ -90,6 +91,8 @@ class FakeRisk:
 
 class FakeOMS:
     """Mock OMS for testing."""
+
+    is_live = False
 
     def __init__(self, lot_size: float = 1.0, submit_raises: Exception | None = None):
         self.lot_size = lot_size
@@ -207,6 +210,7 @@ def make_decision_loop(
     forecast_fn: Any = None,
     exposure_state: ExposureState | None = None,
     emit: Any = None,
+    telemetry: Any = None,
 ) -> DecisionLoop:
     """Build a DecisionLoop with test-friendly defaults."""
     _bar_index = bar_index
@@ -265,6 +269,7 @@ def make_decision_loop(
         emit=emit or (lambda event: None),
         forecast_fn=forecast_fn,
         advisor=advisor,
+        telemetry=telemetry,
     )
 
 
@@ -752,3 +757,77 @@ class TestEdgeCases:
         result = loop.evaluate({}, bar)
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: Activity telemetry sink
+# ---------------------------------------------------------------------------
+
+class RecordingTelemetry(ITelemetry):
+    """Test sink: remembers what the loop reported."""
+
+    def __init__(self) -> None:
+        self.ticks = 0
+        self.signals: list[str] = []
+
+    def record_tick(self) -> None:
+        self.ticks += 1
+
+    def record_signal(self, direction: str) -> None:
+        self.signals.append(direction)
+
+
+class TestActivityTelemetry:
+    def test_default_sink_is_the_shared_no_op(self):
+        """Without a host sink the loop counts into NULL_TELEMETRY, no error."""
+        loop = make_decision_loop()
+
+        assert loop._telemetry is NULL_TELEMETRY
+        assert loop.evaluate({}, FakeBar()) is not None
+
+    def test_each_evaluated_bar_counts_one_tick(self):
+        """Every bar that reaches the strategy counts a tick."""
+        sink = RecordingTelemetry()
+        loop = make_decision_loop(strategy=FakeStrategy(), telemetry=sink)
+
+        loop.evaluate({}, FakeBar())
+        loop.evaluate({}, FakeBar())
+
+        assert sink.ticks == 2
+
+    def test_guard_block_does_not_count_a_tick(self):
+        """A bar blocked before evaluation is not a processed tick."""
+        sink = RecordingTelemetry()
+        loop = make_decision_loop(
+            risk=FakeRisk(can_trade=False, no_trade_reason="halted"),
+            telemetry=sink,
+        )
+
+        assert loop.evaluate({}, FakeBar()) is None
+        assert sink.ticks == 0
+
+    def test_approved_signal_counts_with_its_direction(self):
+        """An approved decision reports the signal's type."""
+        sink = RecordingTelemetry()
+        loop = make_decision_loop(
+            strategy=FakeStrategy(decision=make_decision(approved=True)),
+            telemetry=sink,
+        )
+
+        loop.evaluate({}, FakeBar())
+
+        assert (sink.ticks, sink.signals) == (1, ["LONG"])
+
+    def test_rejected_decision_counts_no_signal(self):
+        """A rejected decision still ticks but reports no signal."""
+        sink = RecordingTelemetry()
+        loop = make_decision_loop(
+            strategy=FakeStrategy(
+                decision=make_decision(approved=False, signal=None, reason="NO_EDGE")
+            ),
+            telemetry=sink,
+        )
+
+        loop.evaluate({}, FakeBar())
+
+        assert (sink.ticks, sink.signals) == (1, [])

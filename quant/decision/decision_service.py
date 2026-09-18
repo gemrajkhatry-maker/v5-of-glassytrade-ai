@@ -22,7 +22,7 @@ from quant.decision.model_router import allows, select_model
 from quant.decision.pipeline import GatePipeline
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import Signal, SignalBuilder, is_min_stop_met
-from quant.decision.va_fade import detect_va_fade, detect_gap_fill_fade
+from quant.decision.va_fade import detect_va_fade
 from quant.decision.data_quality import conviction_allowed
 
 _log = logging.getLogger(__name__)
@@ -41,7 +41,6 @@ class QuantDecision:
     # Which Fabio playbook produced the approval — matches Signal.model_label.
     # "Triple-A" | "LVN_Sniper" | "VA_Fade" | "" (not approved)
     model_label: str = ""
-    metadata: dict = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
 
 
@@ -165,22 +164,5 @@ class DecisionService:
             return QuantDecision(
                 True, sig, "VA_FADE", "", tuple(results),
                 model_label="VA_Fade",
-            )
-        # Gap-fill fallback (spec §5.2 Layer 4): price fills an overnight gap
-        # and re-accepts inside the prior value area. Fades toward gap-POC.
-        gap_fill = detect_gap_fill_fade(ctx)
-        if gap_fill and (ctx.agent_direction in (gap_fill.direction, None)) and gap_fill.rr >= self.min_rr:
-            if is_option_contract(ctx.symbol) and gap_fill.direction == "SHORT":
-                return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
-            if not is_min_stop_met(gap_fill.entry, gap_fill.sl):
-                return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
-            sig = Signal(
-                type=gap_fill.direction, reason=gap_fill.reason, entry=gap_fill.entry,
-                sl=gap_fill.sl, tp=gap_fill.tp, rr=gap_fill.rr,
-                model_label="Gap_Fill", symbol=ctx.symbol, timestamp=ctx.time_str,
-            )
-            return QuantDecision(
-                True, sig, "GAP_FILL", "", tuple(results),
-                model_label="Gap_Fill",
             )
         return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)

@@ -51,7 +51,38 @@ The existing runtime distinguishes live and paper/replay through the injected OM
 - Added a real `LiveOMS` broker-boundary test proving proxy entries do not reach the broker, plus exact live pass, paper proxy metadata/pass, and pre-translation coverage.
 - Replaced class-name live detection with the explicit `IOMS.is_live` capability.
 
+## Review Follow-up
+
+### Red
+
+```text
+PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/decision/test_proxy_live_entry_block.py -q
+11 passed, 3 failed
+```
+
+The three new assertions failed as intended: `live_mode=False` downgraded a `LiveOMS`, a missing `is_live` capability defaulted to paper, and the event assertion did not yet filter the later `PositionOpened` event.
+
+### Green
+
+```text
+PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/decision/test_proxy_live_entry_block.py -q
+14 passed
+
+PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/decision/test_proxy_live_entry_block.py tests/quant/test_decision_loop.py tests/quant/test_submission_handler.py tests/quant/test_certification.py -q -k 'not s5_conviction_formula_is_explicit'
+73 passed, 1 skipped, 1 deselected
+```
+
+The focused assertions now verify `DecisionProduced` and certification records for `PROXY_FLOW_BLOCKED`, and observable `PROXY_MODE` metadata for paper decisions.
+
+### Isolation Decisions
+
+- Removed the `GAP_FILL` approval path only from the Task 2-introduced `6fcf085c` change in `quant/decision/decision_service.py`; preserved the unrelated dirty `quant/decision/va_fade.py` changes.
+- Removed the duplicate `QuantDecision.metadata` declaration introduced by `6fcf085c`.
+- Made the OMS capability authoritative: `LiveOMS` cannot be downgraded by `live_mode=False`; missing or non-boolean capability is fail-closed; contradictory configuration is live-safe. Explicit `is_live=False` remains paper behavior.
+- Updated only the existing paper decision-loop test double to declare `is_live=False`; no unrelated production or DTO consumer changes were made.
+
 ## Concerns
 
-- The broader certification suite retains the known unrelated failure described above.
-- `PROXY_MODE` is carried in `QuantDecision.metadata` and certification records; no broader DTO/UI schema change was made in Task 2.
+- The full certification command retains the known unrelated `s5_conviction_formula_is_explicit` DTO consumer defect; it was explicitly excluded from the focused green run and was not changed.
+- Numerical AMT thresholds remain unchanged.
+- Broker partial/unknown/restart reconciliation and durable event work remain outside Task 2 and are not live-readiness evidence.

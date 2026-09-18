@@ -9,6 +9,7 @@ from quant.decision.data_quality import DataQuality
 from quant.decision.decision_service import QuantDecision
 from quant.decision.signal_builder import Signal
 from quant.engine.decision_loop import DecisionLoop
+from quant.events import DecisionProduced
 
 
 class _Risk:
@@ -79,20 +80,23 @@ def _decision():
     return QuantDecision(True, signal, "Triple-A", "", (), model_label="Triple-A")
 
 
-def _loop(oms, context, *, underlying_gateway=None):
+def _loop(oms, context, *, underlying_gateway=None, live_mode=None, records=None, events=None):
     strategy = type("Strategy", (), {"should_enter": lambda self, ctx: _decision()})()
+    config = {"symbol": "SYM", "market": "NSE", "cooldown_bars": 0}
+    if live_mode is not None:
+        config["live_mode"] = live_mode
     loop = DecisionLoop(
-        config={"symbol": "SYM", "market": "NSE", "cooldown_bars": 0},
+        config=config,
         deps={"risk": _Risk(), "oms": oms, "strategy": strategy, "amt_engine": _AMT(),
               "get_position_manager": lambda: _PositionManager(), "execution_enabled": True,
               "underlying_gateway": underlying_gateway},
         state={"get_bar_index": lambda: 10, "get_entry_bar_index": lambda: 0,
                "set_entry_bar_index": lambda value: None, "get_last_close_bar_index": lambda: -1,
                "get_latch": lambda: {}, "set_latch": lambda key, value: None,
-               "clear_latch": lambda: None, "get_cert_records": lambda: [],
+               "clear_latch": lambda: None, "get_cert_records": lambda: records if records is not None else [],
                "get_last_depth": lambda: None, "get_recent_decisions": lambda: [],
                "get_exposure_state": lambda: None},
-        emit=lambda event: None,
+         emit=(events.append if events is not None else lambda event: None),
     )
     loop._build_context = lambda bar, amt_dto, cooldown: context
     return loop
@@ -143,6 +147,65 @@ def test_live_tick_exact_entry_passes_to_live_oms():
     decision = _loop(oms, _context(DataQuality.TICK_EXACT)).evaluate({}, _bar())
 
     assert decision.approved is True
+
+
+def test_live_capability_cannot_be_downgraded_by_false_config_override():
+    broker = _Broker()
+    oms = LiveOMS(broker=broker, portfolio=object())
+    decision = _loop(
+        oms, _context(DataQuality.CANDLE_DISTRIBUTED), live_mode=False,
+    ).evaluate({}, _bar())
+
+    assert decision.reason == "PROXY_FLOW_BLOCKED"
+    assert broker.submissions == []
+
+
+def test_missing_live_capability_blocks_proxy_by_default():
+    class _UnknownOMS:
+        lot_size = 1
+
+        def __init__(self):
+            self.submissions = []
+
+        def submit(self, signal, quantity):
+            self.submissions.append((signal, quantity))
+
+    oms = _UnknownOMS()
+    decision = _loop(oms, _context(DataQuality.CANDLE_DISTRIBUTED)).evaluate({}, _bar())
+
+    assert decision.reason == "PROXY_FLOW_BLOCKED"
+    assert oms.submissions == []
+
+
+def test_blocked_proxy_is_recorded_in_event_and_certification():
+    records = []
+    events = []
+    oms = LiveOMS(broker=_Broker(), portfolio=object())
+    decision = _loop(
+        oms, _context(DataQuality.CANDLE_DISTRIBUTED), records=records, events=events,
+    ).evaluate({}, _bar())
+
+    assert decision.reason == "PROXY_FLOW_BLOCKED"
+    assert [event.decision.reason for event in events if isinstance(event, DecisionProduced)] == [
+        "PROXY_FLOW_BLOCKED"
+    ]
+    assert records[-1]["reason"] == "PROXY_FLOW_BLOCKED"
+    assert records[-1]["metadata"]["data_quality"] == DataQuality.CANDLE_DISTRIBUTED.value
+
+
+def test_paper_proxy_metadata_is_observable_in_event_and_certification():
+    records = []
+    events = []
+    decision = _loop(
+        _RecordingPaperOMS(), _context(DataQuality.CANDLE_DISTRIBUTED),
+        records=records, events=events,
+    ).evaluate({}, _bar())
+
+    assert decision.metadata["mode"] == "PROXY_MODE"
+    assert [event.decision.metadata["mode"] for event in events if isinstance(event, DecisionProduced)] == [
+        "PROXY_MODE"
+    ]
+    assert records[-1]["metadata"]["mode"] == "PROXY_MODE"
 
 
 def test_paper_proxy_entry_remains_allowed_and_marked_proxy_mode():

@@ -129,11 +129,7 @@ class DecisionLoop:
         self._contract = deps.get("contract")
         self._underlying_gateway = deps.get("underlying_gateway")
         self._execution_enabled: bool = deps.get("execution_enabled", True)
-        live_mode = config.get(
-            "live_mode",
-            deps.get("live_mode", lambda: bool(getattr(self._oms, "is_live", False))),
-        )
-        self._live_mode = live_mode if callable(live_mode) else bool(live_mode)
+        self._configured_live_mode = config.get("live_mode", deps.get("live_mode"))
         self._get_underlying_symbol = deps.get("get_underlying_symbol")
 
         # --- Mutable state accessors/mutators ---
@@ -422,8 +418,18 @@ class DecisionLoop:
         ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
         decision = self._strategy.should_enter(ctx)
         quality = normalize_data_quality(ctx.data_quality)
-        is_live = self._live_mode() if callable(self._live_mode) else self._live_mode
-        if is_live and quality is not DataQuality.TICK_EXACT:
+        capability = getattr(self._oms, "is_live", None)
+        configured_live = self._configured_live_mode
+        configured_live = configured_live() if callable(configured_live) else configured_live
+        # The OMS capability is authoritative. A missing capability is not
+        # paper mode, and a config override cannot make a live OMS paper.
+        safety_live = (
+            capability is True
+            or capability is None
+            or not isinstance(capability, bool)
+            or configured_live is True
+        )
+        if safety_live and quality is not DataQuality.TICK_EXACT:
             decision = _dc_replace(
                 decision,
                 approved=False,
