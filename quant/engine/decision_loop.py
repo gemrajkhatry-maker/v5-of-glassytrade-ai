@@ -28,16 +28,8 @@ from quant.events import (
     Event,
     SignalBlocked,
 )
-from quant.contracts.ports.telemetry import NULL_TELEMETRY, ITelemetry
 from quant.execution.execution_model import ExecutionModel
 from quant.decision.data_quality import DataQuality, normalize_data_quality
-
-# Dashboard metrics — incremented on decision pipeline outcomes
-try:
-    from app.core.metrics import decisions_evaluated, decisions_approved, decisions_blocked
-    _dash_metrics_available = True
-except ImportError:
-    _dash_metrics_available = False  # not running under backend (tests/replay)
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +79,6 @@ class DecisionLoop:
         Returns a fresh TimesFM forecast or None.
     advisor : object, optional
         Advisor with an ``on_context`` method for decision notifications.
-    telemetry : ITelemetry, optional
-        Host-installed activity sink. Defaults to ``NULL_TELEMETRY``.
     """
 
     def __init__(
@@ -106,9 +96,6 @@ class DecisionLoop:
         forecast_fn: Callable[[], Any] | None = None,
         # Optional: advisor for context notifications
         advisor: Any | None = None,
-        # Optional: activity sink. Defaults to a no-op, so the brain counts
-        # into the void unless the host installed one at composition time.
-        telemetry: ITelemetry | None = None,
     ) -> None:
         # --- Static configuration ---
         self._symbol: str = config["symbol"]
@@ -156,7 +143,6 @@ class DecisionLoop:
         # --- Optional ---
         self._forecast_fn = forecast_fn
         self._advisor = advisor
-        self._telemetry: ITelemetry = telemetry or NULL_TELEMETRY
 
         # --- Internal tracking ---
         # Debounce: tracks the bar index of the last rejection so repeated
@@ -235,23 +221,13 @@ class DecisionLoop:
         Returns the ``QuantDecision`` or ``None`` when an entry guard blocked
         before the strategy was consulted.
         """
-        # Dashboard metric: decision evaluated
-        if _dash_metrics_available:
-            decisions_evaluated.inc()
-
         blocked, cooldown_remaining_sec = self._entry_guards(bar)
         if blocked:
-            # Dashboard metric: blocked by entry guard
-            if _dash_metrics_available:
-                decisions_blocked.inc()
             return None
 
         decision, ctx, amt_dto, risk_st = self._build_decision(
             amt_dto, bar, execution_bar, cooldown_remaining_sec,
         )
-
-        # Tick-level telemetry: every evaluated bar counts.
-        self._telemetry.record_tick()
 
         # S1: record the decision itself — gates with pass/fail and reasons.
         self._record_cert_decision(decision, bar)
@@ -264,17 +240,10 @@ class DecisionLoop:
         self._notify_advisor_decision(ctx, amt_dto, execution_bar, cooldown_remaining_sec, risk_st)
 
         if decision.approved and decision.signal is not None:
-            self._telemetry.record_signal(decision.signal.type or "UNKNOWN")
-            # Dashboard metric: decision approved
-            if _dash_metrics_available:
-                decisions_approved.inc()
             self._translate_and_submit(decision, bar, amt_dto, risk_st)
         else:
             # Market state changed — all open blocking episodes are stale.
             self._clear_latch()
-            # Dashboard metric: blocked by strategy/gates
-            if _dash_metrics_available:
-                decisions_blocked.inc()
             if decision.reason == "OPPOSING_TYPE":
                 logger.debug(
                     "[DECISION EVAL] %s: approved=False reason=OPPOSING_TYPE phase=%s",
@@ -405,7 +374,7 @@ class DecisionLoop:
                 "val": amt_dto.get("valueAreaLow"),
                 "lvns": amt_dto.get("lvns") or [],
                 "hvns": amt_dto.get("hvns") or [],
-                "leg_lvns": amt_dto.get("legLvns") or [],
+                "leg_lvn": amt_dto.get("legLvn"),
             },
             context={
                 "market_state": amt_dto.get("marketState"),

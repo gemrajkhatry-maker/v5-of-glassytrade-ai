@@ -86,3 +86,12 @@ The focused assertions now verify `DecisionProduced` and certification records f
 - The full certification command retains the known unrelated `s5_conviction_formula_is_explicit` DTO consumer defect; it was explicitly excluded from the focused green run and was not changed.
 - Numerical AMT thresholds remain unchanged.
 - Broker partial/unknown/restart reconciliation and durable event work remain outside Task 2 and are not live-readiness evidence.
+
+## Isolation Follow-up
+
+- Restored `quant/engine/decision_loop.py` to the Task 1 boundary for unrelated dashboard metrics, activity telemetry, and `leg_lvn` to `leg_lvns` certification changes; retained only the proxy gate and its OMS capability check.
+- Restored `quant/runtime.py` for unrelated telemetry wiring, `use_range_bars`, seed-event timestamp edits, and `last_amt_dto`; retained only the live-mode capability wiring required by the gate.
+- Restored `tests/quant/test_decision_loop.py` by removing the unrelated telemetry test helper, fixture parameter, and test class; retained the existing paper OMS capability declaration needed by the gate boundary.
+- Removed the Task 2 dependency on untracked `quant/contracts/ports/telemetry.py`; no telemetry module is required by the proxy gate or its tests.
+- The resulting commit will contain only the proxy gate, `IOMS.is_live`/OMS capability implementations, proxy-gate tests, and this report. Unrelated dirty worktree files remain untouched.
+- Clean-tree verification: after commit, a detached temporary worktree will run `python -c 'import quant.engine.decision_loop'`, the proxy test suite, and `git diff --check` against the touched files.

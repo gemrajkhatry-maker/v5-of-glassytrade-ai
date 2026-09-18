@@ -55,7 +55,6 @@ engines). All access is guarded by ``PortfolioRiskAuthority._lock``.
 
 from __future__ import annotations
 from quant.contracts.enums import MarketState
-from quant.contracts.ports.telemetry import ITelemetry
 
 import logging
 import os
@@ -336,8 +335,6 @@ class QuantEngine:
         execution_enabled: bool = True,
         seed_scheduler=None,
         max_lots: int | None = None,
-        telemetry: ITelemetry | None = None,
-        use_range_bars: bool = False,
     ) -> None:
         self._gateway = gateway
         # Independent mode is the production default. Legacy dual-feed
@@ -383,15 +380,7 @@ class QuantEngine:
         # (option buying stops at 22:00) and forces a square-off from 21:30 so
         # an ITM option never devolves into a futures position at expiry.
         self._contract_expiry = parse_contract_expiry(symbol)
-        if use_range_bars:
-            # Spec §4: ATR-dynamic range bars. Range size tracks ATR(14)
-            # from completed bars, eliminating time distortion in chop.
-            from quant.amt.profile.range_bars import DynamicRangeBarAggregator
-            self._aggregator = DynamicRangeBarAggregator(
-                interval_seconds=interval_seconds, tick_size=tick_size,
-            )
-        else:
-            self._aggregator = BarAggregator(interval_seconds=interval_seconds)
+        self._aggregator = BarAggregator(interval_seconds=interval_seconds)
         # ponytail: 60s micro aggregator drives 1-min entry triggers while 5-min aggregator retains macro AMT context
         MICRO_SEC = 60
         self._micro_aggregator = (
@@ -618,10 +607,6 @@ class QuantEngine:
         # quant.wiring_advisor.build_live_advisor — so backtest/replay
         # constructions stay thread-free and reproducible.
         self._advisor = advisor
-        # Activity sink for the decision pipeline. Owned by the host and
-        # threaded through unchanged; None means count nowhere. quant never
-        # imports the adapter — see quant/contracts/ports/telemetry.py.
-        self._telemetry = telemetry
         # DecisionLoop: encapsulates the entry decision pipeline (entry guards,
         # context build, strategy evaluation, signal translation, submission).
         # Created after all dependencies are initialized so it can bind to them.
@@ -893,7 +878,6 @@ class QuantEngine:
             emit=self._emit,
             forecast_fn=self._fresh_forecast,
             advisor=getattr(self, "_advisor", None),
-            telemetry=self._telemetry,
         )
 
     def _create_exit_manager(self) -> ExitManager:
@@ -964,18 +948,16 @@ class QuantEngine:
                 self.symbol,
             )
         self._amt_engine.seed()
-        # A seeded DTO carries no "time" of its own; _emit stamps an empty time
-        # with the last bar's (or the wall clock) — see its docstring.
         if self._option_amt_engine is not None:
             self._option_amt_engine.seed()
             if self._option_amt_engine.last_amt_dto:
                 self._option_amt_dto = self._option_amt_engine.last_amt_dto
                 if self._amt_engine.last_amt_dto:
                     self._underlying_amt_dto = self._amt_engine.last_amt_dto
-                self._emit_merged_amt(self._option_amt_dto, "")
+                self._emit_merged_amt(self._option_amt_dto, self._option_amt_dto.get("time", ""))
         elif self._amt_engine.last_amt_dto:
             self._underlying_amt_dto = self._amt_engine.last_amt_dto
-            self._emit(AmtUpdated(symbol=self.symbol, time="", amt=self._amt_engine.last_amt_dto))
+            self._emit(AmtUpdated(symbol=self.symbol, time=self._amt_engine.last_amt_dto.get("time", ""), amt=self._amt_engine.last_amt_dto))
 
         initial_amt = self._option_amt_dto or self._amt_engine.last_amt_dto
         if initial_amt and hasattr(self, "_advisor") and self._advisor is not None:
@@ -1035,23 +1017,6 @@ class QuantEngine:
     @property
     def latest_depth(self) -> dict | None:
         return self._latest_depth
-
-    @property
-    def last_amt_dto(self) -> dict | None:
-        """The AMT DTO for THIS engine's symbol (its own tape).
-
-        Owned by the AMT engine(s): the option engine analyzes ``self.symbol``
-        when a dual-feed setup exists, otherwise the primary engine is the one
-        analyzing it. Consumers outside the engine (e.g. coordinator rotation)
-        must read this instead of reaching for the private ``_amt_engine`` —
-        that reach silently returned None for every real engine.
-        """
-        option_engine = getattr(self, "_option_amt_engine", None)
-        if option_engine is not None:
-            amt = getattr(option_engine, "last_amt_dto", None)
-            if amt:
-                return amt
-        return getattr(getattr(self, "_amt_engine", None), "last_amt_dto", None)
 
     def _release_partial_reserves(self, pm: PositionManager, remaining) -> None:
         """Fractional portfolio-risk reserve release after a tiered partial exit.
