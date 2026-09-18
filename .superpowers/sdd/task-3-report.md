@@ -62,3 +62,14 @@
 - Partial fills without an exposure setter now raise `ReconciliationRequiredError` rather than allowing an untracked obligation to continue. The late-fill collar/fallback test asserts one economic close identity.
 - History review isolated cc8baa9c's unrelated CHOP_MARKET, stacked-imbalance, AMT/chop tests, telemetry, range-bar/feed metrics, and risk-reset additions from this corrective change; pre-existing dirty worktree changes were preserved.
 - Known limitation: the repository still has unrelated dirty-baseline DTO and broader suite failures. No live-readiness claim is made.
+
+## Scope and Identity Correction
+
+- `cc8baa9c`'s pre-existing CHOP behavior and stacked-imbalance exit behavior were incorrectly removed by `29977378`; both were restored without new behavior.
+- Restored files: `quant/execution/exits.py` and `tests/quant/test_position_management_amt_rules.py`; the coordinator-level CHOP position-management branch in `quant/multi_engine.py` was also restored.
+- Startup reconciliation no longer backfills broker snapshot `symbol` or `order_id` from the persisted row. `ExposureState.reconcile()` can resolve `OPEN` or `FLAT` only when the broker independently supplies both matching identities.
+- Added seam regression: a status-only broker response leaves `RECONCILIATION_REQUIRED`, keeps the startup issue, and blocks entry.
+- TDD red: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/execution/test_restart_reconciliation.py::test_status_only_broker_snapshot_keeps_startup_unresolved_and_blocks_entry -q` -> `1 failed, 0 passed` because the persisted identities were backfilled.
+- TDD green: the same test after the minimal fix -> `1 passed`.
+- Focused reconciliation plus restored CHOP regressions: `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/execution/test_exposure_state.py tests/quant/execution/test_live_partial_fill_reconciliation.py tests/quant/execution/test_restart_reconciliation.py tests/quant/execution/test_close_identity.py tests/quant/test_position_management_amt_rules.py -q` -> `21 passed`.
+- No live-readiness claim is made. Known unrelated DTO and broader dirty-baseline failures remain.

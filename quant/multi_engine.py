@@ -902,6 +902,21 @@ class QuantCoordinator:
             (sl_px >= entry_px) if pos_side == "LONG"
             else (sl_px > 0 and sl_px <= entry_px)
         )
+        market_state = str((vs.amt or {}).get("marketState") or "").upper()
+        if market_state == "CHOP":
+            decision = QuantCoordinator._synthesize_position_mgmt(
+                open_p, agent_dec, symbol, vs,
+                entry_px, curr_px, sl_px, tp_px, pos_side, pnl, is_risk_free,
+            )
+            decision["action"] = "EXIT" if pnl <= 0 else "TIGHTEN_SL"
+            decision["reason"] = "CHOP_EXIT" if pnl <= 0 else "CHOP_TIGHTEN"
+            decision["confidence"] = "High"
+            decision["confidenceScore"] = 0.85
+            decision["rationale"] = (
+                f"AMT CHOP detected on {symbol}: do not hold through a non-directional auction. "
+                f"Protect/exit the {pos_side} position at {curr_px:,.2f}."
+            )
+            return decision
         if (
             agent_dec and isinstance(agent_dec, dict)
             and agent_dec.get("role") == "POSITION_MANAGEMENT"
@@ -2056,8 +2071,6 @@ class QuantCoordinator:
                 normalized = None
         else:
             normalized = dict(snapshot)
-            normalized.setdefault("symbol", row.get("symbol"))
-            normalized.setdefault("order_id", order_id)
         engine.reconcile_unresolved_order(normalized)
         if not row.get("risk_reserved") and not row.get("reserved_risk"):
             self._unresolved_startup.add(f"risk-reservation-unavailable:{order_id}")

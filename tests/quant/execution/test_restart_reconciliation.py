@@ -118,3 +118,34 @@ def test_coordinator_reconciliation_failure_remains_a_decision_block():
     )
 
     assert any(issue.startswith("broker-reconciliation-failed:") for issue in coordinator._unresolved_startup)
+
+
+def test_status_only_broker_snapshot_keeps_startup_unresolved_and_blocks_entry():
+    from quant.multi_engine import QuantCoordinator
+
+    coordinator = object.__new__(QuantCoordinator)
+    coordinator._unresolved_startup = {"o1"}
+    coordinator.broker = type(
+        "StatusOnlyBroker", (),
+        {"reconcile_order": lambda self, order_id: {"status": "OPEN"}},
+    )()
+    engine = type(
+        "Engine", (),
+        {
+            "symbol": "MCX",
+            "exposure_state": ExposureState.none().unknown_entry(
+                symbol="MCX", order_id="o1", requested_qty=1
+            ),
+            "reconcile_unresolved_order": lambda self, snapshot: setattr(
+                self, "exposure_state", self.exposure_state.reconcile(snapshot)
+            ),
+        },
+    )()
+
+    coordinator._reconcile_restored_order(
+        engine, {"symbol": "MCX", "order_id": "o1", "risk_reserved": 1}
+    )
+
+    assert engine.exposure_state.status is ExposureStatus.RECONCILIATION_REQUIRED
+    assert engine.exposure_state.can_open_new_position is False
+    assert "o1" in coordinator._unresolved_startup
