@@ -97,3 +97,26 @@ changed for the unrelated stacked-imbalance failure.
 - The architecture DTO test still fails on the known stacked-imbalance keys in
   `quant/execution/exit_checks.py`; that unrelated consumer was intentionally
   left untouched.
+
+## Review Follow-up
+
+### Changes
+
+- Removed the unrelated history-seed `cvd_source` arguments and `latest_is_forming=True` argument introduced by `dc143eb0` from `quant/amt_engine.py`.
+- Preserved the closed live-bar `candidate_direction` handoff from `AMTEngine.analyze()` to `AMTAnalyzer.analyze()`.
+- Replaced the misleading combined test with an explicit engine handoff test and a real `compute_order_flow_metrics()` plus `PersistentAggressionScorer` assertion for opposing CVD.
+
+### Commands and Results
+
+- `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/amt/test_amt_engine_direction.py -q`
+  - Inadequate pre-review test: `1 passed`; it patched the analyzer and computed opposing flow outside the engine.
+  - Corrected focused tests: `2 passed`.
+- `PYTHONPATH=backend:. .venv/bin/python -m pytest tests/quant/amt/test_amt_engine_direction.py tests/quant/amt/orderflow/test_directional_compute.py tests/quant/amt/orderflow/test_analyzer_flow_propagation.py -q`
+  - `6 passed`.
+- `git diff --check -- quant/amt_engine.py tests/quant/amt/test_amt_engine_direction.py`
+  - Passed with no whitespace errors.
+
+### Remaining Concerns
+
+- The unrelated architecture DTO consumer failure for four missing stacked-imbalance keys in `quant/execution/exit_checks.py` remains and was not touched.
+- Other pre-existing dirty-worktree changes remain preserved.
