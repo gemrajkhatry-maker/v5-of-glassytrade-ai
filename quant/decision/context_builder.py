@@ -272,15 +272,15 @@ class DecisionContextBuilder:
                 setup_type="SECOND_DRIVE",
                 direction=setup_dir or ("SHORT" if rejection_at_high else "LONG"),
                 drive_number=drive_number or 2, d1_rejected=True,
-                rejection=rejection_at_high or rejection_at_low or self._db(amt_dto, "rejection"),
+                rejection=rejection_at_high or rejection_at_low,
                 cvd_agrees=cvd_agrees,
             )
         if rejection_at_high or rejection_at_low:
             direction = "SHORT" if rejection_at_high else "LONG"
             return SetupEvidence(
                 setup_type="VA_FADE", direction=direction,
-                rejection=rejection_at_high or rejection_at_low or self._db(amt_dto, "rejection"),
-                acceptance=self._db(amt_dto, "acceptanceAbove") or self._db(amt_dto, "acceptanceBelow") or self._db(amt_dto, "acceptance"),
+                rejection=rejection_at_high or rejection_at_low,
+                acceptance=self._db(amt_dto, "acceptanceAbove") or self._db(amt_dto, "acceptanceBelow"),
                 cvd_agrees=cvd_agrees,
             )
         if nearest_leg_lvn > 0 and absorption_direction(amt_dto.get("absorptionSide")):
@@ -416,9 +416,13 @@ class DecisionContextBuilder:
         return best_bid, best_ask
 
     @staticmethod
-    def _parse_effective_time(bar, amt_dto: dict) -> tuple[str, bool, bool]:
-        """Determine the effective time string and its format flags."""
-        effective_time = str((bar.time if bar else None) or amt_dto.get("time") or "").strip()
+    def _parse_effective_time(bar) -> tuple[str, bool, bool]:
+        """Determine the effective time string and its format flags.
+
+        The bar owns the time: the AMT DTO has no ``time`` key (the event that
+        carries it passes the bar's), so there is nothing to fall back to.
+        """
+        effective_time = str((bar.time if bar else None) or "").strip()
         is_epoch = (
             effective_time.replace(".", "", 1).lstrip("-").isdigit()
             and len(effective_time) >= 9
@@ -483,13 +487,10 @@ class DecisionContextBuilder:
 
     @staticmethod
     def _resolve_data_quality(amt_dto: dict):
-        """Normalize data quality from AMT DTO, or None if absent."""
-        has_dq = "dataQuality" in amt_dto or "data_quality" in amt_dto
-        if not has_dq:
+        """Normalize data quality from AMT DTO, or None when the key is absent."""
+        if "dataQuality" not in amt_dto:
             return None
-        return normalize_data_quality(
-            amt_dto.get("dataQuality") or amt_dto.get("data_quality")
-        )
+        return normalize_data_quality(amt_dto.get("dataQuality"))
 
     @staticmethod
     def _resolve_session_open(effective_time: str, market: str,
@@ -558,6 +559,8 @@ class DecisionContextBuilder:
             cooldown_remaining_sec=cooldown_remaining_sec,
             risk_halted=risk_state.halted,
             consecutive_losses=risk_state.consecutive_losses,
+            consecutive_wins=getattr(risk_state, "consecutive_wins", 0),
+            setup_grade="A+" if getattr(risk_state, "consecutive_wins", 0) >= 2 else ("A" if getattr(risk_state, "consecutive_wins", 0) == 1 else ""),
             agent_direction=agent_direction,
             agent_probability=_DETERMINISTIC_CONVICTION,
             data_quality=self._resolve_data_quality(amt_dto),
@@ -584,8 +587,9 @@ class DecisionContextBuilder:
             equity=risk_state.equity,
             risk_per_trade_pct=risk_state.risk_per_trade_pct,
             leg_lvn=nearest_leg_lvn,
-            bid=float(amt_dto.get("bid") or best_bid),
-            ask=float(amt_dto.get("ask") or best_ask),
+            # The DTO carries no quote: bid/ask are the order book's best levels.
+            bid=best_bid,
+            ask=best_ask,
             time_str=effective_time,
             session_phase=session_phase,
             allow_trend=allow_trend,
@@ -613,6 +617,13 @@ class DecisionContextBuilder:
             squeeze_direction=squeeze_dir,
             squeeze_trapped_level=trapped_lvl,
             pullback_confirmed=pullback,
+            compression_box_poc=df(amt_dto, "compressionBoxPoc"),
+            compression_box_vah=df(amt_dto, "compressionBoxVah"),
+            compression_box_val=df(amt_dto, "compressionBoxVal"),
+            compression_box_bars=di(amt_dto, "compressionBoxBars"),
+            gap_profile_poc=df(amt_dto, "gapProfilePoc"),
+            gap_profile_vah=df(amt_dto, "gapProfileVah"),
+            gap_profile_val=df(amt_dto, "gapProfileVal"),
             vars_result=amt_dto.get("vars"),
             recent_decisions=tuple(recent_decisions or ()),
         )
@@ -665,7 +676,7 @@ class DecisionContextBuilder:
         best_bid, best_ask = self._extract_best_bid_ask(order_book)
 
         # Session & Expiry
-        effective_time, is_epoch, is_iso = self._parse_effective_time(bar, amt_dto)
+        effective_time, is_epoch, is_iso = self._parse_effective_time(bar)
         session_info = self._fetch_session_info(effective_time, is_epoch, is_iso, market)
         session_phase = session_info.session if session_info else "PRIMARY"
         is_expiry = self._resolve_expiry(effective_time, is_epoch, is_iso, contract_expiry)

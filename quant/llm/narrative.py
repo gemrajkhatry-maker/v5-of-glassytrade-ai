@@ -378,18 +378,45 @@ def _second_drive_pred(c: DecisionContext) -> bool:
     return bool(drive_valid and drive_number < 3)
 
 
+def _second_drive_grade_boost(ctx: DecisionContext) -> float:
+    """Second-drive grade boost: consecutive wins + narrative grade bonus."""
+    boost = 0.0
+    wins = getattr(ctx, "consecutive_wins", 0)
+    if wins >= 2:
+        boost += 0.05
+    grade = getattr(ctx, "setup_grade", "")
+    if grade in ("A", "A+"):
+        boost += 0.03
+    return min(boost, 0.10)
+
+
+def _second_drive_label(c: DecisionContext) -> str:
+    drive_number = getattr(c, "drive_number", 0)
+    return f"SECOND_DRIVE_D{drive_number}"
+
+
 def _second_drive_build(c: DecisionContext) -> Dict[str, Any]:
     px = _px(c)
     direction = "LONG" if px < c.poc else "SHORT"
     sym = c.symbol
+    label = _second_drive_label(c)
+    boost = _second_drive_grade_boost(c)
+    base_conf = "High"
+    if boost >= 0.08:
+        base_conf = "Very High"
+    elif boost >= 0.05:
+        base_conf = "High"
+    elif boost > 0:
+        base_conf = "Medium"
     return _action(
         f"ENTER_{direction}",
         direction,
-        "TRIPLE_A",
-        "High",
+        label,
+        base_conf,
         (
             f"Second Drive {direction} on {sym}: D1 level rejected, D2 re-approach confirms failed auction. "
             f"Price {px:.1f} vs POC {c.poc:.1f}. CVD {c.cvd_slope:+.1f}."
+            + (f" Grade boost +{boost:.0%} (consecutive wins/grade)." if boost > 0 else "")
         ),
         sym,
     )

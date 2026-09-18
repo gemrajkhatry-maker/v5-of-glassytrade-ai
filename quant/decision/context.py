@@ -34,6 +34,10 @@ class DecisionContext:
     cooldown_remaining_sec: int = 0
     risk_halted: bool = False
     consecutive_losses: int = 0
+    consecutive_wins: int = 0
+    # Narrative setup grade (Fabio Gap #6): A/A+ grade for second-drive
+    # entries boosts confidence; carried from context_builder / risk tier.
+    setup_grade: str = ""
     # intended direction from a higher-level agent (may be None -> gates decide)
     agent_direction: Optional[str] = None   # "LONG" | "SHORT" | "FLAT" | None
     agent_probability: float = 0.0
@@ -87,7 +91,7 @@ class DecisionContext:
     # Impulse Leg LVN (Layer 3 profile) — primary LVN from the most recent
     # directional impulse leg (swing low → high). Used by Gate 3 Path C
     # (Playbook C LVN Sniper) and the pyramid engine. Zero means unavailable.
-    # Populated from amt_dto["legLvn"] in runtime._decide().
+    # Resolved from amt_dto["legLvns"] by DecisionContextBuilder.
     leg_lvn: float = 0.0
     # Initiative / Breakout state from AMT analyzer (Fabio Model 1)
     break_direction: str = ""   # "UP" | "DOWN" | ""
@@ -131,6 +135,17 @@ class DecisionContext:
     squeeze_direction: str = ""
     squeeze_trapped_level: float = 0.0
     pullback_confirmed: bool = False
+    # Layer 2 Compression Box (spec §5.2): micro-POC/VAH/VAL from a tight
+    # 15-30m balance range. A close beyond micro_vah/micro_val confirms a
+    # true out-of-balance breakout (used by Playbook A/B gate paths).
+    compression_box_poc: float = 0.0
+    compression_box_vah: float = 0.0
+    compression_box_val: float = 0.0
+    compression_box_bars: int = 0
+    # Layer 4 Gap Profile (spec §5.2): gap-POC/VAH/VAL from overnight gap
+    gap_profile_poc: float = 0.0
+    gap_profile_vah: float = 0.0
+    gap_profile_val: float = 0.0
     # LuxAlgo Value Area Reversion Signals (VARS)
     vars_result: Any | None = None
     # Rolling history of recent decisions and rationales (last 3-5 bars)
