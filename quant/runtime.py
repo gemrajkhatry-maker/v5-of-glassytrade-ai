@@ -1367,6 +1367,20 @@ class QuantEngine:
             fill_price=fill.fill_price,
         )
 
+    def restore_unresolved_order(self, row: dict) -> None:
+        """Restore an inflight broker order before the decision loop runs."""
+        from quant.execution.exposure import ExposureState
+
+        if self.exposure_state.status.name != "NONE":
+            return
+        self.exposure_state = ExposureState.none().unknown_entry(
+            symbol=str(row.get("symbol") or self.symbol),
+            order_id=str(row.get("broker_order_id") or row.get("order_id") or "unknown-order"),
+            requested_qty=float(row.get("quantity") or 0.0),
+            filled_qty=float(row.get("filled_quantity") or 0.0),
+            fill_price=float(row.get("avg_fill_price") or 0.0),
+        )
+
     def periodic_reconcile(self) -> PeriodicReconciliationResult:
         """Periodic reconciliation between cached state and event store.
 

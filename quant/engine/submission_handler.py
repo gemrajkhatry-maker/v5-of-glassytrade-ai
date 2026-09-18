@@ -194,7 +194,22 @@ class SubmissionHandler:
 
         try:
             position = self._oms.submit(signal, quantity)
-        except Exception:
+        except Exception as exc:
+            from quant.execution.live_oms import ReconciliationRequiredError
+            if isinstance(exc, ReconciliationRequiredError):
+                from quant.execution.exposure import ExposureState
+                if self._set_exposure_state is not None:
+                    self._set_exposure_state(
+                        ExposureState.none().unknown_entry(
+                            symbol=self._symbol,
+                            order_id=exc.order_id,
+                            requested_qty=exc.requested_qty or quantity,
+                            filled_qty=exc.filled_qty,
+                            fill_price=exc.fill_price,
+                        )
+                    )
+                logger.error("[RECONCILIATION REQUIRED] %s: broker outcome unknown", self._symbol)
+                return False
             # C3: a broker/OMS submission failure must not kill the engine
             logger.exception(
                 "[ENTRY FAILED] %s: OMS submit raised — skipping entry and "

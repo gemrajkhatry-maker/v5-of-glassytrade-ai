@@ -34,7 +34,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["EmergencyFlattenError", "LiveOMS"]
+class ReconciliationRequiredError(RuntimeError):
+    """The broker outcome cannot safely be classified as rejected or flat."""
+
+    def __init__(self, message: str, *, order_id: str, requested_qty: float = 0.0,
+                 filled_qty: float = 0.0, fill_price: float = 0.0) -> None:
+        super().__init__(message)
+        self.order_id = order_id
+        self.requested_qty = requested_qty
+        self.filled_qty = filled_qty
+        self.fill_price = fill_price
+
+
+__all__ = ["EmergencyFlattenError", "ReconciliationRequiredError", "LiveOMS"]
 
 
 class EmergencyFlattenError(RuntimeError):
@@ -246,6 +258,7 @@ class LiveOMS:
             )
 
         try:
+            close_intent_id = f"close:{position.id}:{reason}"
             broker_pos = self._broker.close_position(
                 symbol=position.order.signal.symbol,
                 side=close_side,
@@ -253,17 +266,30 @@ class LiveOMS:
                 portfolio=self._portfolio,
                 reference_price=price,
                 contract_ref=self._contract,
+                close_intent_id=close_intent_id,
             )
         except TypeError as exc:
             if "contract_ref" not in str(exc):
                 raise
-            broker_pos = self._broker.close_position(
-                symbol=position.order.signal.symbol,
-                side=close_side,
-                quantity=qty,
-                portfolio=self._portfolio,
-                reference_price=price,
-            )
+            try:
+                broker_pos = self._broker.close_position(
+                    symbol=position.order.signal.symbol,
+                    side=close_side,
+                    quantity=qty,
+                    portfolio=self._portfolio,
+                    reference_price=price,
+                    close_intent_id=close_intent_id,
+                )
+            except TypeError as compatibility_exc:
+                if "close_intent_id" not in str(compatibility_exc):
+                    raise
+                broker_pos = self._broker.close_position(
+                    symbol=position.order.signal.symbol,
+                    side=close_side,
+                    quantity=qty,
+                    portfolio=self._portfolio,
+                    reference_price=price,
+                )
 
         if broker_pos is None:
             raise RuntimeError(
@@ -309,6 +335,7 @@ class LiveOMS:
             close_time=time,
             reason=reason,
             pnl=pnl,
+            logical_id=close_intent_id,
         )
 
     def close_partial(

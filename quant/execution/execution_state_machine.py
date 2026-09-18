@@ -15,7 +15,11 @@ _TRANSITIONS = {
         ExecutionStatus.REJECTED,
         ExecutionStatus.UNKNOWN,
     },
-    ExecutionStatus.PARTIALLY_FILLED: {ExecutionStatus.PARTIALLY_FILLED, ExecutionStatus.FILLED},
+    ExecutionStatus.PARTIALLY_FILLED: {
+        ExecutionStatus.PARTIALLY_FILLED,
+        ExecutionStatus.FILLED,
+        ExecutionStatus.RECONCILIATION_REQUIRED,
+    },
     ExecutionStatus.UNKNOWN: {ExecutionStatus.RECONCILIATION_REQUIRED},
     ExecutionStatus.RECONCILIATION_REQUIRED: {ExecutionStatus.RECONCILED},
 }

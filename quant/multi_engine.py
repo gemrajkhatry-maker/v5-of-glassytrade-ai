@@ -1941,6 +1941,14 @@ class QuantCoordinator:
         # Always attach storage (position persistence, restart book).
         if self._storage is not None:
             engine.attach_storage(self._storage)
+            try:
+                inflight = self._storage.load_inflight_orders() or []
+            except Exception:
+                logger.exception("load_inflight_orders failed for %s", symbol)
+                inflight = []
+            for row in inflight:
+                if row.get("symbol") == symbol:
+                    engine.restore_unresolved_order(row)
             # Only restore positions classified as OPEN by the reconciler.
             # Quarantined positions are preserved in storage but NOT loaded
             # into any engine (they are not in the active universe).

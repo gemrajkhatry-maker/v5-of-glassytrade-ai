@@ -25,6 +25,7 @@ from quant.contracts.entities import Position, Signal
 from quant.contracts.enums import Side, Source
 from quant.contracts.numeric import to_float
 from quant.contracts.ports.broker import IBroker
+from quant.execution.live_oms import ReconciliationRequiredError
 from shared.money import to_decimal as _strict_to_decimal
 
 logger = logging.getLogger(__name__)
@@ -257,8 +258,14 @@ class DhanBrokerAdapter(IBroker):
                         "Order %s: cancel request failed after timeout — outcome UNKNOWN",
                         placed_order_id,
                     )
-                    self._persist_order_terminal(signal, "UNKNOWN", broker_order_id=placed_order_id)
-                    return None
+                    self._persist_order_terminal(
+                        signal, "RECONCILIATION_REQUIRED", broker_order_id=placed_order_id
+                    )
+                    raise ReconciliationRequiredError(
+                        "broker order outcome is unknown",
+                        order_id=placed_order_id,
+                        requested_qty=qty,
+                    )
                 # A fill can race the cancel — the broker's post-cancel state
                 # decides; never trust the local intent. Hand an observed
                 # TERMINAL status to the normal path below: FILLED -> position
@@ -282,12 +289,18 @@ class DhanBrokerAdapter(IBroker):
                         to_float(post_cancel.quantity),
                     )
                     self._persist_order_terminal(
-                        signal, "FILLED",
+                        signal, "RECONCILIATION_REQUIRED",
                         broker_order_id=placed_order_id,
                         filled_quantity=to_float(post_cancel.filled_quantity),
                         avg_fill_price=to_float(post_cancel.average_fill_price),
                     )
-                    return None
+                    raise ReconciliationRequiredError(
+                        "broker order partially filled before cancellation",
+                        order_id=placed_order_id,
+                        requested_qty=qty,
+                        filled_qty=to_float(post_cancel.filled_quantity),
+                        fill_price=to_float(post_cancel.average_fill_price),
+                    )
                 else:
                     self._persist_order_terminal(signal, "CANCELLED", broker_order_id=placed_order_id)
                     return None
@@ -296,6 +309,21 @@ class DhanBrokerAdapter(IBroker):
                 terminal_status = str(
                     getattr(final_order.status, "value", final_order.status)
                 ).upper()
+                observed_filled = to_float(final_order.filled_quantity)
+                if 0 < observed_filled < float(final_order.quantity):
+                    self._persist_order_terminal(
+                        signal, "RECONCILIATION_REQUIRED",
+                        broker_order_id=placed_order_id,
+                        filled_quantity=observed_filled,
+                        avg_fill_price=to_float(final_order.average_fill_price),
+                    )
+                    raise ReconciliationRequiredError(
+                        "broker order has unresolved partial fill",
+                        order_id=placed_order_id,
+                        requested_qty=to_float(final_order.quantity),
+                        filled_qty=observed_filled,
+                        fill_price=to_float(final_order.average_fill_price),
+                    )
                 logger.warning(
                     "Order %s terminal status=%s, filled=%s/%s",
                     placed_order_id,
@@ -364,6 +392,8 @@ class DhanBrokerAdapter(IBroker):
                 initial_stop=_to_decimal(signal.stop_loss),
                 metadata=metadata,
             )
+        except ReconciliationRequiredError:
+            raise
         except DhanError as exc:
             logger.error("Dhan API error executing signal %s: %s", signal.signal_id, exc)
             self._persist_order_terminal(signal, "REJECTED")
@@ -381,6 +411,7 @@ class DhanBrokerAdapter(IBroker):
         portfolio: Portfolio,
         reference_price: float | None = None,
         contract_ref=None,
+        close_intent_id: str | None = None,
     ) -> Position | None:
         if getattr(self, "_config", None) is not None and contract_ref is None:
             logger.error("Rejecting close: validated ContractRef is required for live execution")
@@ -456,7 +487,7 @@ class DhanBrokerAdapter(IBroker):
             setattr(
                 order,
                 "user_order_id",
-                self._close_order_id(clean_symbol, side, quantity),
+                close_intent_id or self._close_order_id(clean_symbol, side, quantity),
             )
 
             placed_order = broker.place_order(order)
@@ -488,7 +519,8 @@ class DhanBrokerAdapter(IBroker):
                     # MARKET; a zero fill means re-placing full size cannot
                     # over-close.
                     final_order = self._market_fallback_close(
-                        symbol, side, quantity, instrument
+                        symbol, side, quantity, instrument,
+                        close_intent_id=close_intent_id,
                     )
                     if final_order is None:
                         return None
@@ -500,7 +532,8 @@ class DhanBrokerAdapter(IBroker):
                     # Same zero-fill guarantee for a terminal non-fill
                     # (CANCELLED/REJECTED collar order with nothing done).
                     final_order = self._market_fallback_close(
-                        symbol, side, quantity, instrument
+                        symbol, side, quantity, instrument,
+                        close_intent_id=close_intent_id,
                     )
                     if final_order is None:
                         return None
@@ -766,7 +799,8 @@ class DhanBrokerAdapter(IBroker):
             logger.debug("close_position: status read failed for %s", order_id, exc_info=True)
             return None
 
-    def _market_fallback_close(self, symbol: str, side: str, quantity: int, instrument):
+    def _market_fallback_close(self, symbol: str, side: str, quantity: int, instrument,
+                               *, close_intent_id: str | None = None):
         """C7 completion: guarantee a collared close that missed with ZERO fill.
 
         A collar can miss when its reference price went stale (the EOD backstop
@@ -798,9 +832,7 @@ class DhanBrokerAdapter(IBroker):
             setattr(
                 fb_order,
                 "user_order_id",
-                self._close_order_id(
-                    symbol, side, quantity, fallback=True
-                ),
+                close_intent_id or self._close_order_id(symbol, side, quantity),
             )
             placed = broker.place_order(fb_order)
             placed_id = str(getattr(placed, "order_id", ""))

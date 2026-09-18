@@ -72,7 +72,7 @@ def test_repeated_close_uses_same_logical_id():
     assert first_id == second_id
 
 
-def test_fallback_close_has_distinct_stable_id():
+def test_fallback_close_shares_the_economic_id():
     broker = MagicMock()
     broker.place_order.side_effect = [
         SimpleNamespace(order_id="COLLAR-1", quantity=4),
@@ -99,5 +99,4 @@ def test_fallback_close_has_distinct_stable_id():
     collar_id = getattr(collar_order, "user_order_id", "")
     fallback_id = getattr(fallback_order, "user_order_id", "")
     assert collar_id.startswith("close:")
-    assert fallback_id.startswith("close-fallback:")
-    assert collar_id != fallback_id
+    assert fallback_id == collar_id

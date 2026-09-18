@@ -27,6 +27,16 @@ def test_unknown_execution_requires_reconciliation_before_recovery():
     assert machine.status is ExecutionStatus.RECONCILED
 
 
+def test_partial_execution_can_enter_reconciliation_required():
+    machine = ExecutionStateMachine(EconomicOperationId("entry-partial"))
+
+    machine.submit()
+    machine.partial_fill()
+    machine.reconciliation_required()
+
+    assert machine.status is ExecutionStatus.RECONCILIATION_REQUIRED
+
+
 def test_invalid_transition_does_not_silently_change_state():
     machine = ExecutionStateMachine(EconomicOperationId("entry-2"))
 
