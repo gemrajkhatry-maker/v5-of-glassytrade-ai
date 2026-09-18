@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 from quant.amt import compute as mc
 
 from quant.contracts.enums import MarketState, SignalType, Source, SetupType
+from quant.contracts.instrument_registry import is_option_contract
 from quant.contracts.vocabulary import is_call_symbol, is_put_symbol
 from quant.contracts.value_objects import (
     OHLC,
@@ -116,6 +117,8 @@ from quant.amt.market.break_detector import (
 from quant.amt.market.lvn_play import detect_lvn_play
 from quant.amt.profile.volume_profile import create_profile
 from quant.amt.profile.volume_profile import compute_value_area
+from quant.amt.profile.compression_box import CompressionBoxDetector
+from quant.amt.profile.gap_profile import GapProfileDetector
 from quant.amt.market.displacement import (
     detect_displacement,
     detect_acceptance,
@@ -408,6 +411,8 @@ class AMTAnalyzer:
         prior_avg_volume: float = 0.0,  # Average volume from prior sessions
         footprint_accumulator: "TickFootprintAccumulator | None" = None,
         gex: object | None = None,
+        latest_is_forming: bool = False,  # newest candle in `data` is still open (history/REST series)
+        candidate_direction: str | None = None,
     ) -> AMTResult:
         """Run the full AMT analysis pipeline.
 
@@ -428,6 +433,10 @@ class AMTAnalyzer:
             option_tick: Option contract tick (for per-symbol delta isolation)
             cvd_source: "underlying" if data comes from futures, "option" if from option premium
             footprint_accumulator: Optional footprint accumulator for tick-level footprints
+            latest_is_forming: True when ``data[-1]`` is a still-open candle. The
+                dead-volume veto only judges completed candles, so callers that can
+                end mid-bucket (history seeds, client-supplied REST series) must set
+                this; the per-bar engine path never does (it analyzes on bar close).
         """
         empty = AMTResult(
             market_state=MarketState.BALANCED.value,
@@ -628,6 +637,7 @@ class AMTAnalyzer:
             bubble_detector=self._bubble_detector,
             persistent_agg_scorer=self._persistent_agg_scorer,
             session_bars=self._vwap.session_bars,
+            candidate_direction=candidate_direction,
         )
         avg_candle_vol = flow["avg_candle_vol"]
         obi = flow["obi"]
@@ -757,8 +767,16 @@ class AMTAnalyzer:
         # NPOC targets
         npoc_above, npoc_below = _compute_noc(npoc_tracker, underlying, current, tick_size)
 
-        # Dead-volume override
-        _effective_market_state = _compute_eff(market_state, recent_data, current, cvd_source=cvd_source)
+        # Dead-volume override. The series scale is a property of the instrument
+        # being analyzed (each AMTEngine analyzes its own symbol's candles), not of
+        # how CVD is being mixed — the two are passed separately on purpose.
+        _effective_market_state = _compute_eff(
+            market_state,
+            recent_data,
+            current,
+            volume_scale="option" if is_option_contract(symbol) else "underlying",
+            latest_is_forming=latest_is_forming,
+        )
 
         # Per-symbol delta
         delta_normalized_option = _compute_delta(option_tick, current)
@@ -800,6 +818,11 @@ class AMTAnalyzer:
             absorption_side=absorption_side,
             vwap=float(recent_vwap if recent_vwap > 0 else session_vwap),
             cvd_slope=float(cvd_state.slope),
+            absorption_active=flow["absorption_active"],
+            absorption_cluster_high=flow["absorption_cluster_high"],
+            absorption_cluster_low=flow["absorption_cluster_low"],
+            poc=poc,
+            tick_size=tick_size,
         )
 
         vars_result = self._vars_detector.update(
@@ -817,7 +840,22 @@ class AMTAnalyzer:
         self._half_trend_detector.warm_up(data)
         half_trend_result = self._half_trend_detector.update(current)
 
+        # Layer 2 Compression Box (spec §5.2): detect micro-balance range
+        # and extract micro-POC/VAH/VAL for breakout confirmation.
+        _compression_detector = CompressionBoxDetector(max_lookback=30, range_ticks=10)
+        _compression_box = _compression_detector.detect(data, tick_size=tick_size)
 
+        # Layer 4 Gap Profile (spec §5.2): detect overnight/session-opening
+        # gap and extract gap-POC/VAH/VAL for liquidity-void mapping.
+        _gap_detector = GapProfileDetector(min_gap_pct=0.005)
+        _gap_profile = _gap_detector.detect(
+            data,
+            prior_close=prior_close,
+            prior_vwap=session_vwap,
+            prior_vah=prior_vah,
+            prior_val=prior_val,
+            tick_size=tick_size,
+        )
 
         result = self._build_result(
             current=current, data=data, symbol=symbol,
@@ -855,6 +893,13 @@ class AMTAnalyzer:
             _triple=_triple, _effective_market_state=_effective_market_state,
             gex=gex, vars_result=vars_result,
             half_trend_result=half_trend_result,
+            compression_box_poc=_compression_box.micro_poc,
+            compression_box_vah=_compression_box.micro_vah,
+            compression_box_val=_compression_box.micro_val,
+            compression_box_bars=_compression_box.bar_count,
+            gap_profile_poc=_gap_profile.gap_poc,
+            gap_profile_vah=_gap_profile.gap_vah,
+            gap_profile_val=_gap_profile.gap_val,
         )
 
         # Squeeze detection (Fabio Playbook #4): runs on the assembled result
@@ -886,7 +931,11 @@ class AMTAnalyzer:
                       state_result, value_migration,
                       _footprints, _contested_zone, _triple,
                       _effective_market_state, gex=None, vars_result=None,
-                      half_trend_result=None) -> AMTResult:
+                      half_trend_result=None,
+                      compression_box_poc=0.0, compression_box_vah=0.0,
+                      compression_box_val=0.0, compression_box_bars=0,
+                      gap_profile_poc=0.0, gap_profile_vah=0.0,
+                      gap_profile_val=0.0) -> AMTResult:
         """Assemble AMTResult from computed pipeline outputs.
 
         Pure data mapping — extracted from analyze() for readability.
@@ -1008,6 +1057,13 @@ class AMTAnalyzer:
             gex=gex,
             vars_result=vars_result,
             half_trend_result=half_trend_result,
+            compression_box_poc=compression_box_poc,
+            compression_box_vah=compression_box_vah,
+            compression_box_val=compression_box_val,
+            compression_box_bars=compression_box_bars,
+            gap_profile_poc=gap_profile_poc,
+            gap_profile_vah=gap_profile_vah,
+            gap_profile_val=gap_profile_val,
         )
 
     # -------------------------------------------------------------------

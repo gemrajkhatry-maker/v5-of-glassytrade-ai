@@ -39,6 +39,7 @@ def compute_order_flow_metrics(
     persistent_agg_scorer=None,
     atr_period: int = 14,
     session_bars: list | None = None,
+    candidate_direction: str | None = None,
 ) -> dict:
     """Compute order flow detectors and aggression score.
 
@@ -85,10 +86,13 @@ def compute_order_flow_metrics(
     result["cvd_state"] = cvd_state
     result["cvd_confirmed"] = False
     if cvd_state is not None:
-        if market_state == MarketState.IMBALANCED and cvd_state.slope > 0:
-            result["cvd_confirmed"] = True
-        elif market_state == MarketState.IMBALANCED and cvd_state.slope < 0:
-            result["cvd_confirmed"] = True
+        if market_state == MarketState.IMBALANCED:
+            direction = str(candidate_direction or "").upper()
+            result["cvd_confirmed"] = (
+                cvd_state.slope > 0 if direction == "LONG" else
+                cvd_state.slope < 0 if direction == "SHORT" else
+                cvd_state.slope != 0
+            )
         elif cvd_state.has_divergence:
             result["cvd_confirmed"] = True
 
@@ -103,6 +107,9 @@ def compute_order_flow_metrics(
     result["absorption_side"] = absorption.side if absorption and absorption.detected else ""
     result["absorption_range_ratio"] = absorption.range_ratio if absorption else 0.0
     result["absorption_vol_ratio"] = absorption.vol_ratio if absorption else 0.0
+    result["absorption_active"] = absorption.active if absorption else False
+    result["absorption_cluster_high"] = absorption.cluster_high if absorption else 0.0
+    result["absorption_cluster_low"] = absorption.cluster_low if absorption else 0.0
 
     # FR-06-05: OFI
     ofi_result = ofi_calculator.update(current) if ofi_calculator else None
@@ -132,6 +139,11 @@ def compute_order_flow_metrics(
             ofi_aligned=result["ofi_aligned"],
             confluence_bonus=result["confluence_bonus"],
             volume_bubble_near=result["volume_bubble_near"],
+            direction=candidate_direction,
+            cvd_slope=cvd_state.slope if cvd_state is not None else None,
+            ofi=ofi_result.ofi if ofi_result else None,
+            norm_delta=result["norm_delta"],
+            absorption_side=result["absorption_side"],
         )
     else:
         agg_result = None

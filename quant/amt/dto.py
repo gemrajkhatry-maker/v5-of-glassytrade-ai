@@ -14,10 +14,18 @@ is safe.
 from __future__ import annotations
 from quant.contracts.enums import MarketState
 from quant.state import _epoch_to_iso
+from quant.decision.data_quality import DataQuality, normalize_data_quality
 
 
 def amt_result_to_dto(r) -> dict:
     """Convert a domain AMTResult to the camelCase WS DTO dict."""
+    quality = normalize_data_quality(getattr(r, "data_quality", ""))
+    if quality is DataQuality.UNAVAILABLE:
+        quality = (
+            DataQuality.CANDLE_DISTRIBUTED
+            if getattr(r, "cvd_source", "") in ("underlying", "option")
+            else DataQuality.CANDLE_GAUSSIAN
+        )
     return {
         "marketState": r.market_state,
         "poc": r.poc,
@@ -50,11 +58,7 @@ def amt_result_to_dto(r) -> dict:
         "cvdSlope": r.cvd_slope,
         # Canonical provenance: exact tick footprint when available, otherwise
         # preserve the analyzer's explicit candle/proxy source.
-        "dataQuality": (
-            "TICK_EXACT" if r.footprints else
-            "CANDLE_DISTRIBUTED" if getattr(r, "cvd_source", "") in ("underlying", "option") else
-            "CANDLE_GAUSSIAN"
-        ),
+        "dataQuality": quality.value,
         "cvdDivergence": r.cvd_divergence,
         "profileShape": r.profile_shape,
         "profileType": r.profile_type,
@@ -148,6 +152,15 @@ def amt_result_to_dto(r) -> dict:
         "tripleASignal": getattr(r, "triple_a_signal", ""),
         "absorptionClusterHigh": getattr(r, "absorption_cluster_high", 0.0),
         "absorptionClusterLow": getattr(r, "absorption_cluster_low", 0.0),
+        # Layer 2 Compression Box (spec §5.2): micro-profile in tight balance
+        "compressionBoxPoc": float(getattr(r, "compression_box_poc", 0.0)),
+        "compressionBoxVah": float(getattr(r, "compression_box_vah", 0.0)),
+        "compressionBoxVal": float(getattr(r, "compression_box_val", 0.0)),
+        "compressionBoxBars": int(getattr(r, "compression_box_bars", 0)),
+        # Layer 4 Gap Profile (spec §5.2): gap-POC/VAH/VAL
+        "gapProfilePoc": float(getattr(r, "gap_profile_poc", 0.0)),
+        "gapProfileVah": float(getattr(r, "gap_profile_vah", 0.0)),
+        "gapProfileVal": float(getattr(r, "gap_profile_val", 0.0)),
         # Displacement
         "swingDelta": r.swing_delta,
         # Per-symbol delta (isolated per option contract)
