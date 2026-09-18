@@ -324,3 +324,6 @@ class PaperOMS:
             _id=position._id,
         )
         return fill, remaining
+    @property
+    def is_live(self) -> bool:
+        return False

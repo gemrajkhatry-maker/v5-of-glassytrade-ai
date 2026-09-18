@@ -26,6 +26,11 @@ class IOMS(Protocol):
     """Order Management System port — the seam between strategy and venue."""
 
     @property
+    def is_live(self) -> bool:
+        """Whether this OMS can submit orders to a live venue."""
+        ...
+
+    @property
     def lot_size(self) -> float:
         """Units per lot (from the broker). Used for lot-snapped sizing."""
         ...

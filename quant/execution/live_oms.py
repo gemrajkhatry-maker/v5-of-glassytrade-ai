@@ -450,3 +450,6 @@ class LiveOMS:
             "not implemented end-to-end; refusing to create a ghost pyramid "
             "position"
         )
+    @property
+    def is_live(self) -> bool:
+        return True
