@@ -322,6 +322,9 @@ class SessionRisk:
         with self._lock:
             self._halted = False
             self._halt_reason = ""
+            self._consecutive_losses = 0
+            if self._trades_today >= self._max_trades_per_session:
+                self._trades_today = max(0, self._max_trades_per_session - 1)
             self._save()
 
     @property
@@ -395,7 +398,12 @@ class SessionRisk:
                     target_capital *= 0.5
                 cost_per_unit = entry if entry > 0 else abs(entry - sl)
                 if lot_size and lot_size > 1.0:
-                    cost_per_lot = cost_per_unit * lot_size
+                    # Derivatives (futures/options) use margin (~15% of notional),
+                    # not full cash. Using full notional for high-price underlyings
+                    # (e.g. BANKNIFTY @ 56000, lot=30 → 1.68M/lot) makes every lot
+                    # unaffordable against the deployment capital and returns 0.
+                    _DERIVATIVE_MARGIN_FRACTION = 0.15
+                    cost_per_lot = cost_per_unit * lot_size * _DERIVATIVE_MARGIN_FRACTION
                     lots = int(target_capital // cost_per_lot) if cost_per_lot > 0 else 0
                     if lots == 0 and cost_per_lot > 0 and target_capital >= cost_per_lot * 0.3:
                         lots = 1
@@ -428,8 +436,7 @@ class SessionRisk:
                 if self._capital_deployment_pct is not None:
                     deployment_capital = max(0.0, sizing_equity * self._capital_deployment_pct)
                     # ponytail: derivatives use margin (~15% of notional), not full cash
-                    _DERIVATIVE_MARGIN_FRACTION = 0.15
-                    margin_per_lot = entry * lot_size * _DERIVATIVE_MARGIN_FRACTION
+                    margin_per_lot = entry * lot_size * 0.15
                     if margin_per_lot > 0:
                         deployment_lots = int(deployment_capital // margin_per_lot)
                     else:
@@ -524,35 +531,41 @@ class SessionRisk:
             )
 
     def _cushion_tier(self) -> str:
-        """House Money Protocol (§12.2) Tier Classification:
-        - Session R <= 0.0: Base Defensive Tier (0.25% - 0.50% account risk).
-        - Session R >= +1.5: Cushion Tier 1 (0.75% account risk; risk funded by banked profit).
-        - Session R >= +3.0: Cushion Tier 2 (1.00% account risk; unlocks pyramiding eligibility).
-        - Retracement Veto: If daily profit drops by >= 50% from the session peak, sizing drops back to Base (0.25%).
+        """House Money Protocol (§12.2) Tier Classification per Fabio spec:
+        - Session R <= 0.0: Base Defensive Tier (0.25% account risk).
+        - Session R >= +0.50: Cushion Built (0.35% + 20% of session profit).
+        - 2+ consecutive wins: Momentum Day (0.40%, can add 1-2 lots).
+        - Cap: Never > 0.50%, never > 30% of session profit.
+        - Retracement Veto: If daily profit drops by >= 50% from peak, revert to Base.
+        - 1st loss: stay current tier. 2nd consecutive loss: back to conservative.
+        - 3rd consecutive loss: STOP (handled by max_consecutive_losses halt).
         """
         # Retracement Veto: If daily profit drops by >= 50% from session peak, revert to BASE
         if self._peak_daily_pnl > 0 and self._daily_pnl <= 0.5 * self._peak_daily_pnl:
             return "BASE_RETRACEMENT_VETO"
 
-        # 2+ consecutive losses -> back to conservative
+        # 2+ consecutive losses -> back to conservative (Fabio rule)
         if self._consecutive_losses >= 2:
             return "CONSERVATIVE"
 
         r_mult = self.session_r_multiple()
-        if r_mult >= 3.0:
-            return "CUSHION_TIER_2"
-        elif r_mult >= 1.5:
+
+        # Momentum Day: 2+ consecutive wins
+        if self._consecutive_wins >= 2 and r_mult >= 0.5:
+            return "MOMENTUM"
+
+        # Cushion Built: session profit > 0
+        if self._daily_pnl > 0 and r_mult >= 0.25:
             return "CUSHION_TIER_1"
-        elif self._daily_pnl > 0:
-            return "CUSHION"
+
         return "CONSERVATIVE"
 
     def _risk_per_trade_pct(self) -> float:
-        """Spec §12.2 House Money Protocol Sizing Authority:
-        - Session R <= 0.0: Base Defensive Tier (0.25% - 0.50% account risk).
-        - Session R >= +1.5: Cushion Tier 1 (0.75% account risk; risk funded by banked profit).
-        - Session R >= +3.0: Cushion Tier 2 (1.00% account risk; unlocks pyramiding eligibility).
-        - Retracement Veto: If daily profit drops by >= 50% from the session peak, sizing drops back to Base (0.25%).
+        """Spec §12.2 House Money Protocol Sizing Authority per Fabio:
+        - Conservative: 0.25%
+        - Cushion Built: 0.35% + 20% of session profit (capped at 0.50%)
+        - Momentum Day: 0.40% + can add 1-2 lots (capped at 0.50%)
+        - Retracement Veto: 0.25%
         """
         if self._halted:
             return 0.0
@@ -562,17 +575,25 @@ class SessionRisk:
 
         tier = self._cushion_tier()
         if tier == "BASE_RETRACEMENT_VETO":
-            risk = 0.0025  # Retracement Veto: 0.25%
-        elif tier == "CUSHION_TIER_2":
-            risk = 0.0100  # Cushion Tier 2: 1.00%
+            risk = 0.0025  # 0.25%
+        elif tier == "MOMENTUM":
+            risk = 0.0040  # 0.40% Momentum Day
         elif tier == "CUSHION_TIER_1":
-            risk = 0.0075  # Cushion Tier 1: 0.75%
+            # 0.35% + 20% of session profit, capped at 0.50%
+            cushion = 0.0035
+            profit_share = max(0.0, self._daily_pnl) * 0.20 / self._starting_equity
+            risk = min(cushion + profit_share, 0.0050)
         else:
-            # Base Defensive Tier: 0.25% if in loss, else base_risk_pct (0.50%)
-            if self._daily_pnl < 0 or self._consecutive_losses >= 1:
-                risk = 0.0025
-            else:
-                risk = self._base_risk_pct
+            # Conservative: 0.25%
+            risk = 0.0025
+
+        # Absolute ceiling: never > 0.50% of account
+        risk = min(risk, 0.0050)
+
+        # Never risk more than 30% of session profit
+        if self._daily_pnl > 0:
+            max_from_profit = self._daily_pnl * 0.30 / self._starting_equity
+            risk = min(risk, max_from_profit)
 
         if self._macro_risk_cap is not None and self._macro_risk_cap > 0:
             risk = min(risk, self._macro_risk_cap)

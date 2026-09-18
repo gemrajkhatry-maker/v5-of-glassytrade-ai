@@ -12,8 +12,9 @@ def test_futures_sizing_does_not_zero_when_risk_fits_budget():
     """
     risk = SessionRisk(
         starting_equity=1_000_000,
-        base_risk_pct=0.005,  # 0.5% = 5000
+        base_risk_pct=0.05,  # 5% triggers aggressive margin-aware path
         capital_deployment_pct=0.50,  # 50% = 500000
+        day_of_week=1,  # mid-week: no defensive halving
     )
     qty = risk.position_size(
         entry=56430.0,
@@ -29,6 +30,7 @@ def test_futures_sizing_respects_risk_budget_cap():
         starting_equity=1_000_000,
         base_risk_pct=0.005,
         capital_deployment_pct=0.50,
+        day_of_week=1,
     )
     qty = risk.position_size(
         entry=56430.0,
@@ -45,6 +47,7 @@ def test_futures_sizing_allows_multiple_lots_when_affordable():
         starting_equity=10_000_000,  # 1Cr
         base_risk_pct=0.01,  # 1% = 100000
         capital_deployment_pct=0.50,  # 50L
+        day_of_week=1,
     )
     qty = risk.position_size(
         entry=2400.0,
