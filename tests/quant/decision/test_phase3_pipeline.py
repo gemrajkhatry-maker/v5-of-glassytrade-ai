@@ -48,6 +48,7 @@ def test_decision_context_builder_propagates_market_and_direction():
     risk_state = MagicMock()
     risk_state.halted = False
     risk_state.consecutive_losses = 0
+    risk_state.consecutive_wins = 0
     risk_state.equity = 100000.0
     risk_state.risk_per_trade_pct = 0.01
 

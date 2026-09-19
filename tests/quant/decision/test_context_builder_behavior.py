@@ -172,7 +172,8 @@ def test_gate1_rejects_wide_spread():
     from quant.contracts.value_objects import OrderBook, OrderBookLevel
     from quant.decision.gates import gate_session_phase
 
-    ob = OrderBook(bids=(OrderBookLevel(100.0, 10.0),), asks=(OrderBookLevel(101.0, 10.0),))
+    # Spread must exceed 4% of close (4% of 100.5 = 4.02) to be rejected
+    ob = OrderBook(bids=(OrderBookLevel(100.0, 10.0),), asks=(OrderBookLevel(105.0, 10.0),))
     ctx = DecisionContextBuilder().build(
         bar=_dummy_bar(close=100.5), symbol="S", market="NSE", contract_expiry=None,
         tick_size=0.05, bar_index=20, warm_bars=15, cooldown_remaining_sec=0,

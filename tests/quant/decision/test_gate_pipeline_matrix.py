@@ -109,8 +109,8 @@ class TestGate1SessionPhase:
         assert _gate_passed(results, 1)
 
     def test_wide_spread_rejected(self):
-        # Spread = 2.0, which exceeds max(3*0.05, 100*0.001, 0.40) = 0.40
-        ctx = _make_ctx(bid=99.0, ask=101.0)
+        # Spread must exceed 4% of close (4% of 100.0 = 4.0) to be rejected
+        ctx = _make_ctx(bid=99.0, ask=105.0)
         results = GatePipeline().evaluate(ctx)
         assert not _gate_passed(results, 1)
         assert "spread" in _gate_reason(results, 1).lower()

@@ -169,7 +169,7 @@ CHARACTERIZATION_CASES = {
     "play_second_drive": (
         dict(drive_entry_valid=True, drive_number=2, poc=24200.0),
         {
-            "action": "ENTER_LONG", "direction": "LONG", "setup": "TRIPLE_A",
+            "action": "ENTER_LONG", "direction": "LONG", "setup": "SECOND_DRIVE_D2",
             "confidence": "High",
             "rationale": "Second Drive LONG on NIFTY: D1 level rejected, D2 re-approach confirms failed auction. Price 24155.0 vs POC 24200.0. CVD +5.0.",
             "source": "AMT_RULE", "symbol": "NIFTY",

@@ -14,16 +14,16 @@ from tests.helpers.synthetic import SyntheticGateway
 
 
 def test_position_size_rounds_to_whole_lots():
-    # Standard mode (0.5% risk): flat CONSERVATIVE tier uses base 0.5% = ₹5,000
+    # CONSERVATIVE tier: 0.25% risk → risk_amount = ₹2,500
     # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
     risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, day_of_week=1)
     qty = risk.position_size(
         entry=100.0,
         sl=93.0,       # loss per unit = 7.0
-        lot_size=15,   # loss per lot = 105.0 -> nearest lot(5000 / 105) = 48 lots
+        lot_size=15,   # loss per lot = 105.0 -> snap_to_lot(2500/105, 15) = 24 lots
     )
     assert qty % 15 == 0
-    assert qty == 48 * 15
+    assert qty == 24 * 15
 
 
 def test_lot_rounding_never_exceeds_rupee_risk_cap():
@@ -90,9 +90,9 @@ def test_position_size_honors_is_expiry_at_call_site():
 def test_max_lots_cap_enforced():
     # Pin a mid-week day: DAY_OF_WEEK_MULTIPLIER halves risk on Mon/Fri, so an unpinned day makes this assertion calendar-dependent.
     risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, day_of_week=1)
-    # Without cap: nearest lot(5000 / 105) = 48 lots
+    # Without cap: CONSERVATIVE 0.25% → risk_amount=2500 → snap_to_lot(2500/105, 15) = 24 lots
     uncapped = risk.position_size(entry=100.0, sl=93.0, lot_size=15)
-    assert uncapped == 48 * 15
+    assert uncapped == 24 * 15
     # With cap: max 5 lots
     capped = risk.position_size(entry=100.0, sl=93.0, lot_size=15, max_lots=5)
     assert capped == 5 * 15

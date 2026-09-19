@@ -55,7 +55,7 @@ def test_second_drive_reclaim_long(adv):
     )
     out = adv._rule_based_narrative(ctx)
     assert out["action"] == "ENTER_LONG"
-    assert out["setup"] == "TRIPLE_A"
+    assert out["setup"] == "SECOND_DRIVE_D2"
     assert "Second Drive" in out["rationale"]
     assert "D1 level rejected" in out["rationale"]
 

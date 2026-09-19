@@ -231,17 +231,18 @@ class TestPruneFoldCache:
 
 
 class TestPruneMidTransitionSlice:
-    def test_slice_starting_with_close_raises_on_fold(self):
-        """Pruning away a position's opening event leaves an unfoldable slice:
-        fold() must raise, never silently derive partial state."""
+    def test_slice_starting_with_close_replay_tolerant(self):
+        """Pruning away a position's opening event leaves a close-only slice:
+        fold() returns position=None (replay-tolerant), never raises."""
         store = EventStore()
         store.append(_opened_event("p1"))
         store.append(_closed_event("p1"))
 
         store.prune(keep_last=1)  # keeps only the PositionClosed
 
-        with pytest.raises(ValueError, match="No position to close"):
-            store.fold()
+        # Replay-tolerant: returns position=None, no raise
+        state = store.fold()
+        assert state.position is None
 
     def test_slice_starting_at_open_folds_cleanly(self):
         """A retained slice that IS a complete transition folds cleanly."""

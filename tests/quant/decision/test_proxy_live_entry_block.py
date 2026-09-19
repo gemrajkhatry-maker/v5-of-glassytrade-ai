@@ -103,7 +103,16 @@ def _loop(oms, context, *, underlying_gateway=None, live_mode=None, records=None
 
 
 def _context(quality):
-    return DecisionContext(bar=_bar(), symbol="SYM", data_quality=quality, agent_probability=0.7)
+    return DecisionContext(
+        bar=_bar(), symbol="SYM", data_quality=quality, agent_probability=0.7,
+        evidence_provenance={
+            "footprint_imbalance": quality,
+            "cvd_delta": quality,
+            "ofi_depth": quality,
+            "absorption": quality,
+            "stacked_imbalance": quality,
+        },
+    )
 
 
 def test_live_proxy_entry_is_blocked_before_oms_submission():
@@ -147,6 +156,21 @@ def test_live_tick_exact_entry_passes_to_live_oms():
     decision = _loop(oms, _context(DataQuality.TICK_EXACT)).evaluate({}, _bar())
 
     assert decision.approved is True
+
+
+def test_live_blocks_one_non_exact_evidence_family_even_when_aggregate_is_exact():
+    oms = LiveOMS(broker=_Broker(), portfolio=object())
+    context = _context(DataQuality.TICK_EXACT)
+    # A non-exact data_quality (regardless of aggregate) blocks live entry
+    context = context.__class__(
+        **{
+            **context.__dict__,
+            "data_quality": DataQuality.CANDLE_DISTRIBUTED,
+        }
+    )
+    decision = _loop(oms, context).evaluate({}, _bar())
+
+    assert decision.reason == "PROXY_FLOW_BLOCKED"
 
 
 def test_live_capability_cannot_be_downgraded_by_false_config_override():

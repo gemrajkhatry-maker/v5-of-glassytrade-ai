@@ -262,13 +262,13 @@ def test_force_close_position_closes_base_and_pyramids():
     eng._projector = MagicMock()
     eng._emit_lock = threading.Lock()
     eng.event_store = MagicMock()
-    eng.event_store.append = lambda e: None
+    eng.event_store.append = lambda e: "mock-checksum"
     eng._pos_mgr = pm
     # Wire the PositionManager's emit to go through engine's _emit
     pm._emit = eng._emit
-    # event_appender needed by _emit
+    # event_appender needed by _emit — must return non-None to signal success
     eng.event_appender = MagicMock()
-    eng.event_appender.append = lambda e: None
+    eng.event_appender.append = lambda e: "mock-checksum"
     eng.persistence_health = MagicMock()
     eng.persistence_health.failure = None
     eng._is_paper_runtime = True
@@ -356,13 +356,13 @@ def test_force_close_position_falls_back_to_entry_price_without_bar():
     eng._projector = MagicMock()
     eng._emit_lock = threading.Lock()
     eng.event_store = MagicMock()
-    eng.event_store.append = lambda e: None
+    eng.event_store.append = lambda e: "mock-checksum"
     eng._pos_mgr = pm
     # Wire the PositionManager's emit to go through engine's _emit
     pm._emit = eng._emit
-    # event_appender needed by _emit
+    # event_appender needed by _emit — must return non-None to signal success
     eng.event_appender = MagicMock()
-    eng.event_appender.append = lambda e: None
+    eng.event_appender.append = lambda e: "mock-checksum"
     eng.persistence_health = MagicMock()
     eng.persistence_health.failure = None
     eng._is_paper_runtime = True

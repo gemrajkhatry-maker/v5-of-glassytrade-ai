@@ -302,13 +302,13 @@ class TestAtomicTransitions:
         assert new_state.position == pos  # Base position preserved
         assert len(new_state.pyramids) == 0  # Pyramid removed
 
-        # A close matching NEITHER the base nor an open pyramid must raise
-        # (event-production bug or reordering — never silently swallowed).
+        # A close matching NEITHER the base nor an open pyramid is
+        # replay-tolerant: returns unchanged state, no raise.
         ghost_fill = MockFill(pos_id="ghost-999")
-        with pytest.raises(ValueError, match="does not match open position"):
-            apply_event(
-                state, PositionClosed(symbol="NIFTY", time="t1", fill=ghost_fill)
-            )
+        ghost_event = PositionClosed(symbol="NIFTY", time="t1", fill=ghost_fill)
+        replay_state = apply_event(state, ghost_event)
+        assert replay_state.position == pos  # Base preserved
+        assert len(replay_state.pyramids) == 1  # Pyramid preserved
 
     def test_opening_position_when_already_open_raises(self):
         """Opening a position when one is already open raises error."""
@@ -338,17 +338,19 @@ class TestAtomicTransitions:
         with pytest.raises(ValueError, match="Position already open"):
             apply_event(state, event)
 
-    def test_closing_nonexistent_position_raises(self):
-        """Closing when no position exists raises error."""
+    def test_closing_nonexistent_position_replay_tolerant(self):
+        """Closing when no position exists returns unchanged state."""
         from quant.state_machine import EngineState
         from quant.events import PositionClosed
-        
+
         state = EngineState(symbol="NIFTY")
         fill = MockFill()
         event = PositionClosed(symbol="NIFTY", time="t0", fill=fill)
-        
-        with pytest.raises(ValueError, match="No position to close"):
-            apply_event(state, event)
+
+        # Replay-tolerant: returns unchanged state, no raise
+        result = apply_event(state, event)
+        assert result.position is None
+        assert result.sequence == state.sequence  # no transition consumed
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,11 @@ class _ApprovedDecision:
     gate_results: tuple = ()
     block_reasons: tuple = ()
     model_label: str = ""
+    metadata: dict = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
 
 
 def test_execution_disabled_does_not_submit_orders():

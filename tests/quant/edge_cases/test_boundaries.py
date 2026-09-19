@@ -178,14 +178,15 @@ class TestEmptyEvents:
 class TestInvalidTransitions:
     """Attack: Invalid transitions — close without open, double-open, wrong ID."""
 
-    def test_close_without_open_position_raises(self):
-        """PositionClosed without open position must raise ValueError."""
+    def test_close_without_open_position_replay_tolerant(self):
+        """PositionClosed without open position returns unchanged state."""
         pos = _make_position(pos_id="ghost")
         fill = _make_fill(pos)
         event = PositionClosed(symbol="NIFTY", time="t", fill=fill)
         state = EngineState(symbol="NIFTY")
-        with pytest.raises(ValueError):
-            apply_event(state, event)
+        result = apply_event(state, event)
+        assert result.position is None
+        assert result.sequence == 0
 
     def test_double_open_same_position_raises(self):
         """Opening a position when one is already open must raise."""
@@ -220,10 +221,9 @@ class TestInvalidTransitions:
         with pytest.raises(ValueError, match="Position already open"):
             apply_event(state, PositionOpened(symbol="NIFTY", time="t3", position=pos3))
 
-    def test_close_wrong_id_raises(self):
+    def test_close_wrong_id_replay_tolerant(self):
         """Closing a position whose ID matches neither the base nor a pyramid
-        is a real invariant violation (event-production bug or reordering).
-        It must raise instead of silently leaving the position open forever.
+        returns unchanged state (replay-tolerant) — the position stays open.
         """
         pos1 = _make_position(pos_id="base")
         pos2 = _make_position(pos_id="other")
@@ -232,13 +232,14 @@ class TestInvalidTransitions:
         state = EngineState(symbol="NIFTY")
         state = apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos1))
 
-        # Close with a different position ID — must raise, not silently ignore
+        # Close with a different position ID — replay-tolerant, no raise
         event = PositionClosed(symbol="NIFTY", time="t2", fill=fill2)
-        with pytest.raises(ValueError, match="does not match open position"):
-            apply_event(state, event)
+        result = apply_event(state, event)
+        assert result.position is not None
+        assert result.position.id == "base"
 
-    def test_close_after_close_raises_or_noop(self):
-        """Closing an already-closed position — must be idempotent or error."""
+    def test_close_after_close_replay_tolerant(self):
+        """Closing an already-closed position is replay-tolerant (no-op)."""
         pos = _make_position(pos_id="p1")
         fill = _make_fill(pos)
 
@@ -248,9 +249,9 @@ class TestInvalidTransitions:
 
         assert state.position is None  # Position closed
 
-        # Second close — BUG: raises ValueError "No position to close"
-        with pytest.raises(ValueError):
-            apply_event(state, PositionClosed(symbol="NIFTY", time="t3", fill=fill))
+        # Second close — replay-tolerant: returns unchanged state
+        result = apply_event(state, PositionClosed(symbol="NIFTY", time="t3", fill=fill))
+        assert result.position is None
 
 
 # =============================================================================
@@ -1264,10 +1265,9 @@ class TestApplyEventSequenceNotIncremented:
         result = apply_event(state, event)
         assert result.sequence == 1
 
-    def test_apply_event_position_closed_wrong_id_raises(self):
+    def test_apply_event_position_closed_wrong_id_replay_tolerant(self):
         """PositionClosed with an ID matching neither the base nor a pyramid
-        raises — an event-production bug or reordering must not be silently
-        swallowed.
+        returns unchanged state — replay-tolerant, no raise.
         """
         pos1 = _make_position(pos_id="base")
         pos2 = _make_position(pos_id="other")
@@ -1277,10 +1277,11 @@ class TestApplyEventSequenceNotIncremented:
         state = apply_event(state, PositionOpened(symbol="NIFTY", time="t", position=pos1))
         assert state.sequence == 1
 
-        # Close with wrong ID — must raise, not silently no-op
+        # Close with wrong ID — replay-tolerant, returns unchanged state
         event = PositionClosed(symbol="NIFTY", time="t2", fill=fill2)
-        with pytest.raises(ValueError, match="does not match open position"):
-            apply_event(state, event)
+        result = apply_event(state, event)
+        assert result.position.id == "base"
+        assert result.sequence == 1  # no transition consumed
 
     def test_apply_event_unknown_event_doesnt_increment(self):
         """Unknown event types (base Event) don't increment sequence.
@@ -1480,9 +1481,9 @@ class TestPositionClosedEventIdMismatch:
     """Attack: PositionClosed event with mismatched ID."""
 
     def test_close_wrong_id_raises_position_stays_open(self):
-        """A close whose ID matches neither the base nor any OPEN pyramid is an
-        invariant violation — it raises rather than leaving the position open
-        forever without any signal.
+        """A close whose ID matches neither the base nor any OPEN pyramid
+        returns unchanged state (replay-tolerant). A REAL pyramid open then
+        close still works (id matches state.pyramids).
         """
         pos1 = _make_position(pos_id="base-pos")
         pos2 = _make_position(pos_id="pyramid-pos")
@@ -1492,10 +1493,10 @@ class TestPositionClosedEventIdMismatch:
         state = apply_event(state, PositionOpened(symbol="NIFTY", time="t1", position=pos1))
         assert state.position is not None
 
-        # Close pyramid ID that was never opened — must raise
+        # Close pyramid ID that was never opened — replay-tolerant, no raise
         event = PositionClosed(symbol="NIFTY", time="t2", fill=fill2)
-        with pytest.raises(ValueError, match="does not match open position"):
-            apply_event(state, event)
+        result = apply_event(state, event)
+        assert result.position.id == "base-pos"  # position stays open
 
         # A REAL pyramid open then close still works (id matches state.pyramids)
         pyramid_state = _make_position(pos_id="pyramid-pos")
@@ -1650,7 +1651,7 @@ class TestInputValidationBugs:
 
         pos = _make_position()
         bar = _make_bar()
-        amt_dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+        amt_dto = {"legLvns": [100.0], "absorptionSide": "SELL_ABSORBED"}
 
         # Force is_risk_free to return True
         pm._exits.is_risk_free = MagicMock(return_value=True)
