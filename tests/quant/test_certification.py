@@ -44,6 +44,20 @@ def _engine_from(scenario_fn=None):
         def try_next_tick(self):
             return self.next_tick()
 
+    # Synthetic AMT output produces CANDLE_GAUSSIAN data quality, which the
+    # data quality gate blocks before decisions reach the conviction pipeline.
+    # Patch the DTO conversion to emit TICK_EXACT so decisions reach the gate
+    # pipeline and the conviction records are inspectable (cert purpose).
+    import quant.amt_engine as _amt_engine_mod
+    _orig_to_dto = _amt_engine_mod.amt_result_to_dto
+
+    def _tick_exact_dto(r):
+        d = _orig_to_dto(r)
+        d["dataQuality"] = "TICK_EXACT"
+        return d
+
+    _amt_engine_mod.amt_result_to_dto = _tick_exact_dto
+
     from quant.runtime import QuantEngine
     eng = QuantEngine(GW(sc.ticks), sc.symbol,
                       interval_seconds=sc.interval_seconds, market="MCX")
@@ -249,7 +263,7 @@ def test_s10_pyramid_adds_only_when_all_gates_align():
     # Case 1: base NOT risk-free → no pyramid regardless of setup quality.
     pm = mk_pm()
     pos = mk_pos()
-    dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+    dto = {"legLvns": [100.0], "absorptionSide": "SELL_ABSORBED"}
     pm.check_pyramid(dto, bar(100.05), pos, bar_index=5)
     assert pm.pyramid_count == 0, "pyramid fired without risk-free base"
 
@@ -260,7 +274,7 @@ def test_s10_pyramid_adds_only_when_all_gates_align():
     pm2._exits.evaluate(pos2, bar_close=101.0, bar_index=3,
                         bar_high=101.0, bar_low=100.9)
     assert pm2._exits.is_risk_free(pos2), "breakeven should arm at 0.8R+"
-    dto["legLvn"] = 95.0  # far away
+    dto["legLvns"] = [95.0]  # far away
     pm2.check_pyramid(dto, bar(95.05), pos2, bar_index=5)
     assert pm2.pyramid_count == 0, "pyramid fired away from LVN"
 
@@ -269,7 +283,7 @@ def test_s10_pyramid_adds_only_when_all_gates_align():
     pos3 = mk_pos()
     pm3._exits.evaluate(pos3, bar_close=101.0, bar_index=3,
                         bar_high=101.0, bar_low=100.9)
-    dto3 = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+    dto3 = {"legLvns": [100.0], "absorptionSide": "SELL_ABSORBED"}
     pm3.check_pyramid(dto3, bar(100.05), pos3, bar_index=5)
     assert pm3.pyramid_count == 1, "all gates aligned but P1 did not fire"
     assert len(pm3.pyramid_positions) == 1
@@ -322,6 +336,6 @@ def test_s10_pyramid_cert_records_flow():
                        bar_high=101.0, bar_low=100.9)
     assert pm._exits.is_risk_free(pos), "breakeven should arm at 0.8R+"
     bar = Bar(time="t1", open=100.0, high=100.1, low=99.95, close=100.05, volume=100)
-    dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+    dto = {"legLvns": [100.0], "absorptionSide": "SELL_ABSORBED"}
     pm.check_pyramid(dto, bar, pos, bar_index=5)
     assert pm.pyramid_count == 1, "real path failed to record the add"
