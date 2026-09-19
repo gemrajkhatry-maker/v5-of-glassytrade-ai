@@ -775,16 +775,12 @@ class TestEventImportFailure:
 class TestPositionIdMismatch:
     """PositionClosed event.fill.position._id vs state.position.id comparison."""
 
-    def test_pyramid_close_mismatch_raises(self):
-        """A close whose ID matches neither the base nor an OPEN pyramid is an
-        invariant violation — it raises instead of silently no-op'ing, so an
-        event-production bug or reordering never leaves the position open
-        forever without any signal."""
+    def test_pyramid_close_mismatch_is_replay_tolerant(self, caplog):
+        """Unmatched close replay returns unchanged state with diagnostics (Task 4)."""
+        import logging
         from quant.transitions import apply_event
         from quant.events import PositionClosed
-        from quant.state_machine import EngineState, PositionState, Bar
-        from quant.execution.risk import RiskState
-        import pytest
+        from quant.state_machine import EngineState, PositionState
 
         # State has base position open
         base = PositionState(id="base-1", entry=100.0, size=100.0,
@@ -796,8 +792,20 @@ class TestPositionIdMismatch:
         pyr_fill = MockFill(pos_id="pyr-1", size=50.0)
         event = PositionClosed(symbol="NIFTY", time="t1", fill=pyr_fill)
 
-        with pytest.raises(ValueError, match="does not match open position"):
-            apply_event(state, event)
+        # Replay-tolerant: returns unchanged state (no raise)
+        with caplog.at_level(logging.WARNING, logger="quant.transitions"):
+            result = apply_event(state, event)
+
+        # Verify unchanged state (same object returned)
+        assert result is state
+
+        # Verify structured diagnostics in log
+        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_records) >= 1
+        diag = warning_records[0]
+        assert diag.message == "unmatched lifecycle event"
+        assert getattr(diag, "event_type", None) == "PositionClosed"
+        assert getattr(diag, "position_id", None) == "pyr-1"
 
     def test_base_close_clears_position(self):
         """Closing the base position must clear state.position."""
