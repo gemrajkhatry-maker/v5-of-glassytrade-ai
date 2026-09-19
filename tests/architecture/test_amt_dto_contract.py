@@ -58,7 +58,7 @@ _CANDLE_COUNT = 40
 # assertion below trivially satisfied.
 _KNOWN_CONSUMERS = {
     "quant/decision/context_builder.py": {"marketState", "cvdSlope", "squeezeDirection"},
-    "quant/engine/decision_loop.py": {"marketState", "balanceRatio", "legLvns"},
+    "quant/engine/decision_loop.py": {"marketState", "balanceRatio", "legLvn"},
     "quant/execution/exit_checks.py": {"cvdSlope"},
     "quant/multi_engine.py": {"marketState"},
     "quant/position_manager.py": {"marketState", "legProfile"},
@@ -187,6 +187,30 @@ def test_unknown_provenance_remains_unavailable_for_cvd_sources():
         result = SimpleNamespace(**vars(base), data_quality="future-unknown-quality")
 
         assert amt_result_to_dto(result)["dataQuality"] == "UNAVAILABLE"
+
+
+def test_dto_preserves_explicit_provenance_for_each_required_family():
+    result = AMTResult(
+        market_state=MarketState.BALANCED,
+        poc=0.0,
+        value_area_high=0.0,
+        value_area_low=0.0,
+        evidence_provenance={
+            "footprint_imbalance": "TICK_EXACT",
+            "cvd_delta": "CANDLE_DISTRIBUTED",
+            "ofi_depth": "TICK_EXACT",
+            "absorption": "UNKNOWN",
+            "stacked_imbalance": "TICK_EXACT",
+        },
+    )
+
+    assert amt_result_to_dto(result)["evidenceProvenance"] == {
+        "footprint_imbalance": "TICK_EXACT",
+        "cvd_delta": "CANDLE_DISTRIBUTED",
+        "ofi_depth": "TICK_EXACT",
+        "absorption": "UNAVAILABLE",
+        "stacked_imbalance": "TICK_EXACT",
+    }
 
 
 def test_option_scale_merge_keys_are_real_dto_keys():

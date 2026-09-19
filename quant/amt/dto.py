@@ -17,6 +17,35 @@ from quant.state import _epoch_to_iso
 from quant.decision.data_quality import DataQuality, normalize_data_quality, normalize_evidence_provenance
 
 
+def _derive_stacked_imbalance(footprints: dict) -> tuple[str, int]:
+    """Derive the strongest stacked-imbalance run from the latest footprint.
+
+    Mirrors ``_latest_stacked_imbalance`` in context_builder.py but reads the
+    raw AMTResult footprints (FootprintLevel objects) instead of the DTO dict.
+    Returns (direction, magnitude); ("", 0) when no qualifying run exists.
+    """
+    if not footprints:
+        return "", 0
+    latest_key = max(footprints.keys())
+    levels = footprints[latest_key].levels
+    best_dir, best_n = "", 0
+    run_dir, run_n = "", 0
+    for lvl in levels:
+        if not lvl.stacked:
+            run_dir, run_n = "", 0
+            continue
+        d = "BUY" if lvl.ask > lvl.bid else "SELL"
+        if d != run_dir:
+            run_dir, run_n = d, 1
+        else:
+            run_n += 1
+        if run_n > best_n:
+            best_dir, best_n = run_dir, run_n
+    if best_n < 3:
+        return "", 0
+    return best_dir, best_n
+
+
 def amt_result_to_dto(r) -> dict:
     """Convert a domain AMTResult to the camelCase WS DTO dict."""
     quality = normalize_data_quality(getattr(r, "data_quality", ""))
@@ -26,8 +55,11 @@ def amt_result_to_dto(r) -> dict:
             if getattr(r, "cvd_source", "") in ("underlying", "option")
             else DataQuality.CANDLE_GAUSSIAN
         )
+    si_dir, si_mag = _derive_stacked_imbalance(getattr(r, "footprints", {}) or {})
+    leg_lvns = getattr(r, "leg_lvns", ()) or ()
     return {
         "marketState": r.market_state,
+        "time": _epoch_to_iso(max(r.footprints.keys())) if r.footprints else "",
         "poc": r.poc,
         "valueAreaHigh": r.value_area_high,
         "valueAreaLow": r.value_area_low,
@@ -241,6 +273,11 @@ def amt_result_to_dto(r) -> dict:
             }
             for k, v in r.footprints.items()
         },
+        "legLvn": float(leg_lvns[0]) if leg_lvns else 0.0,
+        "stackedImbalanceDirection": si_dir,
+        "stackedImbalanceMagnitude": si_mag,
+        "stacked_imbalance_direction": si_dir,
+        "stacked_imbalance_magnitude": si_mag,
     }
 
 
