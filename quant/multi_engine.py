@@ -1903,6 +1903,7 @@ class QuantCoordinator:
                 if "max_lots" in self.config
                 else (2 if self._session_profile_for(symbol) == "MCX" else 10)
             ),
+            trades_executed=self.config.get("trades_executed"),
         )
         if advisor is not None:
             # Route advisor emissions through the engine's own bus exactly as

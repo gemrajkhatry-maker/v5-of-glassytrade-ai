@@ -118,6 +118,7 @@ class DecisionLoop:
         self._execution_enabled: bool = deps.get("execution_enabled", True)
         self._configured_live_mode = config.get("live_mode", deps.get("live_mode"))
         self._get_underlying_symbol = deps.get("get_underlying_symbol")
+        self._trades_executed = deps.get("trades_executed")
 
         # --- Mutable state accessors/mutators ---
         self._get_bar_index = state["get_bar_index"]
@@ -169,6 +170,7 @@ class DecisionLoop:
             "get_portfolio_risk": self._get_portfolio_risk,
             "get_position_manager": self._get_position_manager,
             "forecast_fn": self._forecast_fn,
+            "trades_executed": self._trades_executed,
         }
         state = {
             "get_bar_index": self._get_bar_index,

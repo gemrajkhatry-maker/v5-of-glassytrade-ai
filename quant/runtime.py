@@ -335,6 +335,7 @@ class QuantEngine:
         execution_enabled: bool = True,
         seed_scheduler=None,
         max_lots: int | None = None,
+        trades_executed=None,
     ) -> None:
         self._gateway = gateway
         # Independent mode is the production default. Legacy dual-feed
@@ -607,6 +608,7 @@ class QuantEngine:
         # quant.wiring_advisor.build_live_advisor — so backtest/replay
         # constructions stay thread-free and reproducible.
         self._advisor = advisor
+        self._trades_executed = trades_executed
         # DecisionLoop: encapsulates the entry decision pipeline (entry guards,
         # context build, strategy evaluation, signal translation, submission).
         # Created after all dependencies are initialized so it can bind to them.
@@ -852,6 +854,7 @@ class QuantEngine:
             "execution_enabled": self._execution_enabled,
             "live_mode": lambda: bool(getattr(self._oms, "is_live", False)),
             "get_underlying_symbol": self._underlying if self._underlying_gateway is not None else None,
+            "trades_executed": self._trades_executed,
         }
         state = {
             "get_bar_index": lambda: self._bar_index,

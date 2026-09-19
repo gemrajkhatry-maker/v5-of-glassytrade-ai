@@ -21,13 +21,7 @@ from quant.events import Event, PositionOpened, SignalApproved
 from quant.execution.execution_model import ExecutionModel, signal_matches_contract
 from quant.session_gates import bar_epoch_ms as _bar_epoch_ms, ist_dt as _ist_dt
 
-# Dashboard metrics — incremented on decision pipeline outcomes
-try:
-    from app.core.metrics import trades_executed
-    _dash_metrics_available = True
-except ImportError:
-    _dash_metrics_available = False  # not running under backend (tests/replay)
-
+# Dashboard metrics — incremented on decision pipeline outcomes (injected via deps)
 logger = logging.getLogger(__name__)
 
 
@@ -99,6 +93,7 @@ class SubmissionHandler:
         self._get_portfolio_risk = deps.get("get_portfolio_risk", lambda: deps.get("portfolio_risk"))
         self._get_position_manager = deps["get_position_manager"]
         self._forecast_fn = deps.get("forecast_fn")
+        self._trades_executed = deps.get("trades_executed")
 
         # --- Mutable state accessors/mutators ---
         self._get_bar_index = state["get_bar_index"]
@@ -293,8 +288,8 @@ class SubmissionHandler:
         self._emit(SignalApproved(symbol=self._symbol, time=bar.time, signal=signal))
 
         # Dashboard metric: trade executed
-        if _dash_metrics_available:
-            trades_executed.inc()
+        if self._trades_executed is not None:
+            self._trades_executed.inc()
 
         # Update engine state
         self._set_entry_bar_index(self._get_bar_index())
