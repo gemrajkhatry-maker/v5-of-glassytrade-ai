@@ -3,7 +3,7 @@
 Evaluation itself is never latched — vetoes still run every bar, so the
 moment a signal becomes executable it trades."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from unittest.mock import MagicMock
 
 from quant.bars import Bar
@@ -22,6 +22,7 @@ class _ApprovedDecision:
     gate_results: tuple = ()
     block_reasons: tuple = ()
     model_label: str = "t"
+    metadata: dict = field(default_factory=dict)
 
 
 def _sig():
@@ -36,6 +37,7 @@ def _engine():
     eng = QuantEngine(gateway=MagicMock(), symbol="LATCH-CALL", portfolio_risk=pra)
     eng._oms = MagicMock()
     eng._oms.lot_size = 1
+    eng._oms.is_live = False
     # ponytail: EventStore checksum-serializes every event eagerly, so the
     # stubbed position must be a real Position — a MagicMock recurses there.
     eng._oms.submit.return_value = Position(
@@ -46,7 +48,11 @@ def _engine():
     )
     eng._risk = MagicMock()
     eng._risk.can_trade.return_value = (True, "")
-    eng._risk.state.return_value = MagicMock(trades_today=0, equity=1_000_000)
+    from quant.execution.risk import RiskState
+    eng._risk.state.return_value = RiskState(
+        daily_pnl=0.0, consecutive_losses=0, halted=False, halt_reason="",
+        risk_per_trade_pct=0.005, trades_today=0, equity=1_000_000,
+    )
     eng._risk.position_size.return_value = 2
     stub = MagicMock()
     stub.should_enter.return_value = _ApprovedDecision(_sig())
@@ -199,6 +205,7 @@ class _NonApprovedDecision:
     gate_results: tuple = ()
     block_reasons: tuple = ("no edge",)
     model_label: str = ""
+    metadata: dict = field(default_factory=dict)
 
 
 def test_non_approved_decision_starts_new_episode():

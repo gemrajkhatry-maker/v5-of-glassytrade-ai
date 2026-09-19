@@ -197,20 +197,33 @@ def test_session_risk_sizes_from_portfolio_equity():
     auth.register_open(5_000)
     auth.record_close(5_000, -20_000)  # portfolio down 2% today
 
-    risk = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, portfolio_risk=auth,
-                       storage=None, symbol="SYM")
+    risk = SessionRisk(
+        starting_equity=1_000_000.0,
+        base_risk_pct=0.005,
+        portfolio_risk=auth,
+        storage=None,
+        symbol="SYM",
+        day_of_week=1,  # mid-week: no defensive halving
+    )
     # Engine's OWN daily_pnl is 0 (equity 1M) but the book is down 20k.
     qty_portfolio = risk.position_size(entry=100.0, sl=95.0)
 
-    solo = SessionRisk(starting_equity=1_000_000.0, base_risk_pct=0.005, storage=None, symbol="SOLO")
+    solo = SessionRisk(
+        starting_equity=1_000_000.0,
+        base_risk_pct=0.005,
+        storage=None,
+        symbol="SOLO",
+        day_of_week=1,
+    )
     qty_solo = solo.position_size(entry=100.0, sl=95.0)
 
     assert qty_portfolio < qty_solo, (
         "sizing must shrink when the portfolio is down, even if this engine "
         "has no losses of its own"
     )
-    # Fresh engine starts in the flat base tier (0.5% base risk).
-    expected = int((980_000 * 0.005) // 5.0)  # risk budget / per-unit risk
+    # Fresh engine starts in the flat base tier (0.25% conservative risk via
+    # _risk_per_trade_pct). Per-unit risk = entry - sl = 5.0.
+    expected = int((980_000 * 0.0025) // 5.0)  # risk budget / per-unit risk
     assert qty_portfolio == expected
 
 

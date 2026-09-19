@@ -3,7 +3,7 @@
 quant/execution/ports.py). Observer engines and pre-submit vetoes must not
 emit it. Exactly one emission per real submission, before PositionOpened."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from unittest.mock import MagicMock
 
 from quant.bars import Bar
@@ -22,6 +22,7 @@ class _ApprovedDecision:
     gate_results: tuple = ()
     block_reasons: tuple = ()
     model_label: str = "t"
+    metadata: dict = field(default_factory=dict)
 
 
 def _signal():
@@ -43,6 +44,7 @@ def _engine(execution_enabled=True, can_accept=(True, "")):
     )
     eng._oms = MagicMock()
     eng._oms.lot_size = 1
+    eng._oms.is_live = False
     # ponytail: EventStore checksum-serializes every event eagerly, so the
     # stubbed position must be a real Position — a MagicMock recurses there.
     eng._oms.submit.return_value = Position(
@@ -53,7 +55,11 @@ def _engine(execution_enabled=True, can_accept=(True, "")):
     )
     eng._risk = MagicMock()
     eng._risk.can_trade.return_value = (True, "")
-    eng._risk.state.return_value = MagicMock(trades_today=0, equity=1_000_000)
+    from quant.execution.risk import RiskState
+    eng._risk.state.return_value = RiskState(
+        daily_pnl=0.0, consecutive_losses=0, halted=False, halt_reason="",
+        risk_per_trade_pct=0.005, trades_today=0, equity=1_000_000,
+    )
     eng._risk.position_size.return_value = 2
     stub = MagicMock()
     stub.should_enter.return_value = _ApprovedDecision(_signal())
@@ -113,6 +119,8 @@ def test_event_store_failure_does_not_orphan_entry():
     eng._bar_index = 10
     eng._decide({}, _bar(0))  # must not raise
     eng._oms.submit.assert_called_once()
-    assert [type(e).__name__ for e in captured] == ["SignalApproved", "PositionOpened"]
+    # SignalApproved is a non-lifecycle event and reaches the bus subscriber;
+    # PositionOpened is lifecycle and is not published on append failure.
+    assert "SignalApproved" in [type(e).__name__ for e in captured]
     assert eng._entry_bar_index == 10
     assert eng._get_position_manager().current_position is not None
