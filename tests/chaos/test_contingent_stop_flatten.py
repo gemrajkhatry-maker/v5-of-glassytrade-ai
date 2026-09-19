@@ -42,7 +42,7 @@ class FailingStopBroker(IBroker):
             entry_time="2026-09-11T09:35:00",
         )
 
-    def close_position(self, symbol, side, quantity, portfolio, reference_price=None, contract_ref=None):
+    def close_position(self, symbol, side, quantity, portfolio, reference_price=None, contract_ref=None, close_intent_id=None):
         self.close_call_count += 1
         self.last_close_side = side
         self.last_close_qty = quantity
