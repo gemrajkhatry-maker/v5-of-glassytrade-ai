@@ -1,15 +1,16 @@
-"""The active analyzer supplies candidate direction to order-flow scoring."""
+"""The active analyzer computes raw order-flow components (no direction gating)."""
 
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from quant.amt.analyzer import AMTAnalyzer
+from quant.amt.orderflow.compute import compute_order_flow_metrics
+from quant.contracts.enums import MarketState
 from quant.contracts.value_objects import OHLC
 
 
-def _bar(index: int) -> OHLC:
+def _bar() -> OHLC:
     return OHLC(
-        time=f"2026-01-01T00:0{index}:00Z",
+        time="2026-01-01T00:00:00Z",
         open=100.0,
         high=101.0,
         low=99.0,
@@ -21,22 +22,39 @@ def _bar(index: int) -> OHLC:
     )
 
 
-def test_analyzer_passes_candidate_direction_to_order_flow_compute():
-    with patch("quant.amt.orderflow.compute.compute_order_flow_metrics") as compute:
-        compute.return_value = {
-            "avg_candle_vol": 0.0, "obi": 0.0, "toxicity": 0.0,
-            "norm_delta": 0.0, "footprint_confirmed": False,
-            "cvd_confirmed": False, "cvd_state": None,
-            "big_trade_confirmed": False, "absorption_detected": False,
-            "absorption_side": "", "absorption_range_ratio": 0.0,
-            "absorption_vol_ratio": 0.0, "absorption_active": False,
-            "absorption_cluster_high": 0.0, "absorption_cluster_low": 0.0,
-            "ofi_result": SimpleNamespace(ofi=0.0), "ofi_aligned": False,
-            "confluence_bonus": False, "volume_bubble_near": False,
-            "agg_result": None, "aggression_score": 0.0,
-            "has_aggression": False,
-        }
-        AMTAnalyzer().analyze([_bar(i) for i in range(5)], candidate_direction="LONG")
+def test_compute_returns_raw_components_without_direction():
+    """compute_order_flow_metrics returns raw aggression components.
 
-    assert compute.call_args is not None
-    assert compute.call_args.kwargs["candidate_direction"] in {"LONG", "SHORT"}
+    No candidate_direction parameter. Direction-gated re-scoring happens in
+    the decision pipeline (gate_triple_a_edge).
+    """
+    result = compute_order_flow_metrics(
+        recent_data=[_bar()],
+        order_book=None,
+        current=_bar(),
+        agg_prints=[],
+        market_state=MarketState.IMBALANCED,
+        lvns=[],
+        vah=0.0,
+        val=0.0,
+        poc=0.0,
+        tick_size=1.0,
+        cvd_state=None,
+    )
+
+    # candidate_direction parameter removed
+    # Returns raw components for re-scoring
+    assert "aggression_components" in result
+    components = result["aggression_components"]
+    assert "footprint_confirmed" in components
+    assert "cvd_confirmed" in components
+    assert "big_trade_confirmed" in components
+    assert "absorption_detected" in components
+    assert "ofi_aligned" in components
+    assert "confluence_bonus" in components
+    assert "volume_bubble_near" in components
+
+    # No direction-gated aggression score
+    assert result["aggression_score"] == 0.0
+    assert result["has_aggression"] is False
+    assert result["agg_result"] is None

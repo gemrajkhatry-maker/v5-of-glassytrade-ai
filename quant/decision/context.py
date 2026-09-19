@@ -44,6 +44,7 @@ class DecisionContext:
     # Provenance of order-flow evidence; unknown quality must not pass a
     # high-conviction entry gate.
     data_quality: DataQuality | None = None
+    evidence_provenance: dict[str, DataQuality] | None = None
     setup_evidence: Any | None = None
     # AMT market state (Fabio 2-state model) from the AMT analyzer. The
     # Triple-A edge (absorption → accumulation → VWAP breakout) fires in both
@@ -88,6 +89,12 @@ class DecisionContext:
     vwap_lower_2: float = 0.0
     cvd_slope: float = 0.0
     absorption_side: str = ""
+    # Raw aggression components from AMT engine (no direction gating).
+    # Re-scored with resolved agent_direction in gate_triple_a_edge.
+    aggression_components: dict | None = None
+    cvd_state: Any | None = None
+    ofi_result: Any | None = None
+    norm_delta: float = 0.0
     # Impulse Leg LVN (Layer 3 profile) — primary LVN from the most recent
     # directional impulse leg (swing low → high). Used by Gate 3 Path C
     # (Playbook C LVN Sniper) and the pyramid engine. Zero means unavailable.

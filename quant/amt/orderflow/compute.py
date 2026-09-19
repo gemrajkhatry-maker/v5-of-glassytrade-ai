@@ -39,12 +39,15 @@ def compute_order_flow_metrics(
     persistent_agg_scorer=None,
     atr_period: int = 14,
     session_bars: list | None = None,
-    candidate_direction: str | None = None,
 ) -> dict:
-    """Compute order flow detectors and aggression score.
+    """Compute order flow detectors and RAW aggression components (no direction gating).
 
     All tracker objects (cvd, big_trade, absorption, ofi, bubble, agg_scorer)
     are injected — this function is a pure mapper, not a god-class method.
+
+    Returns raw component confirmations. Direction-gated aggression scoring is
+    delegated to the decision pipeline where the strategy candidate direction
+    is resolved (see quant/decision/gates_edge.py).
     """
     result: dict = {}
 
@@ -82,19 +85,20 @@ def compute_order_flow_metrics(
     has_strong_delta = abs(result["norm_delta"]) > 0.30
     result["footprint_confirmed"] = has_agg_prints and has_strong_delta
 
-    # FR-06-02: CVD
+    # FR-06-02: CVD — raw confirmation without direction gating.
+    # Direction-gated CVD confirmation is applied in the decision pipeline
+    # (gate_triple_a_edge) where the strategy candidate direction is resolved.
     result["cvd_state"] = cvd_state
     result["cvd_confirmed"] = False
     if cvd_state is not None:
-        if market_state == MarketState.IMBALANCED:
-            direction = str(candidate_direction or "").upper()
-            result["cvd_confirmed"] = (
-                cvd_state.slope > 0 if direction == "LONG" else
-                cvd_state.slope < 0 if direction == "SHORT" else
-                cvd_state.slope != 0
-            )
-        elif cvd_state.has_divergence:
+        # CVD is confirmed if there's a meaningful slope (non-zero) OR divergence.
+        # The direction alignment check happens in the decision pipeline.
+        if cvd_state.has_divergence:
             result["cvd_confirmed"] = True
+            result["cvd_divergence_type"] = cvd_state.divergence_type
+        else:
+            result["cvd_confirmed"] = cvd_state.slope != 0
+            result["cvd_divergence_type"] = ""
 
     # FR-06-03: Big trade
     big_trade = big_trade_detector.detect(current, result["avg_candle_vol"]) if big_trade_detector else None
@@ -128,7 +132,19 @@ def compute_order_flow_metrics(
     bubble = bubble_detector.detect(current) if bubble_detector else None
     result["volume_bubble_near"] = bubble.detected if bubble else False
 
-    # Aggression scorer
+    # Store raw components for direction-gated re-scoring in decision pipeline.
+    # Do NOT compute direction-gated aggression score here.
+    result["aggression_components"] = {
+        "footprint_confirmed": result["footprint_confirmed"],
+        "cvd_confirmed": result["cvd_confirmed"],
+        "big_trade_confirmed": result["big_trade_confirmed"],
+        "absorption_detected": result["absorption_detected"],
+        "ofi_aligned": result["ofi_aligned"],
+        "confluence_bonus": result["confluence_bonus"],
+        "volume_bubble_near": result["volume_bubble_near"],
+    }
+
+    # Call scorer WITHOUT direction (direction gating happens in decision pipeline)
     if persistent_agg_scorer is not None:
         persistent_agg_scorer.set_persistence_for_state(market_state)
         agg_result = persistent_agg_scorer.score(
@@ -139,7 +155,7 @@ def compute_order_flow_metrics(
             ofi_aligned=result["ofi_aligned"],
             confluence_bonus=result["confluence_bonus"],
             volume_bubble_near=result["volume_bubble_near"],
-            direction=candidate_direction,
+            direction=None,
             cvd_slope=cvd_state.slope if cvd_state is not None else None,
             ofi=ofi_result.ofi if ofi_result else None,
             norm_delta=result["norm_delta"],

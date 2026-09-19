@@ -412,7 +412,6 @@ class AMTAnalyzer:
         footprint_accumulator: "TickFootprintAccumulator | None" = None,
         gex: object | None = None,
         latest_is_forming: bool = False,  # newest candle in `data` is still open (history/REST series)
-        candidate_direction: str | None = None,
     ) -> AMTResult:
         """Run the full AMT analysis pipeline.
 
@@ -625,7 +624,7 @@ class AMTAnalyzer:
         log_state_transition(self._previous_state, market_state, state_result)
         self._previous_state = market_state
 
-        # 3. Order Flow Detectors + Aggression Scoring
+        # 3. Order Flow Detectors + Aggression Scoring (raw components, no direction gating)
         from quant.amt.orderflow.compute import compute_order_flow_metrics as _compute_ofm
         flow = _compute_ofm(
             recent_data, order_book, current, agg_prints, market_state,
@@ -637,7 +636,6 @@ class AMTAnalyzer:
             bubble_detector=self._bubble_detector,
             persistent_agg_scorer=self._persistent_agg_scorer,
             session_bars=self._vwap.session_bars,
-            candidate_direction=candidate_direction,
         )
         avg_candle_vol = flow["avg_candle_vol"]
         obi = flow["obi"]
@@ -645,6 +643,7 @@ class AMTAnalyzer:
         norm_delta = flow["norm_delta"]
         footprint_confirmed = flow["footprint_confirmed"]
         cvd_confirmed = flow["cvd_confirmed"]
+        cvd_divergence_type = flow.get("cvd_divergence_type", "")
         cvd_state = flow["cvd_state"]
         big_trade_confirmed = flow["big_trade_confirmed"]
         absorption_detected = flow["absorption_detected"]
@@ -658,6 +657,7 @@ class AMTAnalyzer:
         agg_result = flow["agg_result"]
         aggression_score = flow["aggression_score"]
         has_aggression = flow["has_aggression"]
+        aggression_components = flow.get("aggression_components", {})
 
         # Profile shape and bimodal override
         shape = classify_shape(profile)
@@ -882,25 +882,29 @@ class AMTAnalyzer:
             bubble_retests=bubble_retests, npoc_above=npoc_above,
             npoc_below=npoc_below, opening_result=opening_result,
             mtf_result=mtf_result, structure=structure,
-            absorption_side=absorption_side,
-            absorption_range_ratio=absorption_range_ratio,
-            absorption_vol_ratio=absorption_vol_ratio,
-            delta_normalized_option=delta_normalized_option,
-            _drive_number=_drive_number, _drive_entry_valid=_drive_entry_valid,
-            cvd_source=cvd_source,
-            state_result=state_result, value_migration=value_migration,
-            _footprints=_footprints, _contested_zone=_contested_zone,
-            _triple=_triple, _effective_market_state=_effective_market_state,
-            gex=gex, vars_result=vars_result,
-            half_trend_result=half_trend_result,
-            compression_box_poc=_compression_box.micro_poc,
-            compression_box_vah=_compression_box.micro_vah,
-            compression_box_val=_compression_box.micro_val,
-            compression_box_bars=_compression_box.bar_count,
-            gap_profile_poc=_gap_profile.gap_poc,
-            gap_profile_vah=_gap_profile.gap_vah,
-            gap_profile_val=_gap_profile.gap_val,
-        )
+            order_book=order_book,
+            aggression_components=aggression_components,
+            norm_delta=norm_delta,
+absorption_side=absorption_side,
+             absorption_range_ratio=absorption_range_ratio,
+             absorption_vol_ratio=absorption_vol_ratio,
+             absorption_detected=absorption_detected,
+             delta_normalized_option=delta_normalized_option,
+             _drive_number=_drive_number, _drive_entry_valid=_drive_entry_valid,
+             cvd_source=cvd_source,
+             state_result=state_result, value_migration=value_migration,
+             _footprints=_footprints, _contested_zone=_contested_zone,
+             _triple=_triple, _effective_market_state=_effective_market_state,
+             gex=gex, vars_result=vars_result,
+             half_trend_result=half_trend_result,
+             compression_box_poc=_compression_box.micro_poc,
+             compression_box_vah=_compression_box.micro_vah,
+             compression_box_val=_compression_box.micro_val,
+             compression_box_bars=_compression_box.bar_count,
+             gap_profile_poc=_gap_profile.gap_poc,
+             gap_profile_vah=_gap_profile.gap_vah,
+             gap_profile_val=_gap_profile.gap_val,
+         )
 
         # Squeeze detection (Fabio Playbook #4): runs on the assembled result
         # because it needs the canonical session VA (val/vah) from above.
@@ -912,6 +916,63 @@ class AMTAnalyzer:
             squeeze_direction=sq.direction if sq else "",
             squeeze_trapped_level=sq.trapped_level if sq else 0.0,
         )
+
+    def _compute_evidence_provenance(
+        self, footprint_accumulator, cvd_state, order_book, absorption_detector,
+        absorption_detected: bool, _footprints, _contested_zone, _triple, cvd_source
+    ) -> dict:
+        """Compute per-evidence-family provenance for live safety gating.
+
+        Returns a dict mapping each REQUIRED_EVIDENCE_FAMILY to its DataQuality.
+        TICK_EXACT = live tick data available for this family
+        CANDLE_DISTRIBUTED = candle-level reconstruction available
+        CANDLE_GAUSSIAN = synthetic/proxy
+        PRICE_DIRECTION_PROXY = price-only inference
+        UNAVAILABLE = no data at all
+        """
+        from quant.decision.data_quality import DataQuality
+
+        provenance = {}
+
+        # 1. footprint_imbalance: TICK_EXACT if live footprint accumulator has data
+        if footprint_accumulator and _footprints:
+            provenance["footprint_imbalance"] = DataQuality.TICK_EXACT
+        elif _footprints:
+            provenance["footprint_imbalance"] = DataQuality.CANDLE_DISTRIBUTED
+        else:
+            provenance["footprint_imbalance"] = DataQuality.UNAVAILABLE
+
+        # 2. cvd_delta: TICK_EXACT if CVD tracker has live tick source
+        if cvd_state and cvd_source in ("underlying", "option"):
+            provenance["cvd_delta"] = DataQuality.TICK_EXACT
+        elif cvd_state:
+            provenance["cvd_delta"] = DataQuality.CANDLE_DISTRIBUTED
+        else:
+            provenance["cvd_delta"] = DataQuality.UNAVAILABLE
+
+        # 3. ofi_depth: TICK_EXACT if live order book depth available
+        if order_book:
+            provenance["ofi_depth"] = DataQuality.TICK_EXACT
+        else:
+            provenance["ofi_depth"] = DataQuality.UNAVAILABLE
+
+        # 4. absorption: TICK_EXACT if absorption detector ran on live data
+        if absorption_detected and absorption_detector:
+            provenance["absorption"] = DataQuality.TICK_EXACT
+        elif absorption_detector:
+            provenance["absorption"] = DataQuality.CANDLE_DISTRIBUTED
+        else:
+            provenance["absorption"] = DataQuality.UNAVAILABLE
+
+        # 5. stacked_imbalance: TICK_EXACT if live footprint shows stacked levels
+        if _footprints and _contested_zone:
+            provenance["stacked_imbalance"] = DataQuality.TICK_EXACT
+        elif _footprints:
+            provenance["stacked_imbalance"] = DataQuality.CANDLE_DISTRIBUTED
+        else:
+            provenance["stacked_imbalance"] = DataQuality.UNAVAILABLE
+
+        return provenance
 
     def _build_result(self, *, current, data, symbol, profile, poc, vah, val,
                   lvns, hvns, aggression_score, _setup, agg_prints,
@@ -925,12 +986,13 @@ class AMTAnalyzer:
                       break_state, ofi_result, obi, dev_poc, dev_vah, dev_val,
                       cushion_tier, session_pnl, bubble_retests, npoc_above,
                       npoc_below, opening_result, mtf_result, structure,
-                      absorption_side, absorption_range_ratio,
-                      absorption_vol_ratio, delta_normalized_option,
-                      _drive_number, _drive_entry_valid, cvd_source,
-                      state_result, value_migration,
-                      _footprints, _contested_zone, _triple,
-                      _effective_market_state, gex=None, vars_result=None,
+                      order_book=None, aggression_components=None, norm_delta=0.0,
+                      absorption_side="", absorption_range_ratio=0.0,
+                      absorption_vol_ratio=0.0, absorption_detected=False, delta_normalized_option=0.0,
+                      _drive_number=0, _drive_entry_valid=False, cvd_source="",
+                      state_result=None, value_migration=None,
+                      _footprints=None, _contested_zone=False, _triple=None,
+                      _effective_market_state="", gex=None, vars_result=None,
                       half_trend_result=None,
                       compression_box_poc=0.0, compression_box_vah=0.0,
                       compression_box_val=0.0, compression_box_bars=0,
@@ -940,6 +1002,12 @@ class AMTAnalyzer:
 
         Pure data mapping — extracted from analyze() for readability.
         """
+        # Compute per-evidence-family provenance for live safety gating
+        evidence_provenance = self._compute_evidence_provenance(
+            getattr(self, '_footprint_accumulator', None), cvd_state, order_book,
+            self._absorption_detector, absorption_detected,
+            _footprints=_footprints, _contested_zone=_contested_zone, _triple=_triple, cvd_source=cvd_source
+        )
         return AMTResult(
             market_state=_effective_market_state,
             poc=poc,
@@ -1064,6 +1132,11 @@ class AMTAnalyzer:
             gap_profile_poc=gap_profile_poc,
             gap_profile_vah=gap_profile_vah,
             gap_profile_val=gap_profile_val,
+            aggression_components=aggression_components,
+            cvd_state=cvd_state,
+            ofi_result=ofi_result,
+            norm_delta=norm_delta,
+            evidence_provenance=evidence_provenance,
         )
 
     # -------------------------------------------------------------------

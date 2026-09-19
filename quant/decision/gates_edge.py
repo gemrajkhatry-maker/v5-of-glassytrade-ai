@@ -1,6 +1,6 @@
 """Gate 3 — the Triple-A edge (Fabio: absorption -> accumulation -> aggression)."""
 
-from quant.amt.orderflow.aggression import canonical_absorption_direction
+from quant.amt.orderflow.aggression import canonical_absorption_direction, AggressionScorer
 from quant.config.constants import (
     ABSORPTION_MAX_AGE_BARS as _ABSORPTION_MAX_AGE_BARS,
     OBI_AGGRESSION_THRESHOLD as _OBI_AGGRESSION_THRESHOLD,
@@ -32,6 +32,50 @@ from quant.decision.result import GateResult
 # and refusing them would disable trading rather than filter probes.
 _FULL_BODY_MIN_RATIO = 0.6
 _CLOSE_NEAR_EXTREME_MIN = 0.75
+
+
+def rescore_aggression_with_direction(ctx: DecisionContext) -> float:
+    """Re-compute aggression score with the resolved strategy candidate direction.
+
+    The AMT engine computes raw aggression components WITHOUT direction gating
+    (since it runs before the strategy direction is resolved). This function
+    applies the direction gating using the resolved agent_direction from the
+    DecisionContext, ensuring the aggression score reflects the actual trade
+    direction, not the observed bar delta.
+
+    Returns the direction-gated aggression score (0.0 to 4.5).
+    """
+    components = getattr(ctx, "aggression_components", None)
+    if not components:
+        return 0.0
+
+    direction = str(getattr(ctx, "agent_direction", "") or "").upper()
+    if direction not in ("LONG", "SHORT"):
+        return 0.0
+
+    cvd_state = getattr(ctx, "cvd_state", None)
+    cvd_slope = cvd_state.slope if cvd_state else None
+    ofi_result = getattr(ctx, "ofi_result", None)
+    ofi = ofi_result.ofi if ofi_result else None
+    norm_delta = getattr(ctx, "norm_delta", None)
+    absorption_side = getattr(ctx, "absorption_side", "")
+
+    scorer = AggressionScorer()
+    result = scorer.score(
+        footprint_confirmed=components.get("footprint_confirmed", False),
+        cvd_confirmed=components.get("cvd_confirmed", False),
+        big_trade_confirmed=components.get("big_trade_confirmed", False),
+        absorption_detected=components.get("absorption_detected", False),
+        ofi_aligned=components.get("ofi_aligned", False),
+        confluence_bonus=components.get("confluence_bonus", False),
+        volume_bubble_near=components.get("volume_bubble_near", False),
+        direction=direction,
+        cvd_slope=cvd_slope,
+        ofi=ofi,
+        norm_delta=norm_delta,
+        absorption_side=absorption_side,
+    )
+    return result.score
 
 
 def _opposing_absorption(ctx: DecisionContext) -> bool:
@@ -145,6 +189,15 @@ def _check_guards(ctx: DecisionContext) -> GateResult | None:
         return GateResult(3, False, f"CVD slope aggressively negative ({cvd_slope:.2f}) conflicts with LONG")
     if ctx.agent_direction == "SHORT" and cvd_slope > cvd_block_pos:
         return GateResult(3, False, f"CVD slope aggressively positive ({cvd_slope:.2f}) conflicts with SHORT")
+
+    # CVD divergence direction alignment — divergence must confirm the trade direction
+    cvd_divergence = getattr(ctx, "cvd_divergence", "")
+    if cvd_divergence:
+        if ctx.agent_direction == "LONG" and cvd_divergence != "BULLISH_DIV":
+            return GateResult(3, False, f"CVD divergence {cvd_divergence} conflicts with LONG")
+        if ctx.agent_direction == "SHORT" and cvd_divergence != "BEARISH_DIV":
+            return GateResult(3, False, f"CVD divergence {cvd_divergence} conflicts with SHORT")
+
     return None
 
 
@@ -175,6 +228,27 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         lvn_near = leg_lvn > 0 and abs(price - leg_lvn) <= _LVN_PROXIMITY_TICKS * tick
         if not lvn_near:
             return GateResult(3, False, f"Triple-A AGGRESSION without LVN proximity (leg_lvn={leg_lvn:.2f}, price={price:.2f})")
+        # Spec §5.2 Layer 2: compression box breakout confirmation. When a
+        # micro-balance range has formed (compression box detected), require
+        # the breakout close to exceed the micro-VAH (LONG) or micro-VAL
+        # (SHORT). This confirms a true out-of-balance condition — a close
+        # inside the box is range rotation, not a tradable breakout.
+        cb_bars = getattr(ctx, "compression_box_bars", 0) or 0
+        if cb_bars >= 3:
+            cb_vah = getattr(ctx, "compression_box_vah", 0.0) or 0.0
+            cb_val = getattr(ctx, "compression_box_val", 0.0) or 0.0
+            if ctx.agent_direction == "LONG" and cb_vah > 0 and price <= cb_vah:
+                return GateResult(
+                    3, False,
+                    f"Triple-A LONG blocked: close {price:.2f} did not break "
+                    f"compression box VAH {cb_vah:.2f} (bars={cb_bars})",
+                )
+            if ctx.agent_direction == "SHORT" and cb_val > 0 and price >= cb_val:
+                return GateResult(
+                    3, False,
+                    f"Triple-A SHORT blocked: close {price:.2f} did not break "
+                    f"compression box VAL {cb_val:.2f} (bars={cb_bars})",
+                )
         return _pass(f"Triple-A AGGRESSION {tsignal} @ LVN {leg_lvn:.2f}", "TRIPLE_A")
     if ctx.drive_entry_valid:
         return _pass("Second Drive reclaim confirmed", "SECOND_DRIVE")
@@ -228,7 +302,17 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
 
     Three valid canonical paths: Triple-A AGGRESSION, IB Second Drive, LVN Sniper.
     Guards: volume bubble, contested zone, anti-climax, drive exhaustion, CVD direction.
+
+    The aggression score is re-computed with the resolved strategy candidate
+    direction (agent_direction) to ensure it reflects the actual trade direction,
+    not the observed bar delta.
     """
+    # Re-score aggression with the resolved strategy direction.
+    # This ensures the aggression score reflects the actual candidate trade
+    # direction, not the observed bar delta (which the AMT engine uses
+    # since it runs before the strategy direction is resolved).
+    aggression_score = rescore_aggression_with_direction(ctx)
+
     r = _check_guards(ctx)
     if r: return r
     r = _check_setup_paths(ctx, ctx.cvd_slope)

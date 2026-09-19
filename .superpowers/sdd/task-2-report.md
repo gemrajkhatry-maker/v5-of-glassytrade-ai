@@ -81,6 +81,23 @@ The focused assertions now verify `DecisionProduced` and certification records f
 - Made the OMS capability authoritative: `LiveOMS` cannot be downgraded by `live_mode=False`; missing or non-boolean capability is fail-closed; contradictory configuration is live-safe. Explicit `is_live=False` remains paper behavior.
 - Updated only the existing paper decision-loop test double to declare `is_live=False`; no unrelated production or DTO consumer changes were made.
 
+## Final Whole-Branch Remediation (Including Corrective Fixes)
+
+- The live boundary now evaluates normalized provenance for all five required
+  evidence families, not only aggregate `data_quality`. One missing or
+  non-`TICK_EXACT` family produces `PROXY_FLOW_BLOCKED`, even when the
+  aggregate quality is exact.
+- The paper/replay branch remains explicitly `PROXY_MODE` for any non-exact
+  family. No exactness is inferred from footprint presence or `cvd_source`.
+- Added regression coverage for an exact aggregate containing one distributed
+  CVD/delta family.
+- Focused final regression run: `21 passed`; the per-family test specifically
+  proves one non-exact family blocks an otherwise exact aggregate.
+- Corrective fix integration: the per-family provenance is now populated by the
+  AMT analyzer (`_compute_evidence_provenance`) and threaded through the DTO
+  and DecisionContext. The live gate in `decision_loop.py` uses
+  `live_evidence_exact(ctx.evidence_provenance)` which checks all five families.
+
 ## Concerns
 
 - The full certification command retains the known unrelated `s5_conviction_formula_is_explicit` DTO consumer defect; it was explicitly excluded from the focused green run and was not changed.

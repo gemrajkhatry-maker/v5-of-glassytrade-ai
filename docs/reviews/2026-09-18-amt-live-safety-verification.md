@@ -1,21 +1,20 @@
 # AMT Live Safety Verification
 
 **Date:** 2026-09-18
-**Scope:** Task 5 verification after the approved Task 1-4 commits
-**Production behavior:** No production files were changed for this verification
+**Scope:** Task 5 verification after the approved Task 1-4 commits + corrective fixes
+**Production behavior:** Corrective fixes applied for 3 high-severity design gaps
 
-## Directional AMT
+## Directional AMT (Corrected)
 
-The focused AMT regression command completed with `247 passed, 6 skipped, 2
-failed`. The two failures are the known dirty-baseline DTO contract drift:
-`quant/execution/exit_checks.py` reads stacked-imbalance keys that
-`amt_result_to_dto` does not emit, and the decision-loop scanner no longer sees
-the expected `legLvns` consumer. The approved Task 1 directional tests remain
-covered by the prior Task 1 report (`6 passed` for the corrected engine,
-directional compute, and analyzer propagation set).
+The AMT scoring no longer uses bar delta as a substitute for strategy direction.
+Directional aggression/CVD qualification now occurs in the decision pipeline
+(`quant/decision/gates_edge.py::rescore_aggression_with_direction`) where the
+resolved `agent_direction` is available. The AMT engine computes raw components
+without direction gating.
 
-The numerical AMT parity work remains deferred. This verification does not
-change the 68.2% value-area, LVN, absorption, or range-bar thresholds.
+Focused regression: `tests/quant/amt/orderflow/test_directional_compute.py`,
+`tests/quant/amt/test_amt_engine_direction.py` pass. The prior approach of
+passing bar delta as `candidate_direction` has been removed.
 
 ## Proxy Live-Entry Gate
 
@@ -40,6 +39,23 @@ the final focused report, including partial, unknown, restart, and close
 identity cases). Live broker readiness is still not proven: startup requires a
 real broker status provider and durable risk-reservation data, and unresolved
 startup issues remain entry-blocking.
+
+## Per-Evidence-Family Provenance (Corrected)
+
+Per-family provenance is now populated in `AMTResult.evidence_provenance` for
+all five required families: footprint_imbalance, cvd_delta, ofi_depth,
+absorption, stacked_imbalance. The AMT analyzer computes provenance from
+available data sources (live tick footprint, CVD tracker source, order book
+depth, absorption detector, contested zone). Live gating via
+`live_evidence_exact()` requires every family to be `TICK_EXACT`; one non-exact
+family blocks an otherwise exact aggregate. Paper/replay retains `PROXY_MODE`.
+
+## CVD Divergence Direction-Awareness (Corrected)
+
+CVD divergence confirmation is now direction-aware in all market states.
+`gate_triple_a_edge` explicitly checks `cvd_divergence` against
+`agent_direction`: BULLISH_DIV only confirms LONG, BEARISH_DIV only confirms
+SHORT. This replaces the prior IMBALANCED-only check.
 
 ## Durable Event/Projection
 
@@ -77,7 +93,9 @@ to completion. An earlier invocation was tool-timeout terminated after 120
 seconds; it was rerun with a longer timeout and the result above is the
 authoritative result.
 
-## Known Baseline Failures
+## Failure Classification
+
+### Known Baseline Failures
 
 - DTO consumer drift: missing `legLvn`, `legLvns`, stacked-imbalance, and
   `time` keys across the known consumers. This is outside Task 5 and the
@@ -91,11 +109,28 @@ authoritative result.
   telemetry, approval, golden, and latch failures.
 - Certification failure: `s5_conviction_formula_is_explicit` reaches no gate
   record because the current data-quality/DTO baseline path blocks it early.
-- One chaos assertion still expects unmatched close replay to raise, while the
-  approved Task 4 behavior is replay-tolerant with structured diagnostics.
-
 These failures were inspected and classified; no unrelated production or test
 fixes were applied.
+
+### Intentional Behavior/Test Debt
+
+- `tests/quant/chaos/test_crash_recovery.py::TestPositionIdMismatch::test_pyramid_close_mismatch_raises`
+  expects unmatched close replay to raise. The approved Task 4 contract
+  intentionally changed this behavior to replay-tolerant handling with
+  structured diagnostics. The failure is stale/conflicting test debt, not a
+  baseline production failure.
+
+### Pre-existing Branch Scope Contamination
+
+- Commit `cc8baa9c` introduced CHOP position-management and stacked-imbalance
+  exit behavior, plus related range-bar/feed telemetry and risk-reset work.
+  Those commits predate this remediation branch scope. They were preserved and
+  not destructively reverted; no additional unrelated behavior was added here.
+
+### Unresolved Regressions
+
+- The release gate remains red with the failures reported below, including DTO
+  consumer drift and broader dirty-worktree failures. These remain unresolved.
 
 ## Explicit Live Status
 

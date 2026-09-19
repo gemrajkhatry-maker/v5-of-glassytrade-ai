@@ -14,7 +14,7 @@ is safe.
 from __future__ import annotations
 from quant.contracts.enums import MarketState
 from quant.state import _epoch_to_iso
-from quant.decision.data_quality import DataQuality, normalize_data_quality
+from quant.decision.data_quality import DataQuality, normalize_data_quality, normalize_evidence_provenance
 
 
 def amt_result_to_dto(r) -> dict:
@@ -59,6 +59,12 @@ def amt_result_to_dto(r) -> dict:
         # Canonical provenance: exact tick footprint when available, otherwise
         # preserve the analyzer's explicit candle/proxy source.
         "dataQuality": quality.value,
+        "evidenceProvenance": {
+            key: value.value
+            for key, value in normalize_evidence_provenance(
+                getattr(r, "evidence_provenance", None)
+            ).items()
+        },
         "cvdDivergence": r.cvd_divergence,
         "profileShape": r.profile_shape,
         "profileType": r.profile_type,
@@ -161,6 +167,11 @@ def amt_result_to_dto(r) -> dict:
         "gapProfilePoc": float(getattr(r, "gap_profile_poc", 0.0)),
         "gapProfileVah": float(getattr(r, "gap_profile_vah", 0.0)),
         "gapProfileVal": float(getattr(r, "gap_profile_val", 0.0)),
+        # Raw aggression components for direction-gated re-scoring
+        "aggressionComponents": getattr(r, "aggression_components", {}),
+        "cvdState": getattr(r, "cvd_state", None),
+        "ofiResult": getattr(r, "ofi_result", None),
+        "normDelta": getattr(r, "norm_delta", 0.0),
         # Displacement
         "swingDelta": r.swing_delta,
         # Per-symbol delta (isolated per option contract)

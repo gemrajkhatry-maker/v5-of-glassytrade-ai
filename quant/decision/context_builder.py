@@ -24,7 +24,7 @@ from quant.decision.context import DecisionContext
 from quant.session_gates import ist_dt, session_allow_entry
 from quant.amt.session.context import get_session_info
 from quant.bars import DEFAULT_INTERVAL_SEC
-from quant.decision.data_quality import normalize_data_quality
+from quant.decision.data_quality import normalize_data_quality, normalize_evidence_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -493,6 +493,10 @@ class DecisionContextBuilder:
         return normalize_data_quality(amt_dto.get("dataQuality"))
 
     @staticmethod
+    def _resolve_evidence_provenance(amt_dto: dict):
+        return normalize_evidence_provenance(amt_dto.get("evidenceProvenance"))
+
+    @staticmethod
     def _resolve_session_open(effective_time: str, market: str,
                               contract_expiry, session_info) -> bool:
         """Determine whether the session allows entry."""
@@ -564,6 +568,7 @@ class DecisionContextBuilder:
             agent_direction=agent_direction,
             agent_probability=_DETERMINISTIC_CONVICTION,
             data_quality=self._resolve_data_quality(amt_dto),
+            evidence_provenance=self._resolve_evidence_provenance(amt_dto),
             setup_evidence=setup_evidence,
             market_state=amt_market_state,
             balance_ratio=df(amt_dto, "balanceRatio"),
@@ -584,6 +589,10 @@ class DecisionContextBuilder:
             vwap_lower_2=df(amt_dto, "vwapLower2"),
             cvd_slope=df(amt_dto, "cvdSlope"),
             absorption_side=ds(amt_dto, "absorptionSide"),
+            aggression_components=amt_dto.get("aggressionComponents"),
+            cvd_state=amt_dto.get("cvdState"),
+            ofi_result=amt_dto.get("ofiResult"),
+            norm_delta=df(amt_dto, "normDelta"),
             equity=risk_state.equity,
             risk_per_trade_pct=risk_state.risk_per_trade_pct,
             leg_lvn=nearest_leg_lvn,

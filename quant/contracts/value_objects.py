@@ -267,6 +267,7 @@ class AMTResult:
     delta_normalized_option: float = 0.0  # Normalized delta from option tick (per-symbol isolation)
     # CVD data source indicator — "underlying" when computed from futures, "option" when from option premium
     cvd_source: str = ""
+    evidence_provenance: dict[str, object] = field(default_factory=dict)
     # New: Extreme deviation escalation (> 3.0 sigma)
     is_extreme_deviation: bool = False
     # Fix 1: Option type for direction labeling (CALL/PUT/UNKNOWN)
@@ -290,6 +291,23 @@ class AMTResult:
     vars_result: object | None = None
     # HalfTrend indicator (display-only trend line + Buy/Sell labels)
     half_trend_result: object | None = None
+    # Layer 2 Compression Box (spec §5.2): micro-profile inside a tight
+    # 15-30m balance range. A true out-of-balance condition requires a 1m
+    # candle close outside this box (micro_vah/micro_val).
+    compression_box_poc: float = 0.0
+    compression_box_vah: float = 0.0
+    compression_box_val: float = 0.0
+    compression_box_bars: int = 0  # bars in the compression window (0 = none detected)
+    # Layer 4 Gap Profile (spec §5.2): micro-POC/VAH/VAL from the overnight
+    # gap zone. Maps liquidity voids; gap-LVNs are high-prob fill zones.
+    gap_profile_poc: float = 0.0
+    gap_profile_vah: float = 0.0
+    gap_profile_val: float = 0.0
+    # Raw aggression components for direction-gated re-scoring in decision pipeline.
+    aggression_components: dict = field(default_factory=dict)
+    cvd_state: object = None  # CVD tracker state (for slope in re-scoring)
+    ofi_result: object = None  # OFI calculator result (for OFI value in re-scoring)
+    norm_delta: float = 0.0  # Normalized delta (for footprint re-scoring)
 
 
 
@@ -402,4 +420,3 @@ class AIAnalysisResult:
     projected_price: float
     reasoning: tuple[str, ...] = ()
     factor_breakdown: FactorBreakdown = field(default_factory=FactorBreakdown)
-

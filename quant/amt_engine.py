@@ -478,10 +478,6 @@ class AMTEngine:
                 option_tick=ohlc,
                 footprint_accumulator=self._footprint,
                 gex=self._gex,
-                candidate_direction=(
-                    "LONG" if ohlc.delta > 0 else
-                    "SHORT" if ohlc.delta < 0 else None
-                ),
             )
         except Exception:
             if not self._amt_fail_logged:
