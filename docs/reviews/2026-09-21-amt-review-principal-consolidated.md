@@ -11,8 +11,10 @@ test coverage, integration seams) working from `docs/amt` only, plus a principal
 independent verification pass on every CRITICAL and HIGH finding. Each finding below was
 re-checked by the consolidating principal against the spec text and the code.
 
-**Test baseline (unchanged throughout the review):** `tests/quant` + `tests/architecture`
-→ **2580 passed, 11 skipped, 0 failed**, exit 0.
+**Test baseline at review time:** `tests/quant` + `tests/architecture` → **2580 passed,
+11 skipped, 0 failed**, exit 0. The validation round added 12 regression tests
+(`tests/quant/decision/test_review_regression_c1_c4.py`), taking the suite to
+**2592 passed, 11 skipped, 0 failed**.
 
 ---
 
@@ -54,26 +56,40 @@ Three failure modes dominate, and they are the dangerous ones:
    breakeven floor. The ratchet itself is dead state. (D-C4 → downgraded to M18; see
    correction.)
 
-None of these is caught by any test. A green suite here measures plumbing, not
-spec conformance.
+None of these was caught by any test at review time. The validation round added
+two regression guards (`tests/quant/decision/test_review_regression_c1_c4.py`) that
+pin C1's wiring contract and §13.2.4's bundle invariant — the first by failing on a
+half-fix, the second by failing when the breakeven merge is removed (mutation-verified).
+The remaining 43 findings are still uncovered.
 
 ---
 
-## CRITICAL (7 confirmed + 1 downgraded) — fix before any live deployment
+## CRITICAL (6 confirmed; C2 and C4 downgraded to MEDIUM, see M1/M18) — fix before any live deployment
 
 ### C1. `cvd_divergence` gate input is dead code — the divergence veto fails open
 **Spec:** `fabio_decision_pipeline.md:106-107` — Gate 3 CVD-conflict guard family.
 **Code:** `quant/decision/gates_edge.py:200-205` reads `getattr(ctx, "cvd_divergence", "")`.
-**Producer:** none. `quant/decision/context.py` declares **no such field** (verified by
-construction: `hasattr(ctx, "cvd_divergence")` → `False`). `context_builder.py` never
-sets it (verified by AST-level field-coverage diff of `build()`). The analyzer *does*
-compute real divergences (`quant/amt/compute.py:221-224`, genuine half-window swing
-comparisons — correct), and the DTO carries `"cvdDivergence"` (`dto.py:170`), but
-`context_builder.py` never reads that key (verified by grep).
+**Producer:** none. `quant/decision/context.py` declares **no such field** — and because
+`DecisionContext` is a **frozen** dataclass, the field cannot be set even by a caller who
+tries: `dataclasses.replace(ctx, cvd_divergence=...)` raises `TypeError` (verified at
+runtime). `context_builder.py` never sets it and never reads the `"cvdDivergence"` key
+that `dto.py:170` emits. The analyzer *does* compute real divergences
+(`quant/amt/orderflow/cvd.py:52-58` carries `divergence_type`; `analyzer.py:1025` sets it
+on `AMTResult`), so this is a wiring gap, not an unimplemented feature.
 **Impact:** the guard is `""` on 100% of bars, so the divergence-alignment veto can never
-fire. Silent fail-open on a Gate 3 safety guard.
+fire. Silent fail-open on a Gate 3 safety guard. **Proven by execution:** with a context
+that satisfies every prior guard (full-body close, no anti-climax, in-favour slope), a
+`BEARISH_DIV` value vetoes a LONG correctly when supplied — but the real production
+context resolves `getattr(ctx, "cvd_divergence", "")` to `""` and the branch is skipped.
+**Pinned by a test:** `tests/quant/decision/test_review_regression_c1_c4.py` now asserts
+(1) the veto logic is correct when the field is populated, (2) the field is absent from
+the frozen dataclass and no constructor argument can reach the branch, (3) the builder
+never reads the DTO key, and (4) the producer does emit it. Tests (2)/(3) are written to
+**fail on a half-fix** (field added without wiring the builder), so the fix is guided
+rather than silently landing still-dead.
 **Fix:** add `cvd_divergence: str = ""` to `DecisionContext`; map `dto["cvdDivergence"]`
 in `context_builder.build()` (the strings already match: `BULLISH_DIV`/`BEARISH_DIV`).
+Then flip tests (2)/(3) into positive assertions.
 
 ---
 
@@ -316,7 +332,7 @@ and a live test asserting which path is active; or amend §4 to name time bars a
 | M15 | `quantize` ladder contains an off-spec leading `2` step | MEDIUM | `range_bars.py:43-46` — `{2,5,10,25,50,100,200}` vs spec's `{5,10,25,50,100,200}` |
 | M16 | Footprint provenance name drift + `cvd_source` never passed | MEDIUM |
 | M17 | **§3's 5-Minute Kline stream has no producer at the production default** | MEDIUM | Spec §3 requires 5m klines for "Macro Dealing Range identification, Session highs/lows, and overarching market narrative framing." `_DEFAULT_CONFIG["interval_seconds"] = 60` (`multi_engine.py:266`), so `runtime.py:384-409` builds a 60s aggregator and no 5m one; `analyzer.py` receives a single timeframe (`recent_data`, `:454`) and has **no 5m/macro concept at all** (verified: grep for `dealing_range`/`macro`/`5m` in the analyzer → no hits). The 60s bar does double duty as both decision and macro context. Note `DEFAULT_INTERVAL_SEC = 300` (`bars.py:7`) contradicts the coordinator default of 60 — two sources of truth again | `analyzer.py:1007` reads `self._footprint_accumulator` (never assigned) — should read the `footprint_accumulator` parameter; `AMTEngine` never passes `cvd_source`. Both `TICK_EXACT` provenance branches are unreachable, so live CVD/footprint is reported `CANDLE_DISTRIBUTED` forever |
-| M18 | **(downgraded from CRITICAL C4 — headline refuted by execution)** The pyramid SL ratchet writes `new_sl` into `signal.sl`, but the exit engine resolves the effective stop as `max({signal.sl, be_floor, trail})` (`protective_stop.py:5-9`), so the ratchet is overridden by the breakeven floor that authorized the pyramid | MEDIUM | Bundle guarantee holds (verified end-to-end: `+24.5`). Residual cost: the `StopMoved` event at `position_manager.py:678` journals a stop the engine never honours, and `base_override` (`position_manager.py:256`) hands a stale sub-breakeven `signal.sl` to any caller that skips the merge. No test pins bundle PnL ≥ 0 |
+| M18 | **(downgraded from CRITICAL C4 — headline refuted by execution)** The pyramid SL ratchet writes `new_sl` into `signal.sl`, but the exit engine resolves the effective stop as `max({signal.sl, be_floor, trail})` (`protective_stop.py:5-9`), so the ratchet is overridden by the breakeven floor that authorized the pyramid | MEDIUM | Bundle guarantee holds (verified end-to-end: `+24.5`). Residual cost: the `StopMoved` event at `position_manager.py:678` journals a stop the engine never honours, and `base_override` (`position_manager.py:256`) hands a stale sub-breakeven `signal.sl` to any caller that skips the merge. **Now pinned:** `tests/quant/decision/test_review_regression_c1_c4.py::TestPyramidBundleGuarantee` asserts stopped-out bundle PnL ≥ 0 for both directions and both ratchet-firing and non-firing stops, and was mutation-verified (removing the `be_floor` merge fails it) |
 | L1 | `mock_pass` sentinel aliases `NotImplementedError` to a "placed" live stop | LOW | `live_oms.py:181-189`. Blast radius = one unguarded position; the in-memory stop path still works |
 | L2 | Gate 4 options stop cap uses 5% of premium, not 0.75% | LOW | `gates_rr.py:32-37`. Deliberate and documented; the 200-tick hard cap swamps either value |
 | L3 | §8 aggression trigger joint-condition / non-confirm paths undertested | LOW | No 2-of-3 test asserting the machine resets |
@@ -466,8 +482,10 @@ correctly implemented and tested against `docs/amt`, and on that measure it is n
   layer) whose tuning constant an operator could believe is live.
 - **45 total** defects across constants, predicates, guards, formulas, and tests.
 - **3 spec-internal contradictions** the code cannot resolve.
-- A **2580/2580 green suite** that asserts the wrong values in the exact places where the
-  drift lives, and cannot detect any of the 8 CRITICALs.
+- A **2592/2592 green suite** (2580 at review time + 12 guards added in validation)
+  that asserts the wrong values in the exact places where the drift lives and could not
+  detect any of the CRITICALs at review time; 2 of the findings are now pinned by the
+  added guards, 43 are still unguarded.
 
 **Do not deploy to live trading until Phase 0 and Phase 1 are closed and the three
 spec contradictions are settled in writing.**
