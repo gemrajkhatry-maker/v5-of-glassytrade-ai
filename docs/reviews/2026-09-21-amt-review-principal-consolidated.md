@@ -27,14 +27,19 @@ between the specification and the code**: load-bearing spec constants, predicate
 safety guards are absent, inverted, or silently disabled, and the test suite asserts the
 *wrong* values in the places that matter most.
 
-**Defect totals: 44** — **8 CRITICAL**, **17 HIGH**, **15 MEDIUM**, **4 LOW**
+**Defect totals: 44** — **7 CRITICAL**, **17 HIGH**, **16 MEDIUM**, **4 LOW**
+*(One CRITICAL downgraded to MEDIUM on re-inspection: `session_extreme_*` has a wick
+fallback, so it degrades stop quality rather than disabling the guard. See C2.)*
 
 Three failure modes dominate, and they are the dangerous ones:
 
-1. **Silent fail-open guards.** Four DecisionContext fields consumed by safety gates have
-   **no producer anywhere in the codebase**. Each is read via `getattr(ctx, x, default)`,
-   so the guard evaluates to "no conflict" on every bar of every session. A typo can
-   disable a veto. (D-E1, D-E2, D-E3)
+1. **A silent fail-open guard, plus a larger dead subsystem.** One DecisionContext field
+   consumed by a Gate 3 safety veto has **no producer anywhere in the codebase** and is read
+   via `getattr(ctx, "cvd_divergence", "")`, so the guard sees "no conflict" on every bar of
+   every session — a typo can disable a veto (C1). Two sibling fields are also unproduced but
+   have **wick fallbacks**, so they degrade rather than disable (C2, downgraded). And a whole
+   bias subsystem — resolver, threshold constant, and a complete `_apply_bias_override()` —
+   is unreachable dead code with zero callers (C3).
 2. **Spec constants replaced by different constants, then certified by green tests.**
    The absorption thresholds, the Value Area percentage, the LVN predicate, the cushion
    formula, and the exit ladder all use values the spec does not contain — and the one
@@ -49,48 +54,76 @@ spec conformance.
 
 ---
 
-## CRITICAL (8) — fix before any live deployment
+## CRITICAL (7 confirmed + 1 downgraded) — fix before any live deployment
 
 ### C1. `cvd_divergence` gate input is dead code — the divergence veto fails open
 **Spec:** `fabio_decision_pipeline.md:106-107` — Gate 3 CVD-conflict guard family.
 **Code:** `quant/decision/gates_edge.py:200-205` reads `getattr(ctx, "cvd_divergence", "")`.
 **Producer:** none. `quant/decision/context.py` declares **no such field** (verified by
 construction: `hasattr(ctx, "cvd_divergence")` → `False`). `context_builder.py` never
-sets it (verified by AST-level field-coverage diff of `build()`).
-The analyzer *computes* real divergences (`quant/amt/compute.py:221-224`, genuine
-half-window swing comparisons — correct), and the DTO carries `"cvdDivergence"`
-(`dto.py:170`), but `context_builder.py` never reads that key (verified by grep).
+sets it (verified by AST-level field-coverage diff of `build()`). The analyzer *does*
+compute real divergences (`quant/amt/compute.py:221-224`, genuine half-window swing
+comparisons — correct), and the DTO carries `"cvdDivergence"` (`dto.py:170`), but
+`context_builder.py` never reads that key (verified by grep).
 **Impact:** the guard is `""` on 100% of bars, so the divergence-alignment veto can never
 fire. Silent fail-open on a Gate 3 safety guard.
 **Fix:** add `cvd_divergence: str = ""` to `DecisionContext`; map `dto["cvdDivergence"]`
 in `context_builder.build()` (the strings already match: `BULLISH_DIV`/`BEARISH_DIV`).
 
-### C2. `session_extreme_low`/`session_extreme_high` declared, consumed, never produced
+---
+
+### C2. `session_extreme_low`/`session_extreme_high` declared, consumed, never produced — *(DOWNGRADED to MEDIUM, see note in body)*
 **Spec:** `fabio_decision_pipeline.md:166-167` (VA-fade condition 2: "A probe beyond the
 VA edge was rejected: `session_extreme_low < VAL` / `session_extreme_high > VAH`").
 **Code:** declared `quant/decision/context.py:168-169`; consumed
 `quant/decision/va_fade.py:64-65` via `getattr(ctx, "session_extreme_low", 0.0) or 0.0`.
-**Producer:** none — not in `context.py` defaults that get populated, not in the DTO
-(`amt_result_to_dto` has no such keys), not set anywhere in `quant/`.
-**Impact:** both fade-invalidation guards compare against `0.0` and never trip. Fail-open.
-The `or 0.0` double-default means even adding the field as `None` would still read `0.0`.
+**Producer:** none — not set by `context_builder.py` (verified by AST-level field-coverage
+diff of `build()`), not in the DTO (`amt_result_to_dto` has no such keys).
+
+**Impact — CORRECTED on re-inspection; this is NOT a fail-open guard.**
+`va_fade.py:68-69` falls back to the current bar's wick when the tracker reads zero:
+```python
+probe_low  = session_low  if session_low  > 0 else (bar_low  if bar_low  < val else 0.0)
+probe_high = session_high if session_high > 0 else (bar_high if bar_high > vah else 0.0)
+```
+so the fade still detects a single-bar failed auction and places a stop beyond it. What is
+lost is only the spec's "across all session bars" breadth: the stop references the last
+bar's probe instead of the session's true probe extreme, so on a multi-bar failed auction
+the stop can sit *inside* the real probe and be stopped out by continuation. This degrades
+stop quality; it does not disable the guard. A second independent route reaches the same
+fade — the analyzer's complete `VA_FADE` evidence packet (`va_fade.py:46-60`, satisfied when
+`rejection and not acceptance and cvd_agrees`; verified constructible via
+`context_builder.py:281-285` and `SetupEvidence.is_complete()` returns `True`), which does
+not read the session extremes at all.
+The `or 0.0` double-default remains a latent hazard: adding the field as `None` later would
+still read `0.0` and silently take the wick path.
+**Severity: CRITICAL → MEDIUM** (stop-quality degradation, not a disabled safety guard).
 **Fix:** emit `sessionExtremeLow`/`sessionExtremeHigh` in `amt_result_to_dto` from the
 analyzer's tracked session high/low; map them in `context_builder`.
 
 ### C3. `bias_direction` / `bias_confidence` never resolved — `BiasResolver` imported, never used
-**Code:** `quant/decision/context.py` declares both (defaults `NEUTRAL` / `0.0`, verified
-by construction); `quant/decision/context_builder.py:12` **imports** `BiasResolver` and
-never instantiates or calls it (verified: only other references are in `quant/amt/bias/`).
-**Impact:** a declared top-down bias layer with a resolver, a threshold constant
-(`FABIO_BIAS_OVERRIDE_THRESHOLD = 0.60`), and zero producers. Consumers read "no bias,"
-which is not "bias unknown — refuse to trade."
-**Note on severity:** `bias` is **not named in `docs/amt`** as a gate input (the pipeline
-field table lists no bias field). This is therefore an **aspirational feature left
-half-wired**, not a spec violation per se. It is rated CRITICAL because a dangling import
-plus `getattr` defaults is the exact fail-open pattern C1/C2 have, and because
-`constants.py:236` asserts the threshold as a Fabio parameter. If bias is not a spec
-requirement, **delete the import, the fields, and the constant** rather than leaving a
-guard-shaped object with no producer.
+**Code:** `quant/decision/context.py:162-163` declares both (defaults `NEUTRAL` / `0.0`,
+verified by construction). `quant/decision/context_builder.py:12` imports `BiasResolver`,
+and `:14` imports `FABIO_BIAS_OVERRIDE_THRESHOLD`, `:46` aliases it, `:49-66` implements a
+complete `_apply_bias_override()` — and **none of it is reachable**: the function has zero
+callers (verified by grep across `quant/`), `BiasResolver` is never constructed outside
+`quant/amt/bias/`, and no live path calls `resolve_bias`. Verified: the only consumers of
+`bias_direction`/`bias_confidence` are the two dataclass defaults in `context.py:162-163`.
+**Impact:** a declared top-down bias layer with a resolver, a threshold constant, a
+fully-written override function, and **zero producers and zero callers**. The dead code is
+larger than a dangling import — the entire bias subsystem, including its threshold, is
+unreachable. Unlike C1/C2 there is no gate reading these fields, so nothing fails open:
+the hazard is that an operator tuning `FABIO_BIAS_OVERRIDE_THRESHOLD` in `constants.py:236`
+reasonably believes the 15-minute bias is live. It is not.
+**Note on severity — corrected:** `bias` is **not named in `docs/amt`** as a gate input (the
+pipeline field table lists no bias field), and — critically — **no gate reads these fields**,
+so unlike C1 this is not a fail-open defect. This is an **aspirational feature left
+half-wired**: a resolver, a constant, a threshold alias, and a complete override function,
+all unreachable. It is rated CRITICAL on the same *class* of defect as C1/C2 (a guard-shaped
+object with no producer) rather than on demonstrated fail-open behavior. If bias is not a spec
+requirement, **delete the import, the fields, the constant, and `_apply_bias_override`** rather
+than leaving the impression of a live subsystem. If it *is* intended, it must be wired and
+tested.
 **Fix:** wire `BiasResolver` into `ContextBuilder.__init__` + `build()`, or remove it.
 
 ### C4. Pyramid SL ratchet inverts the stop polarity — the net-positive guarantee is broken
@@ -234,21 +267,22 @@ and a live test asserting which path is active; or amend §4 to name time bars a
 
 | # | Defect | Severity | Summary |
 |---|---|---|---|
-| M1 | §12.1 MDL at exactly 2.0% is not asserted as the number — `test_max_loss_halts` uses `0.03` and proves a *different* (undocumented 2%) threshold fires earlier | MEDIUM | `risk.py:253` itself is **verified correct** (−1.9% → no halt, −2.0% → halt); only the test is weak |
-| M2 | §12.2 `floor()` never asserted (tests use `pytest.approx`, which would also pass `round`) | MEDIUM | `risk.py:409` spec formula |
-| M3 | §13.2 pyramid 50%/25% sizing ratios never asserted | MEDIUM | `position_manager.py:608` — `fraction = 0.50 if pyramid_count == 0 else 0.25` is exercised only incidentally |
-| M4 | §10 pre-market trap lock has no explicit state or test | MEDIUM | The exchange-clock blackout *incidentally* excludes it; spec demands "STRICT RULE: Zero new entries" |
-| M5 | §6.2 CVD divergence tests are a set-membership tautology | MEDIUM | `test_cvd.py:45-53` asserts `divergence_type in ("BEARISH_DIV","BULLISH_DIV","NONE")` — cannot fail on any input |
-| M6 | §6.1 VWAP σ formula never asserted against an independent value; only band *ordering* | MEDIUM | `vwap.py:106-110` math is **verified algebraically exact** (shifted-variance identity) |
-| M7 | Determinism test filters out the events that could diverge | MEDIUM | `test_multi_symbol_isolation.py:69-75` drops `AgentDecisionProduced` and keeps only `(type, time)` — a LONG@105/SL98 and a SHORT@105/SL112 fingerprint identically |
-| M8 | Gate 1 spread check: `max(4%×price, 2×tick)` vs spec's `max(2×tick, 0.1%×price, ₹0.40)` | MEDIUM | `gate_session_phase.py:113-117`. Deviation is deliberate and documented inline (₹0.40 is unworkable for high-LTP options) but the pipeline doc still advertises the three-term formula |
-| M9 | §8 ACCUMULATING transition omits "delta stabilizing" and LVN proximity | MEDIUM | `triple_a.py:200-210` checks only `_is_near_poc` on a 4-tick tolerance |
-| M10 | `TickFootprintAccumulator` claims "real tick-level footprint" while running on 5-level depth proxy | MEDIUM | §16 explicitly forbids claiming true tick aggression while using the proxy. Rename to `DerivedFootprintAccumulator`, add a `provenance` field |
-| M11 | `MODEL_RISK_FAILURES`/`MODEL_SIZING_FAILURES` are process-globals shared by all engines | MEDIUM | `exits.py:22-28`. The one genuine cross-engine mutable-state leak in the decision path — makes per-engine degradation undetectable. Telemetry only, no money path |
-| M12 | `H_range` bucket width is not `S_bucket`; profiles use auto-computed bucket counts (100–1000) | MEDIUM | `volume_profile.py:213-221`. Depends on C8 |
-| M13 | CVD slope is an unnormalised linear-regression slope over 40 bars — absolute thresholds aren't scale-free across NSE options vs MCX commodities | MEDIUM | Compounds H8/H9 |
-| M14 | `quantize` ladder contains an off-spec leading `2` step | MEDIUM | `range_bars.py:43-46` — `{2,5,10,25,50,100,200}` vs spec's `{5,10,25,50,100,200}` |
-| M15 | Footprint provenance name drift + `cvd_source` never passed | MEDIUM | `analyzer.py:1007` reads `self._footprint_accumulator` (never assigned) — should read the `footprint_accumulator` parameter; `AMTEngine` never passes `cvd_source`. Both `TICK_EXACT` provenance branches are unreachable, so live CVD/footprint is reported `CANDLE_DISTRIBUTED` forever |
+| M1 | **(downgraded from CRITICAL C2)** `session_extreme_low/high` unproduced — `va_fade.py:68-69` falls back to the bar wick, so stops reference the last bar's probe, not the session's true probe extreme | MEDIUM | Stop-quality degradation only; a second route via the complete `VA_FADE` evidence packet does not read these fields at all |
+| M2 | §12.1 MDL at exactly 2.0% is not asserted as the number — `test_max_loss_halts` uses `0.03` and proves a *different* (undocumented 2%) threshold fires earlier | MEDIUM | `risk.py:253` itself is **verified correct** (−1.9% → no halt, −2.0% → halt); only the test is weak |
+| M3 | §12.2 `floor()` never asserted (tests use `pytest.approx`, which would also pass `round`) | MEDIUM | `risk.py:409` spec formula |
+| M4 | §13.2 pyramid 50%/25% sizing ratios never asserted | MEDIUM | `position_manager.py:608` — `fraction = 0.50 if pyramid_count == 0 else 0.25` is exercised only incidentally |
+| M5 | §10 pre-market trap lock has no explicit state or test | MEDIUM | The exchange-clock blackout *incidentally* excludes it; spec demands "STRICT RULE: Zero new entries" |
+| M6 | §6.2 CVD divergence tests are a set-membership tautology | MEDIUM | `test_cvd.py:45-53` asserts `divergence_type in ("BEARISH_DIV","BULLISH_DIV","NONE")` — cannot fail on any input |
+| M7 | §6.1 VWAP σ formula never asserted against an independent value; only band *ordering* | MEDIUM | `vwap.py:106-110` math is **verified algebraically exact** (shifted-variance identity) |
+| M8 | Determinism test filters out the events that could diverge | MEDIUM | `test_multi_symbol_isolation.py:69-75` drops `AgentDecisionProduced` and keeps only `(type, time)` — a LONG@105/SL98 and a SHORT@105/SL112 fingerprint identically |
+| M9 | Gate 1 spread check: `max(4%×price, 2×tick)` vs spec's `max(2×tick, 0.1%×price, ₹0.40)` | MEDIUM | `gate_session_phase.py:113-117`. Deviation is deliberate and documented inline (₹0.40 is unworkable for high-LTP options) but the pipeline doc still advertises the three-term formula |
+| M10 | §8 ACCUMULATING transition omits "delta stabilizing" and LVN proximity | MEDIUM | `triple_a.py:200-210` checks only `_is_near_poc` on a 4-tick tolerance |
+| M11 | `TickFootprintAccumulator` claims "real tick-level footprint" while running on 5-level depth proxy | MEDIUM | §16 explicitly forbids claiming true tick aggression while using the proxy. Rename to `DerivedFootprintAccumulator`, add a `provenance` field |
+| M12 | `MODEL_RISK_FAILURES`/`MODEL_SIZING_FAILURES` are process-globals shared by all engines | MEDIUM | `exits.py:22-28`. The one genuine cross-engine mutable-state leak in the decision path — makes per-engine degradation undetectable. Telemetry only, no money path |
+| M13 | `H_range` bucket width is not `S_bucket`; profiles use auto-computed bucket counts (100–1000) | MEDIUM | `volume_profile.py:213-221`. Depends on C8 |
+| M14 | CVD slope is an unnormalised linear-regression slope over 40 bars — absolute thresholds aren't scale-free across NSE options vs MCX commodities | MEDIUM | Compounds H8/H9 |
+| M15 | `quantize` ladder contains an off-spec leading `2` step | MEDIUM | `range_bars.py:43-46` — `{2,5,10,25,50,100,200}` vs spec's `{5,10,25,50,100,200}` |
+| M16 | Footprint provenance name drift + `cvd_source` never passed | MEDIUM | `analyzer.py:1007` reads `self._footprint_accumulator` (never assigned) — should read the `footprint_accumulator` parameter; `AMTEngine` never passes `cvd_source`. Both `TICK_EXACT` provenance branches are unreachable, so live CVD/footprint is reported `CANDLE_DISTRIBUTED` forever |
 | L1 | `mock_pass` sentinel aliases `NotImplementedError` to a "placed" live stop | LOW | `live_oms.py:181-189`. Blast radius = one unguarded position; the in-memory stop path still works |
 | L2 | Gate 4 options stop cap uses 5% of premium, not 0.75% | LOW | `gates_rr.py:32-37`. Deliberate and documented; the 200-tick hard cap swamps either value |
 | L3 | §8 aggression trigger joint-condition / non-confirm paths undertested | LOW | No 2-of-3 test asserting the machine resets |
@@ -357,9 +391,11 @@ finding.
 
 ## Recommended fix order
 
-**Phase 0 — stop the bleeding (fail-open guards).** C1, C2, C3 (or delete the bias
-half-wiring). Each is a small, mechanical producer addition; together they remove the
-class of defect where a typo disables a safety veto.
+**Phase 0 — stop the bleeding.** C1 (the one true fail-open: add the producer, or delete
+the dead `getattr` read so the guard fails loudly). C2 (add the session-extreme producer so
+stops reference the true probe, not the last bar's wick). C3 — **decide or delete**: either
+wire `BiasResolver` end-to-end with tests, or remove the resolver, the threshold constant, and
+`_apply_bias_override`, so the config surface does not advertise a subsystem that never runs.
 
 **Phase 1 — the money-path guarantee.** C4 + H5 + H12. Decide the stop polarity in the
 spec first (contradiction #2), then fix the pyramid ratchet to only tighten toward
@@ -387,8 +423,9 @@ isolation contract, the EOD enforcement, and the VWAP/absorption-polarity math a
 I would sign off on individually. But the review question asked was whether the system is
 correctly implemented and tested against `docs/amt`, and on that measure it is not:
 
-- **8 CRITICAL** defects, including **3 silent fail-open guards** and **1 broken
-  money-path guarantee** I reproduced numerically.
+- **7 CRITICAL** defects, including **1 confirmed silent fail-open guard**, **1 broken
+  money-path guarantee** I reproduced numerically, and **1 entirely dead subsystem** (the
+  15-minute bias layer) whose tuning constant an operator could believe is live.
 - **44 total** defects across constants, predicates, guards, formulas, and tests.
 - **3 spec-internal contradictions** the code cannot resolve.
 - A **2580/2580 green suite** that asserts the wrong values in the exact places where the
@@ -396,6 +433,37 @@ correctly implemented and tested against `docs/amt`, and on that measure it is n
 
 **Do not deploy to live trading until Phase 0 and Phase 1 are closed and the three
 spec contradictions are settled in writing.**
+
+---
+
+## Post-consolidation corrections (transparency)
+
+Three findings were revised during a final principal re-verification pass, all downward.
+The corrections are recorded here rather than silently edited, because a reviewer acting on
+the first version of this document deserves the delta.
+
+1. **C2 (`session_extreme_low`/`session_extreme_high`) — CRITICAL → MEDIUM.** The original
+   text claimed both fade guards "compare against `0.0` and never trip." That is wrong.
+   `va_fade.py:68-69` has an explicit wick fallback (`bar_low`/`bar_high`), so the fade still
+   fires on a single-bar failed auction and still places a stop beyond it. What is actually
+   lost is the spec's session-wide probe breadth. Additionally, `va_fade.py:46-60` provides a
+   second, independent route to the same fade via a complete `VA_FADE` evidence packet that
+   never reads the session extremes. This is stop-quality degradation, not a disabled guard.
+2. **C3 (bias) — mechanism corrected, severity held.** The original text described "a
+   dangling import." The dead code is larger than that: `context_builder.py:12,14,46,49-66`
+   imports the resolver, imports and aliases the threshold, and implements a complete
+   `_apply_bias_override()` — all with **zero callers**. Severity is retained as CRITICAL, but
+   on the *class* of the defect (a guard-shaped, unreachable subsystem whose tuning constant
+   sits in the config surface) rather than on demonstrated fail-open behavior, because **no
+   gate reads `bias_direction`/`bias_confidence`** — unlike C1, nothing fails open here.
+3. **Headline claim corrected.** "Four DecisionContext fields … three silent fail-open
+   guards" overstated the fail-open count. The accurate statement is **one** confirmed
+   fail-open guard (`cvd_divergence`), **two** degrading-but-fallback-protected fields, and
+   **one** fully dead subsystem. The FAIL verdict is unaffected: C1 alone is a silent
+   Gate 3 veto bypass, and C4's broken net-positive guarantee was re-confirmed numerically.
+
+The five specialist reports are unchanged and retain their original severities; where they
+differ from this consolidated view the consolidated text says so.
 
 ---
 
