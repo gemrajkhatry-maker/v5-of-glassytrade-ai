@@ -14,7 +14,7 @@ re-checked by the consolidating principal against the spec text and the code.
 **Test baseline at review time:** `tests/quant` + `tests/architecture` → **2580 passed,
 11 skipped, 0 failed**, exit 0. The validation rounds added 15 regression tests
 (`tests/quant/decision/test_review_regression_c1_c4.py`), taking the suite to
-**2595 passed, 11 skipped, 0 failed**.
+**2600 passed, 11 skipped, 0 failed**.
 
 ---
 
@@ -57,10 +57,10 @@ Three failure modes dominate, and they are the dangerous ones:
    correction.)
 
 None of these was caught by any test at review time. The validation round added
-three regression guards (`tests/quant/decision/test_review_regression_c1_c4.py`) that
-pin C1's wiring contract, §13.2.4's bundle invariant, and C6's measured threshold
-divergence — each mutation-verified to fail on the corresponding fix. The remaining
-42 findings are still uncovered.
+four regression guards (`tests/quant/decision/test_review_regression_c1_c4.py`) that
+pin C1's wiring contract, §13.2.4's bundle invariant, C6's measured threshold
+divergence, and H5's stop polarity — each mutation-verified to fail on the
+corresponding fix. The remaining 41 findings are still uncovered.
 
 ---
 
@@ -319,8 +319,8 @@ and a live test asserting which path is active; or amend §4 to name time bars a
 | H2 | Big Trade Filter has no absolute contract thresholds | §7.1: 20–30 (London), 30–40 (NY), ≥100 institutional | `detectors.py:81-83` | Purely relative `5.0 × avg`. On a low-liquidity option (avg 300) it fires at 1500 contracts — 15× the institutional floor; on an index future (avg 50k) nothing can ever qualify. Feeds `AGGRESSION_BIG_TRADE = 1.0` of the 2.0 confirmation score. |
 | H3 | Cushion formula is a tier system, not §12.2's formula | §12.2:404-409 | `risk.py:533-601` | Spec: offensive `E₀×0.0025 + 0.40×Cushion`; defensive `min(E₀×0.0025, MDL−|Cushion|)`. Code: CONSERVATIVE 0.25% / CUSHION_TIER_1 0.35%+20%of-profit (cap 0.50%) / MOMENTUM 0.40%. **`0.40` never appears as a cushion fraction.** No test covers either spec branch. |
 | H4 | §13.3 exit ladder lands on 50/25/25 only by arithmetic accident; §9.1 says 50/50 | §13.3:449-451 vs §9.1 | `exit_checks.py:95-102` | TP2 closes 50% *of the remainder* (→ 25% of original), so the runner is correct **by accident**. But TP2's *target* is a pure `2R` formula (`tp2_level`), not "macro VA extreme or CVD divergence exhaustion"; **no TP3 tier exists** and the runner has no absorption-bubble trailing. §9.1 and §13.3 **contradict each other in the spec itself** and the code implements neither exactly. |
-| H5 | §9.1/§11 stop polarity is inverted relative to the spec's literal formula | §9.1:256/266, §11:367 | `stops.py:84-108` | Spec: LONG `SL = L_cluster − 2×Tick`. Code: `anchor + 2×tick` — *toward entry*. Verified numerically: `anchor=95, tick=0.5` → code `96.0`, spec `94.0`. The module docstring argues this is a deliberate Fabio "pro stop" (fill before the cascade). §11's headline says "Behind Bubbles, Not Wicks" — the code places it *in front*. **`docs/amt` is internally inconsistent**; this must be settled by the spec owner, not the code. Same root cause as C4. |
-| H6 | §11 stops are never anchored to absorption cluster extremes | §11:367, §15:733 | `stops.py:27-60` | Anchor candidates are `nearest_buy_print_below`, `leg_lvn`, `vah`, `val`, `bar.low/high`. **`cluster_low`/`cluster_high` appear nowhere.** `ctx.bar.low` — which §11 explicitly dismisses as "arbitrary candle wicks" — is a first-class candidate. The institutional-cost-basis stop is the strategy's core slippage defence. |
+| H5 | §9.1/§11 stop polarity is inverted relative to the spec's literal formula | §9.1:256/266, §11:367, **§15:733** | `stops.py:84-108` | Spec §9.1: LONG `SL = L_cluster − 2×Tick`. Spec §11:367: stop goes "**behind**" the bubble, "not at arbitrary candle wicks." **Executed:** `anchor=95, tick=0.5` → code `96.0`, spec `94.0` — the code places it 2 ticks *toward entry* (inside the level), the direction both prose formulations reject. The module docstring argues this is a deliberate Fabio "pro stop" (fill before the cascade). **New finding on re-check:** spec §15:733 — the algorithm-truth table — says "Stop-Loss \| **Cluster Extreme ± 2 ticks**," which matches §9.1's outside polarity and contradicts the code. So the code does not match §9.1 *or* §15; only §11's separate "1–2 ticks inside the structural level" exit-shield clause (§11:368, about take-profit placement, not stop-loss) reads as support, and the docstring leans on it. `docs/amt` is internally inconsistent between §9.1/§15 and §11:368; this must be settled by the spec owner, not the code. Same root cause as C4 |
+| H6 | §11 stops are never anchored to absorption cluster extremes | §11:367, §15:733 | `stops.py:27-60` | Anchor candidates are `nearest_buy_print_below`, `leg_lvn`, `vah`, `val`, `bar.low/high`. `ctx.bar.low` — which §11 explicitly dismisses as "arbitrary candle wicks" — is a first-class candidate. The institutional-cost-basis stop is the strategy's core slippage defence. **Validated with a correction:** the original text said `cluster_low`/`cluster_high` "appear nowhere." They do — `detectors.py:271-272` computes them, `analyzer.py:822-823` and `analyzer.py:1123-1124` propagate them, and `dto.py:261-262` emits `absorptionClusterHigh/Low`. The defect is narrower and more specific: **`stops.py` never reads them** (`grep cluster quant/decision/stops.py` returns only a docstring line), so the levels are computed, shipped to the DTO, and then discarded at the exact point §11 says they should be used. That makes this a wiring gap in the stop resolver, not a missing detector |
 | H7 | §9.1/§9.3 RR floors: `MIN_RR_RATIO = 1.5` vs spec 1:2.0 (A) / 1:3.0–1:5.0 (C) | §9.1:261, §9.3 | `signal_builder.py:211` (`min_rr: float = 1.5`), `constants.py:123` | **Playbook C's "point B" does not exist in the decision layer** — no code path computes it and no `rr >= 3` floor exists for the sniper label (grep `1:3`, `rr >= 3` → no decision-layer hits). The runner is then capped at 2R instead of 3–5R. |
 | H8 | §8 "CVD expanding" implemented as "CVD not aggressively diverging" | §8:217 | `triple_a.py:243` (`cvd_slope > -0.3`) | The third condition of a three-condition trigger is a *non-veto* rather than a *confirmation*. A LONG can fire while CVD is mildly rolling over. Gate 3's conflict thresholds disagree with the trigger's (see H9). |
 | H9 | Gate 3 CVD conflict thresholds inverted vs spec, in **two** places | `fabio...md:106-107` | `constants.py:232-233` (`NSE=0.5, MCX=0.3`) **and** `gates_edge.py:192-193` (same literals hardcoded) | Spec: NSE = ±0.3, MCX = ±0.5. Two independent sources of truth, both wrong, neither matching spec, no test pins either. On NSE the veto needs a much larger opposing slope to fire — **harder to trip than designed on the primary exchange** (verified: a LONG with `cvd_slope = −0.4` on NSE is vetoed by the spec but passes Gate 3 in code). **Validated:** both sites are live — `constants.py:232-233` is consumed at `context_builder.py:181` for **direction resolution** (not merely a veto), so the inverted constant can also flip the resolved trade direction; `gates_edge.py:192-193` hardcodes its own copy rather than importing the constant |
@@ -506,7 +506,7 @@ correctly implemented and tested against `docs/amt`, and on that measure it is n
   layer) whose tuning constant an operator could believe is live.
 - **45 total** defects across constants, predicates, guards, formulas, and tests.
 - **3 spec-internal contradictions** the code cannot resolve.
-- A **2595/2595 green suite** (2580 at review time + 15 guards added in validation)
+- A **2600/2600 green suite** (2580 at review time + 20 guards added in validation)
   that asserts the wrong values in the exact places where the drift lives and could not
   detect any of the CRITICALs at review time; 2 of the findings are now pinned by the
   added guards, 43 are still unguarded.
@@ -610,3 +610,31 @@ differ from this consolidated view the consolidated text says so.
 *Consolidated from the five specialist reports in `docs/reviews/2026-09-21-amt-review-agent{A,B,C,D,E}-*.md`
 plus an independent principal-engineer verification pass. All file:line citations refer to
 the working tree at commit `e589cbe5a`, 2026-09-21.*
+5. **HIGH pass re-verified by execution (H1–H17).** Every HIGH finding was re-checked by
+   running the code, not by re-reading it. Two of them did not survive that pass:
+
+   - **H6 — the claim "`cluster_low`/`cluster_high` appear nowhere" was wrong.** They are
+     computed at `detectors.py:271-272`, propagated at `analyzer.py:822-823` and
+     `analyzer.py:1123-1124`, and emitted to clients at `dto.py:261-262`. The defect is
+     narrower than first stated: **`stops.py` never reads them** — `grep cluster
+     quant/decision/stops.py` returns only a docstring line — so the levels are computed,
+     shipped to the DTO, and then discarded at the exact point §11 says they should be used.
+     This is a wiring gap in the stop resolver, not a missing detector. Severity held as HIGH.
+
+   - **H5 — a new spec section was found that strengthens the finding.** §15:733, the
+     algorithm truth table, specifies "Stop-Loss \| Cluster Extreme ± 2 ticks" — the same
+     *outside* polarity as §9.1's `L_cluster − 2×Tick`, which the code contradicts. So the
+     code matches neither §9.1 nor §15; the only spec text supporting the code's *inside*
+     placement is §11:368, and that clause is about take-profit placement ("exit shield"),
+     not stop-loss. The internal inconsistency is between §9.1/§15 and §11:368, and it must
+     be settled by the spec owner. Severity held as HIGH.
+
+   H3 (spec §12.2's `0.40×Cushion` appears nowhere as a cushion fraction), H4 (`tp2_level`
+   is pure `2R`, no TP3 tier), H8 (`cvd_slope > -0.3` is a non-veto at `triple_a.py:243`),
+   and H11 (the "2 consecutive range bars closing in profit" confirmation has no streak
+   counter) were all confirmed as written.
+
+   Two executed regression guards were added for this pass: `TestH5StopPolarity` (5 cases)
+   pinning the arithmetic disagreement in both directions, and the C6 threshold guard from
+   the prior pass. Both are mutation-verified to fail on the corresponding fix. Suite: **20
+   regression guards, 2600 passed, 11 skipped, 0 failures.**

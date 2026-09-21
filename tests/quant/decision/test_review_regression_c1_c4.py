@@ -358,3 +358,45 @@ class TestLVNThresholdIsNotTheSpecs:
             f"found {non_convex_local_mins} non-convex local minima; the C6 claim "
             "that the convexity term is behaviourally redundant no longer holds"
         )
+
+
+# ---------------------------------------------------------------------------
+# H5 — stop polarity vs both spec formulations (executed, not read)
+# ---------------------------------------------------------------------------
+
+class TestH5StopPolarity:
+    """The spec says the stop belongs OUTSIDE the structural level, in every
+    formulation: section 9.1 gives ``SL = L_cluster - 2*TickSize`` (below the
+    cluster on a long), section 15:733 gives "Cluster Extreme +/- 2 ticks", and
+    section 11 says "behind the bubble, not at arbitrary candle wicks".
+
+    The code returns ``anchor + 2*tick`` on a long — 2 ticks TOWARD entry, i.e.
+    inside the level. This test pins the arithmetic so the disagreement is a
+    number, not an interpretation.
+    """
+
+    @pytest.mark.parametrize("side,anchor,entry,tick", [
+        ("LONG", 95.0, 100.0, 0.5),
+        ("LONG", 90.0, 100.0, 0.25),
+        ("LONG", 4500.0, 4520.0, 0.25),
+        ("SHORT", 105.0, 100.0, 0.5),
+        ("SHORT", 4520.0, 4500.0, 0.25),
+    ])
+    def test_the_stop_is_two_ticks_outside_the_level(self, side, anchor, entry, tick):
+        from quant.decision.stops import structural_stop
+
+        got = structural_stop(side, entry=entry, anchor=anchor, tick=tick)
+        if side == "LONG":
+            spec_9_1 = anchor - 2 * tick          # L_cluster - 2*TickSize
+        else:
+            spec_9_1 = anchor + 2 * tick          # H_cluster + 2*TickSize
+        assert got != pytest.approx(spec_9_1), (
+            "the stop must disagree with spec 9.1's formula; if this passes, the "
+            "polarity was fixed and the H5 finding is closed"
+        )
+        # And it must sit on the *inside*, which is the direction the spec
+        # explicitly rejects ("not at arbitrary candle wicks").
+        if side == "LONG":
+            assert got > anchor, "code places the long stop ABOVE the level (inside)"
+        else:
+            assert got < anchor, "code places the short stop BELOW the level (inside)"
