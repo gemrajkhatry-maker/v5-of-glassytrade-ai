@@ -27,9 +27,12 @@ between the specification and the code**: load-bearing spec constants, predicate
 safety guards are absent, inverted, or silently disabled, and the test suite asserts the
 *wrong* values in the places that matter most.
 
-**Defect totals: 45** — **7 CRITICAL**, **17 HIGH**, **17 MEDIUM**, **4 LOW**
-*(One CRITICAL downgraded to MEDIUM on re-inspection: `session_extreme_*` has a wick
-fallback, so it degrades stop quality rather than disabling the guard. See C2.)*
+**Defect totals: 45** — **6 CRITICAL**, **17 HIGH**, **18 MEDIUM**, **4 LOW**
+*(Two downgrades, both recorded transparently: C2 CRITICAL→MEDIUM — `session_extreme_*`
+has a wick fallback, so it degrades stop quality rather than disabling the guard; and
+C4 CRITICAL→M18 MEDIUM — the net-negative-bundle headline was **refuted by executing**
+the real `PositionManager` end-to-end: the exit price is the breakeven floor that
+authorized the pyramid, not the ratcheted SL.)*
 
 Three failure modes dominate, and they are the dangerous ones:
 
@@ -45,9 +48,11 @@ Three failure modes dominate, and they are the dangerous ones:
    formula, and the exit ladder all use values the spec does not contain — and the one
    constants test in the suite *asserts the wrong values as correct*. (D-A2, D-A3, D-A6,
    D-C1/D-D7, D-D1)
-3. **A money-path guarantee that cannot hold.** The spec's pyramiding guarantee ("the
-   entire trade bundle is guaranteed a net positive cash payout") is structurally broken
-   by an inverted stop polarity in the ratchet. I reproduced this numerically. (D-C4)
+3. **A money-path guarantee that is not implemented as specified.** The spec's pyramiding
+   guarantee ("the entire trade bundle is guaranteed a net positive cash payout") is *not*
+   delivered by the ratchet the spec names — it is delivered, accidentally, by the
+   breakeven floor. The ratchet itself is dead state. (D-C4 → downgraded to M18; see
+   correction.)
 
 None of these is caught by any test. A green suite here measures plumbing, not
 spec conformance.
@@ -126,37 +131,64 @@ than leaving the impression of a live subsystem. If it *is* intended, it must be
 tested.
 **Fix:** wire `BiasResolver` into `ContextBuilder.__init__` + `build()`, or remove it.
 
-### C4. Pyramid SL ratchet inverts the stop polarity — the net-positive guarantee is broken
+### C4. ~~Pyramid SL ratchet inverts the stop polarity — the net-positive guarantee is broken~~ → M18 (DOWNGRADED, headline refuted by execution)
+> **CORRECTION (validation round, committed).** The CRITICAL headline — that a
+> pyramid ratchets the base SL to a point *below the base entry*, producing a
+> net-negative bundle (−350) — is **refuted by driving the real
+> `PositionManager` end-to-end.** The original arithmetic treated the ratcheted
+> SL as the exit price. It is not.
+
 **Spec (§13.2, rule 4):** "Stop Ratchet: Move combined position stop to the new
 LVN/cluster floor. **The entire trade bundle is guaranteed a net positive cash payout.**"
 **Spec (§13.2, rule 1):** "Base trade must be at **Risk-Zero (Breakeven or $+1.0R Locked)**."
-**Code:** `quant/position_manager.py:612` computes the pyramid SL with
-`structural_stop("LONG" if long else "SHORT", price, leg_lvn, tick)`, which at
-`quant/decision/stops.py:84-108` returns **`anchor + inside_ticks×tick`** for LONG and
-**`anchor − …`** for SHORT — i.e. *toward entry*, not "behind the level." The ratchet at
-`position_manager.py:664-677` then applies it to the **base** SL whenever it is tighter.
-**Reproduced numerically (principal verification):** base LONG entry `105.0`,
-`leg_lvn = 100.0`, `tick = 0.5` → `new_sl = 101.0`. The ratchet moves the base SL to
-`101.0`, still **4 points below the base entry**. Stopped out at 101.0:
 
-| Leg | Entry | SL | Size | PnL at SL |
-|---|---|---|---|---|
-| Base | 105.0 | 101.0 | 100 | **−400** |
-| Pyramid 1 | 100.0 | 101.0 | 50 | **+50** |
-| **Bundle** | | | | **−350** |
+**Why the −350 cannot happen (execution evidence).** The pyramid is authorized only
+when `is_risk_free()` is true (`position_manager.py:548`), which is true only when a
+breakeven floor has been armed in `ExitEngine._breakeven[id]` (`exits.py:108-116`).
+Every setter of that floor stores a value **at or above cost basis**:
 
-The bundle is **net negative**, contradicting §13.2's explicit guarantee. The mirror case
-(SHORT, entry 95, LVN 100) yields `99.0`, also net negative. The guarantee is only
-achievable if the ratchet only fires when the new SL is on the profitable side of the
-base entry — which the code never checks.
-**Impact:** live-money-critical *in principle*; today pyramids are hard-disabled on
-LiveOMS (`live_oms.py:~485` raises `ValueError`, caught at `position_manager.py:623`), so
-this is paper/replay-live. But `oms.py:195-206`'s docstring still asserts the guarantee.
-**Fix:** (a) compute pyramid SL as `leg_lvn − inside×tick` (LONG) / `+inside×tick` (SHORT)
-— a dedicated `behind_level()` helper, not the entry-facing `structural_stop`;
-(b) only ratchet the base SL when `new_sl` is on the profitable side of `base.open_price`,
-else skip the add-on; (c) add a unit test asserting the stopped-out bundle PnL ≥ 0 for
-both directions and both pyramid levels.
+- `exits.py:285` (0.8R / CVD path) sets `be_floor = entry` (`exit_checks.py:140,145`) — never below;
+- `exits.py:303` (auction-acceptance path) sets `be_floor = entry`;
+- `exits.py:215` (TimesFM quantile path) stores `eval_res.new_stop` only when
+  `eval_res.is_risk_free`, and `timesfm_risk.py:66` derives that from `new_stop >= entry`.
+
+The ratchet then writes `new_sl` back into `position.order.signal.sl`
+(`position_manager.py:670-674`) — but the *exit* price is not `signal.sl`. Both the bar
+path (`exits.py:257-258`) and the tick path (`position_manager.py:381-384`) resolve the
+effective stop through `resolve_protective_stop()`, which takes the **max** of
+`{signal.sl, be_floor, trail_stop}` for a LONG (`protective_stop.py:5-9`). Because the
+be_floor that *authorized* the pyramid is ≥ entry, it overrides the ratcheted SL.
+
+**Reproduction with the real `PositionManager`** (base LONG @ 105, initial SL 98 so the
+ratchet demonstrably fires, LVN 100, tick 0.5):
+
+```
+auth: is_risk_free=True            (be_floor=105.0 armed by the 0.8R bar)
+pyramid_count=1
+RATCHET FIRED: base sl 98.0 -> 99.6
+EFFECTIVE stop=105.0 (BREAKEVEN) [ratcheted=99.6 be=105.0 trail=None]
+BUNDLE at 105.0: +24.5  spec 13.2.4 >= 0? True
+```
+
+The ratchet tightened the frozen signal SL (98→99.6) yet the bundle still exits at the
+breakeven floor (105.0), net **+24.5**, satisfying §13.2.4.
+
+**The residual defect (M18).** The ratchet is *cosmetic*, not harmful: it mutates the
+frozen `signal.sl` to a value that the exit engine immediately overrides. That is dead
+state with two costs: (a) the `StopMoved` audit event at `position_manager.py:678`
+records a stop the engine never honours — the journal lies to ops; (b) any future caller
+that reads `signal.sl` *without* merging the breakeven floor (the ratcheted base is
+returned via `base_override`, `position_manager.py:256`) inherits a stop below the one
+actually enforced. The guarantee currently rests entirely on `be_floor`, not on the
+ratchet the spec describes.
+**Impact:** LOW–MEDIUM, paper/replay-live only — pyramids are hard-disabled on LiveOMS
+(`live_oms.py:489-494` raises `ValueError`, caught at `position_manager.py:623`).
+**Fix:** (a) give the pyramid SL its own `behind_level()` helper rather than reusing the
+entry-facing `structural_stop`, and stop writing it into `signal.sl`; (b) add a unit test
+asserting the stopped-out bundle PnL ≥ 0 for both directions and both pyramid levels —
+the suite has **no** such test today (`test_pyramid_integration.py:67` asserts only
+`is_risk_free`). This is the guard that would have caught the original mis-reading, and
+it is still the right test to write.
 
 ### C5. §5.1 Value Area is 70%, spec requires 68.2%
 **Spec (§5.1, rule 3):** "Value Area (VA = **68.2%** of Total Volume)" —
@@ -251,7 +283,7 @@ and a live test asserting which path is active; or amend §4 to name time bars a
 | H6 | §11 stops are never anchored to absorption cluster extremes | §11:367, §15:733 | `stops.py:27-60` | Anchor candidates are `nearest_buy_print_below`, `leg_lvn`, `vah`, `val`, `bar.low/high`. **`cluster_low`/`cluster_high` appear nowhere.** `ctx.bar.low` — which §11 explicitly dismisses as "arbitrary candle wicks" — is a first-class candidate. The institutional-cost-basis stop is the strategy's core slippage defence. |
 | H7 | §9.1/§9.3 RR floors: `MIN_RR_RATIO = 1.5` vs spec 1:2.0 (A) / 1:3.0–1:5.0 (C) | §9.1:261, §9.3 | `signal_builder.py:211` (`min_rr: float = 1.5`), `constants.py:123` | **Playbook C's "point B" does not exist in the decision layer** — no code path computes it and no `rr >= 3` floor exists for the sniper label (grep `1:3`, `rr >= 3` → no decision-layer hits). The runner is then capped at 2R instead of 3–5R. |
 | H8 | §8 "CVD expanding" implemented as "CVD not aggressively diverging" | §8:217 | `triple_a.py:243` (`cvd_slope > -0.3`) | The third condition of a three-condition trigger is a *non-veto* rather than a *confirmation*. A LONG can fire while CVD is mildly rolling over. Gate 3's conflict thresholds disagree with the trigger's (see H9). |
-| H9 | Gate 3 CVD conflict thresholds inverted vs spec, in **two** places | `fabio...md:106-107` | `constants.py:232-233` (`NSE=0.5, MCX=0.3`) **and** `gates_edge.py:192-193` (same literals hardcoded) | Spec: NSE = ±0.3, MCX = ±0.5. Two independent sources of truth, both wrong, neither matching spec, no test pins either. On NSE the veto needs a much larger opposing slope to fire — **harder to trip than designed on the primary exchange**. |
+| H9 | Gate 3 CVD conflict thresholds inverted vs spec, in **two** places | `fabio...md:106-107` | `constants.py:232-233` (`NSE=0.5, MCX=0.3`) **and** `gates_edge.py:192-193` (same literals hardcoded) | Spec: NSE = ±0.3, MCX = ±0.5. Two independent sources of truth, both wrong, neither matching spec, no test pins either. On NSE the veto needs a much larger opposing slope to fire — **harder to trip than designed on the primary exchange** (verified: a LONG with `cvd_slope = −0.4` on NSE is vetoed by the spec but passes Gate 3 in code). **Validated:** both sites are live — `constants.py:232-233` is consumed at `context_builder.py:181` for **direction resolution** (not merely a veto), so the inverted constant can also flip the resolved trade direction; `gates_edge.py:192-193` hardcodes its own copy rather than importing the constant |
 | H10 | Playbook C's RR ≥ 1:3.0 and "target above point B" not implemented | §9.3 step 7 | — | (See H7.) Separate defect ID retained because Agent B found it as a distinct missing-feature; fix is the same. |
 | H11 | §13.1's alternative breakeven trigger is half-implemented | §13.1:419 | `exit_checks.py:122-133` | Path 2 (+0.8R) ✅ verified correct. Path 1 requires only `profit > 0` **and a single bar's** `cvdSlope` crossing — the "**2 consecutive range bars closing in profit**" confirmation is entirely missing (no streak counter, no range-bar notion). Arms breakeven too eagerly, inverting the spec's intent (CVD should be the *earlier but confirmed* route). |
 | H12 | §13.2 "+1.0R Locked" authorization variant is not modelled | §13.2:441 | `exits.py:108-116` | `is_risk_free` only knows "a breakeven floor exists." If the spec means pyramids are authorized only when the base is *locked in profit*, the gate is too permissive. Same root cause as C4; settle together. |
@@ -284,6 +316,7 @@ and a live test asserting which path is active; or amend §4 to name time bars a
 | M15 | `quantize` ladder contains an off-spec leading `2` step | MEDIUM | `range_bars.py:43-46` — `{2,5,10,25,50,100,200}` vs spec's `{5,10,25,50,100,200}` |
 | M16 | Footprint provenance name drift + `cvd_source` never passed | MEDIUM |
 | M17 | **§3's 5-Minute Kline stream has no producer at the production default** | MEDIUM | Spec §3 requires 5m klines for "Macro Dealing Range identification, Session highs/lows, and overarching market narrative framing." `_DEFAULT_CONFIG["interval_seconds"] = 60` (`multi_engine.py:266`), so `runtime.py:384-409` builds a 60s aggregator and no 5m one; `analyzer.py` receives a single timeframe (`recent_data`, `:454`) and has **no 5m/macro concept at all** (verified: grep for `dealing_range`/`macro`/`5m` in the analyzer → no hits). The 60s bar does double duty as both decision and macro context. Note `DEFAULT_INTERVAL_SEC = 300` (`bars.py:7`) contradicts the coordinator default of 60 — two sources of truth again | `analyzer.py:1007` reads `self._footprint_accumulator` (never assigned) — should read the `footprint_accumulator` parameter; `AMTEngine` never passes `cvd_source`. Both `TICK_EXACT` provenance branches are unreachable, so live CVD/footprint is reported `CANDLE_DISTRIBUTED` forever |
+| M18 | **(downgraded from CRITICAL C4 — headline refuted by execution)** The pyramid SL ratchet writes `new_sl` into `signal.sl`, but the exit engine resolves the effective stop as `max({signal.sl, be_floor, trail})` (`protective_stop.py:5-9`), so the ratchet is overridden by the breakeven floor that authorized the pyramid | MEDIUM | Bundle guarantee holds (verified end-to-end: `+24.5`). Residual cost: the `StopMoved` event at `position_manager.py:678` journals a stop the engine never honours, and `base_override` (`position_manager.py:256`) hands a stale sub-breakeven `signal.sl` to any caller that skips the merge. No test pins bundle PnL ≥ 0 |
 | L1 | `mock_pass` sentinel aliases `NotImplementedError` to a "placed" live stop | LOW | `live_oms.py:181-189`. Blast radius = one unguarded position; the in-memory stop path still works |
 | L2 | Gate 4 options stop cap uses 5% of premium, not 0.75% | LOW | `gates_rr.py:32-37`. Deliberate and documented; the 200-tick hard cap swamps either value |
 | L3 | §8 aggression trigger joint-condition / non-confirm paths undertested | LOW | No 2-of-3 test asserting the machine resets |
@@ -377,7 +410,8 @@ owner can, and each one currently has money-path consequences.
    1–2 ticks *inside* the level to fill before the cascade, and labels the outside
    formula "the retail stop … forbidden here." The code follows the inside reading.
    Every downstream R-multiple (0.8R BE, +2.0R TP1, pyramid 50%) is computed off this
-   stop, so the whole risk geometry shifts either way. → **H5**, and the root cause of **C4**
+   stop, so the whole risk geometry shifts either way. → **H5**, and the root cause of
+   the ratchet half of **C4/M18**.
 3. **§4 vs §16 on range bars.** §4 makes range bars the substrate of the whole engine;
    §16 declares them "not the primary decision driver … an architectural choice, not a
    bug." The code implements neither — it implements correct range-bar code that is
@@ -398,9 +432,10 @@ stops reference the true probe, not the last bar's wick). C3 — **decide or del
 wire `BiasResolver` end-to-end with tests, or remove the resolver, the threshold constant, and
 `_apply_bias_override`, so the config surface does not advertise a subsystem that never runs.
 
-**Phase 1 — the money-path guarantee.** C4 + H5 + H12. Decide the stop polarity in the
-spec first (contradiction #2), then fix the pyramid ratchet to only tighten toward
-profit, and add a bundle-PnL ≥ 0 test for both directions.
+**Phase 1 — the money-path guarantee.** C4/M18 + H5 + H12. Decide the stop polarity in the
+spec first (contradiction #2), then stop writing the pyramid SL into `signal.sl` and add a
+bundle-PnL ≥ 0 test for both directions. Severity is lower than first assessed: the
+bundle guarantee currently holds, via the breakeven floor rather than the ratchet.
 
 **Phase 2 — constants.** C5, C6, C7, H3, H7/H10. Fix the value, fix the duplicate
 (`FABIO_*` dead constants), and **fix the test that certifies the wrong value** (D-D1).
@@ -424,9 +459,11 @@ isolation contract, the EOD enforcement, and the VWAP/absorption-polarity math a
 I would sign off on individually. But the review question asked was whether the system is
 correctly implemented and tested against `docs/amt`, and on that measure it is not:
 
-- **7 CRITICAL** defects, including **1 confirmed silent fail-open guard**, **1 broken
-  money-path guarantee** I reproduced numerically, and **1 entirely dead subsystem** (the
-  15-minute bias layer) whose tuning constant an operator could believe is live.
+- **6 CRITICAL** defects, including **1 confirmed silent fail-open guard** on the
+  primary exchange, **1 money-path guarantee not implemented as specified** (the bundle
+  guarantee holds, but via the breakeven floor rather than the ratchet the spec names —
+  the ratchet is dead state), and **1 entirely dead subsystem** (the 15-minute bias
+  layer) whose tuning constant an operator could believe is live.
 - **45 total** defects across constants, predicates, guards, formulas, and tests.
 - **3 spec-internal contradictions** the code cannot resolve.
 - A **2580/2580 green suite** that asserts the wrong values in the exact places where the
@@ -460,8 +497,11 @@ the first version of this document deserves the delta.
 3. **Headline claim corrected.** "Four DecisionContext fields … three silent fail-open
    guards" overstated the fail-open count. The accurate statement is **one** confirmed
    fail-open guard (`cvd_divergence`), **two** degrading-but-fallback-protected fields, and
-   **one** fully dead subsystem. The FAIL verdict is unaffected: C1 alone is a silent
-   Gate 3 veto bypass, and C4's broken net-positive guarantee was re-confirmed numerically.
+   **one** fully dead subsystem. **C4 was then refuted by execution** (validation round): the
+   −350 bundle assumed the ratcheted SL is the exit price, but `resolve_protective_stop`
+   overrides it with the breakeven floor that authorized the pyramid; it is now **M18**.
+   The FAIL verdict is unaffected: C1 alone is a silent Gate 3 veto bypass on the primary
+   exchange, and C5/C6/C7 hardcode constants the spec does not contain.
 
 ### Scope verification (addressed explicitly)
 
