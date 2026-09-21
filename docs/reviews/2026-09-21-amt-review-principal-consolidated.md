@@ -685,3 +685,45 @@ the working tree at commit `e589cbe5a`, 2026-09-21.*
    cannot fail on any input).
 
    Suite: **23 regression guards, 2603 passed, 11 skipped, 0 failures.**
+7. **LOW pass (L1–L4) and a report-wide consistency audit.** All four LOW findings were
+   confirmed as written, and the audit found no arithmetic or count errors:
+
+   - **L1** — `live_oms.py:183` aliases `NotImplementedError` to the sentinel
+     `"mock_pass"`; a grep for that sentinel across `quant/` finds only its own
+     definition, so nothing downstream distinguishes a *placed* live stop from a
+     mocked one. Blast radius is one unguarded position, and the in-memory stop
+     path still works, so LOW stands.
+   - **L2** — `gates_rr.py:33-37` uses `entry × 0.05 / tick` for options and
+     `entry × 0.0075 / tick` for futures. Deliberate, documented inline with a worked
+     example, and swamped by the 200-tick hard cap. LOW stands.
+   - **L3** — no 2-of-3 joint-condition test asserts the aggression machine resets.
+   - **L4** — `gap_profile.py:273` swallows all exceptions to `return []`, and the
+     nested `_Cfg` class is referenced only inside its own method. The severity anchor
+     was checked too: a grep for consumers of gap LVNs outside `gap_profile.py`
+     returns **nothing**, so the "HIGH the moment gap LVNs gate an entry" escalation
+     condition is not currently live.
+
+   **Headline #2 was then upgraded from "asserted" to "proven."** The report claimed
+   the one constants test certifies spec-wrong values as correct. That was verified by
+   the strongest available method — setting the constants *to* the spec's values and
+   running the suite:
+
+   | constant | code | spec (`docs/amt`) | outcome when set to spec |
+   |---|---|---|---|
+   | `FABIO_VALUE_AREA_PCT` | 0.70 | **0.682** (§5.1:128) | `test_value_area_percentage` FAILS |
+   | `FABIO_CVD_THRESHOLD_NSE` | 0.5 | **0.3** (`fabio_decision_pipeline.md:106`) | `test_cvd_thresholds_match_fabio` FAILS |
+   | `FABIO_CVD_THRESHOLD_MCX` | 0.3 | **0.5** (`fabio_decision_pipeline.md:107`) | same test FAILS |
+   | `FABIO_ABSORPTION_VOL_MULT` | 2.0 | **1.5** (§7.2) | (not asserted by that file) |
+   | `FABIO_ABSORPTION_RANGE_ATR` | 0.30 | **0.5** (§7.2) | (not asserted by that file) |
+
+   So aligning the code with its own specification **breaks the test suite in two
+   places**. The tests actively defend the divergence rather than catching it — a fix
+   to the spec values currently reads as a regression. This is the single clearest
+   demonstration of the review's central finding, and it also independently re-confirms
+   C5 (0.70 vs 0.682) and H9 (NSE/MCX inverted).
+
+   **Arithmetic audit:** 6 CRITICAL (C1–C8 with C2→M1 and C4→M18 downgraded) + 17 HIGH
+   + 18 MEDIUM + 4 LOW = **45**, matching the stated total. No duplicate IDs. The
+   CRITICAL section uses `###` subsections while HIGH/MEDIUM/LOW use table rows, which
+   is why a naive table-row count under-reports CRITICALs — the counts are correct, the
+   formats merely differ.
