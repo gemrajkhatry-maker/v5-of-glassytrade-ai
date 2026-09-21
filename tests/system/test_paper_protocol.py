@@ -146,6 +146,34 @@ def _index(trace):
     return bars, decisions, opens, closes, amts
 
 
+def _owning_bar_time(bars, t):
+    """Map a fill timestamp to the bar whose window contains it.
+
+    Tick-path exits stamp fills with the RAW TICK time (intra-bar precision is
+    the point of the fast stop/TP path), so a fill may carry an odd tick id
+    like ``t173`` — the closing tick of bar ``t172`` — while ``bars`` only
+    holds BarClosed (bar-window) times. Bar i spans tick ids [2i, 2i+1] in
+    this fixture (bar time = first tick epoch), so the owning bar of tick
+    ``tN`` is ``t{N - N % 2}``. Falls back to the nearest earlier bar for
+    fixtures whose epochs are not tick-paired.
+    """
+    if t in bars:
+        return t
+    digits = "".join(ch for ch in str(t) if ch.isdigit())
+    if digits:
+        n = int(digits)
+        snapped = f"t{n - n % 2}"
+        if snapped in bars:
+            return snapped
+        earlier = sorted(
+            (k for k in bars if digits and k[1:].isdigit() and int(k[1:]) <= n),
+            key=lambda k: int(k[1:]),
+        )
+        if earlier:
+            return earlier[-1]
+    return t
+
+
 # ---------------------------------------------------------------------------
 # Invariant A — no-trade-no-edge
 # ---------------------------------------------------------------------------
@@ -299,6 +327,7 @@ def test_fills_follow_fill_price_convention():
 
     for evt in closes:
         t = evt.time
+        bar_t = _owning_bar_time(bars, t)
         reason = evt.fill.reason.split("_")[0]  # strip _PYRAMID suffix
         if reason in ("SL", "TP1", "TP2"):
             sig = evt.fill.position.order.signal
@@ -313,7 +342,7 @@ def test_fills_follow_fill_price_convention():
                 expected = entry + 2.0 * r if sig.type == "LONG" else entry - 2.0 * r
             assert (
                 evt.fill.close_price == pytest.approx(expected, abs=1e-9)
-                or abs(evt.fill.close_price - bars[t].close) <= TICK_SIZE
+                or abs(evt.fill.close_price - bars[bar_t].close) <= TICK_SIZE
                 or (reason.startswith("TP") and evt.fill.close_price >= expected)
                 or (reason == "SL" and evt.fill.close_price <= expected)
             ), (
@@ -321,7 +350,7 @@ def test_fills_follow_fill_price_convention():
                 f"expected exact level {expected}"
             )
         else:
-            exit_dev = abs(evt.fill.close_price - bars[t].close)
+            exit_dev = abs(evt.fill.close_price - bars[bar_t].close)
             assert exit_dev <= TICK_SIZE, (
                 f"exit ({evt.fill.reason}) at {t} deviates {exit_dev} > tick {TICK_SIZE}"
             )

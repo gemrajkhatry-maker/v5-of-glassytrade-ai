@@ -416,7 +416,15 @@ class SessionRisk:
                         qty = min(qty, float(max_lots))
                 if freeze_limit is not None and freeze_limit > 0:
                     qty = clamp_to_freeze(qty, freeze_limit)
-                return qty * DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
+                # The day-of-week multiplier scales AFTER the lot computation:
+                # without a re-snap, a 0.5 multiplier on Mon/Fri turned a
+                # lot-aligned quantity into a half-lot (16,650 -> 8,325 for
+                # lot 50) that can never be ordered on-exchange. Round DOWN
+                # to the lot so scaling never up-sizes risk.
+                scaled = qty * DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
+                if lot_size and lot_size > 1.0:
+                    return float(int(scaled // lot_size) * lot_size)
+                return scaled
 
             # House Money Protocol fractional risk sizing
             risk_pct = self._risk_per_trade_pct()
