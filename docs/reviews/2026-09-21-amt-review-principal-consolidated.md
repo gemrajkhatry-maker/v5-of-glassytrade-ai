@@ -14,7 +14,7 @@ re-checked by the consolidating principal against the spec text and the code.
 **Test baseline at review time:** `tests/quant` + `tests/architecture` → **2580 passed,
 11 skipped, 0 failed**, exit 0. The validation rounds added 15 regression tests
 (`tests/quant/decision/test_review_regression_c1_c4.py`), taking the suite to
-**2600 passed, 11 skipped, 0 failed**.
+**2603 passed, 11 skipped, 0 failed**.
 
 ---
 
@@ -57,10 +57,11 @@ Three failure modes dominate, and they are the dangerous ones:
    correction.)
 
 None of these was caught by any test at review time. The validation round added
-four regression guards (`tests/quant/decision/test_review_regression_c1_c4.py`) that
+five regression guards (`tests/quant/decision/test_review_regression_c1_c4.py`) that
 pin C1's wiring contract, §13.2.4's bundle invariant, C6's measured threshold
-divergence, and H5's stop polarity — each mutation-verified to fail on the
-corresponding fix. The remaining 41 findings are still uncovered.
+divergence, H5's stop polarity, and M2's hardcoded MDL shadowing — each
+mutation-verified against the production code it pins. The remaining 40
+findings are still uncovered.
 
 ---
 
@@ -340,7 +341,7 @@ and a live test asserting which path is active; or amend §4 to name time bars a
 | # | Defect | Severity | Summary |
 |---|---|---|---|
 | M1 | **(downgraded from CRITICAL C2)** `session_extreme_low/high` unproduced — `va_fade.py:68-69` falls back to the bar wick, so stops reference the last bar's probe, not the session's true probe extreme | MEDIUM | Stop-quality degradation only; a second route via the complete `VA_FADE` evidence packet does not read these fields at all |
-| M2 | §12.1 MDL at exactly 2.0% is not asserted as the number — `test_max_loss_halts` uses `0.03` and proves a *different* (undocumented 2%) threshold fires earlier | MEDIUM | `risk.py:253` itself is **verified correct** (−1.9% → no halt, −2.0% → halt); only the test is weak |
+| M2 | §12.1 MDL at exactly 2.0% is not asserted as the number — `test_max_loss_halts` uses `0.03` and proves a *different* (undocumented 2%) threshold fires earlier | MEDIUM | **Validated and reframed by execution:** `risk.py:253` is not merely untested — the hardcoded `0.02` branch is checked **before** the operator-configurable `max_daily_loss_pct` (`runtime.py:333` → `SessionRisk(max_daily_loss_pct=...)`), so with any *looser* setting the session still halts at 2.0% and the configuration is silently ignored. Driven through the real `record_trade` API: MDL=5.0%, pnl=−3.0% → halt reason `'session kill switch: cumulative loss reaches 2.0% of equity'` (not `'daily loss limit reached'`). With the shipped default (0.020) the configured branch is unreachable for every input. Either the hardcode should go and 0.02 become the knob's default, or the knob should not exist — as shipped the config surface lies. Severity held MEDIUM (telemetry/halt path, not a money-path miscalculation) |
 | M3 | §12.2 `floor()` never asserted (tests use `pytest.approx`, which would also pass `round`) | MEDIUM | `risk.py:409` spec formula |
 | M4 | §13.2 pyramid 50%/25% sizing ratios never asserted | MEDIUM | `position_manager.py:608` — `fraction = 0.50 if pyramid_count == 0 else 0.25` is exercised only incidentally |
 | M5 | §10 pre-market trap lock has no explicit state or test | MEDIUM | The exchange-clock blackout *incidentally* excludes it; spec demands "STRICT RULE: Zero new entries" |
@@ -355,7 +356,7 @@ and a live test asserting which path is active; or amend §4 to name time bars a
 | M14 | CVD slope is an unnormalised linear-regression slope over 40 bars — absolute thresholds aren't scale-free across NSE options vs MCX commodities | MEDIUM | Compounds H8/H9 |
 | M15 | `quantize` ladder contains an off-spec leading `2` step | MEDIUM | `range_bars.py:43-46` — `{2,5,10,25,50,100,200}` vs spec's `{5,10,25,50,100,200}` |
 | M16 | Footprint provenance name drift + `cvd_source` never passed | MEDIUM |
-| M17 | **§3's 5-Minute Kline stream has no producer at the production default** | MEDIUM | Spec §3 requires 5m klines for "Macro Dealing Range identification, Session highs/lows, and overarching market narrative framing." `_DEFAULT_CONFIG["interval_seconds"] = 60` (`multi_engine.py:266`), so `runtime.py:384-409` builds a 60s aggregator and no 5m one; `analyzer.py` receives a single timeframe (`recent_data`, `:454`) and has **no 5m/macro concept at all** (verified: grep for `dealing_range`/`macro`/`5m` in the analyzer → no hits). The 60s bar does double duty as both decision and macro context. Note `DEFAULT_INTERVAL_SEC = 300` (`bars.py:7`) contradicts the coordinator default of 60 — two sources of truth again | `analyzer.py:1007` reads `self._footprint_accumulator` (never assigned) — should read the `footprint_accumulator` parameter; `AMTEngine` never passes `cvd_source`. Both `TICK_EXACT` provenance branches are unreachable, so live CVD/footprint is reported `CANDLE_DISTRIBUTED` forever |
+| M17 | **§3's 5-Minute Kline stream has no producer at the production default** — **validated by execution** | MEDIUM | Spec §3 requires 5m klines for "Macro Dealing Range identification, Session highs/lows, and overarching market narrative framing." `_DEFAULT_CONFIG["interval_seconds"] = 60` (`multi_engine.py:266`), so `runtime.py:384-409` builds a 60s aggregator and no 5m one; `analyzer.py` receives a single timeframe (`recent_data`, `:454`) and has **no 5m/macro concept at all** (verified: grep for `dealing_range`/`macro`/`5m` in the analyzer → no hits). The 60s bar does double duty as both decision and macro context. Note `DEFAULT_INTERVAL_SEC = 300` (`bars.py:7`) contradicts the coordinator default of 60 — two sources of truth again | `analyzer.py:1007` reads `self._footprint_accumulator` (never assigned) — should read the `footprint_accumulator` parameter; `AMTEngine` never passes `cvd_source`. Both `TICK_EXACT` provenance branches are unreachable, so live CVD/footprint is reported `CANDLE_DISTRIBUTED` forever |
 | M18 | **(downgraded from CRITICAL C4 — headline refuted by execution)** The pyramid SL ratchet writes `new_sl` into `signal.sl`, but the exit engine resolves the effective stop as `max({signal.sl, be_floor, trail})` (`protective_stop.py:5-9`), so the ratchet is overridden by the breakeven floor that authorized the pyramid | MEDIUM | Bundle guarantee holds (verified end-to-end: `+24.5`). Residual cost: the `StopMoved` event at `position_manager.py:678` journals a stop the engine never honours, and `base_override` (`position_manager.py:256`) hands a stale sub-breakeven `signal.sl` to any caller that skips the merge. **Now pinned:** `tests/quant/decision/test_review_regression_c1_c4.py::TestPyramidBundleGuarantee` asserts stopped-out bundle PnL ≥ 0 for both directions and both ratchet-firing and non-firing stops, and was mutation-verified (removing the `be_floor` merge fails it) |
 | L1 | `mock_pass` sentinel aliases `NotImplementedError` to a "placed" live stop | LOW | `live_oms.py:181-189`. Blast radius = one unguarded position; the in-memory stop path still works |
 | L2 | Gate 4 options stop cap uses 5% of premium, not 0.75% | LOW | `gates_rr.py:32-37`. Deliberate and documented; the 200-tick hard cap swamps either value |
@@ -506,7 +507,7 @@ correctly implemented and tested against `docs/amt`, and on that measure it is n
   layer) whose tuning constant an operator could believe is live.
 - **45 total** defects across constants, predicates, guards, formulas, and tests.
 - **3 spec-internal contradictions** the code cannot resolve.
-- A **2600/2600 green suite** (2580 at review time + 20 guards added in validation)
+- A **2603/2603 green suite** (2580 at review time + 23 guards added in validation)
   that asserts the wrong values in the exact places where the drift lives and could not
   detect any of the CRITICALs at review time; 2 of the findings are now pinned by the
   added guards, 43 are still unguarded.
@@ -637,4 +638,50 @@ the working tree at commit `e589cbe5a`, 2026-09-21.*
    Two executed regression guards were added for this pass: `TestH5StopPolarity` (5 cases)
    pinning the arithmetic disagreement in both directions, and the C6 threshold guard from
    the prior pass. Both are mutation-verified to fail on the corresponding fix. Suite: **20
-   regression guards, 2600 passed, 11 skipped, 0 failures.**
+   regression guards, 2603 passed, 11 skipped, 0 failures.**
+6. **MEDIUM pass re-verified by execution (M1–M18).** The MEDIUM tier was checked the
+   same way, and produced one reframing plus a self-caught error in a new test.
+
+   - **M2 — the finding's own framing was wrong, and the defect is bigger than stated.**
+     The row said "`risk.py:253` itself is verified correct; only the test is weak."
+     That is backwards. Driving the real `record_trade` API shows the hardcoded
+     `0.02` branch is checked **before** the operator-configurable
+     `max_daily_loss_pct`, so with any *looser* setting the session still halts at
+     2.0% and the configuration is silently ignored: MDL=5.0%, pnl=−3.0% returns
+     `'session kill switch: cumulative loss reaches 2.0% of equity'`, not
+     `'daily loss limit reached'`. With the shipped default (0.020) the configured
+     branch is unreachable for every input. Either the hardcode should go and 0.02
+     become the knob's default, or the knob should not exist. Severity held MEDIUM.
+
+   - **M17 confirmed on both halves by execution.** `_DEFAULT_CONFIG["interval_seconds"]
+     = 60` (`multi_engine.py:266`), and `runtime.py:384-409` builds the 5m
+     aggregator only when `interval_seconds > 60` — so at the production default it
+     is never constructed. `grep -n "macro\\|dealing_range\\|5m" quant/amt/analyzer.py`
+     returns no hits: the analyzer has no multi-timeframe concept at all. Second
+     half: `self._footprint_accumulator` is **read** at `analyzer.py:1007` but
+     **never assigned** anywhere — confirmed absent from both instance and class
+     `__dict__` on a real `AMTAnalyzer` — so `_compute_evidence_provenance` always
+     receives `None` and live CVD/footprint is reported `CANDLE_DISTRIBUTED` forever.
+
+   - **A first draft of the M2 test was wrong, and the real API caught it.** The draft
+     re-implemented the branch logic instead of calling `record_trade`, so it passed
+     even when the hardcoded branch was disabled — a mutation test that did not bite.
+     Rewritten against the real API (and against the real `is_halted` /
+     `halt_reason` **properties**, not methods), it now fails on the mutation.
+     This is the second time in this review that a synthetic test was caught by
+     mutation-testing it against the code it claims to pin.
+
+   Confirmed as written by inspection-and-execution: M9 (the 4%-of-premium spread
+   threshold at `gate_session_phase.py:115`, deliberate and documented inline but
+   not the spec's three-term formula), M12 (`MODEL_RISK_FAILURES` /
+   `MODEL_SIZING_FAILURES` are module-level counters at `exits.py:22,28`, shared by
+   every engine in the process), M13 (`compute_optimal_buckets` returns
+   `max(100, min(ticks_in_range, 1000))` — auto-computed, not `S_bucket`),
+   M14 (`_compute_slope` is an unnormalised `linreg_slope` over the 40-bar window),
+   M15 (`_DEFAULT_QUANT_STEPS = (2, 5, 10, 25, 50, 100, 200)` — the leading `2` is
+   not in the spec's set), M5 (no explicit pre-market state; the 09:15–09:30
+   blackout is a clock exclusion, not the spec's "STRICT RULE: Zero new entries"),
+   M6 (`test_cvd.py:53` asserts membership over the enum's entire codomain, so it
+   cannot fail on any input).
+
+   Suite: **23 regression guards, 2603 passed, 11 skipped, 0 failures.**

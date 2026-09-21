@@ -1,9 +1,10 @@
 import React from 'react';
 import { Zap, ShieldCheck, Clock, CheckCircle2, XCircle, Database, Activity } from 'lucide-react';
-import { QuantDecisionAnalysis } from '../../types';
+import { QuantDecisionAnalysis, RiskState } from '../../types';
 
 interface QuantDecisionCardProps {
     quantDecision: QuantDecisionAnalysis | null;
+    riskState?: RiskState | null;
 }
 
 const formatReason = (reason?: string | null): string => {
@@ -29,19 +30,22 @@ const formatReason = (reason?: string | null): string => {
 };
 
 /** PRIMARY decision card — renders the quant decision with clean metrics and gate grid. */
-const QuantDecisionCard = React.memo<QuantDecisionCardProps>(({ quantDecision }) => {
+const QuantDecisionCard = React.memo<QuantDecisionCardProps>(({ quantDecision, riskState }) => {
     if (!quantDecision) return null;
 
-    const isApproved = quantDecision.approved && !!quantDecision.signal;
-    const isHalted = quantDecision.reason === 'HALTED';
-    const humanReason = formatReason(quantDecision.reason);
-    const gates = quantDecision.gateResults || [];
+    const effectiveDecision = riskState?.halted === false && quantDecision.reason === 'HALTED'
+        ? { ...quantDecision, reason: 'SETUP_IN_PROGRESS', blockReasons: [] }
+        : quantDecision;
+    const isHalted = Boolean(riskState?.halted) || effectiveDecision.reason === 'HALTED';
+    const isApproved = effectiveDecision.approved && !!effectiveDecision.signal;
+    const gates = effectiveDecision.gateResults || [];
     const passedGatesCount = gates.filter(g => g.passed).length;
     const totalGatesCount = gates.length || 7;
     const overallProgressPct = gates.length > 0 ? Math.round((passedGatesCount / totalGatesCount) * 100) : 0;
 
     // Primary blocker string — first block reason or halt reason
-    const blockReasons: string[] = (quantDecision as any).blockReasons || [];
+    const blockReasons: string[] = (effectiveDecision as any).blockReasons || [];
+    const humanReason = formatReason(effectiveDecision.reason);
     const primaryBlocker = isHalted
         ? `HALTED: ${blockReasons[0] || 'session risk limit reached'}`
         : !isApproved && blockReasons.length > 0
@@ -63,17 +67,36 @@ const QuantDecisionCard = React.memo<QuantDecisionCardProps>(({ quantDecision })
 
             {/* 0. Top blocker banner — overrides all visual "enter" language */}
             {primaryBlocker && (
-                <div className={`mb-2.5 px-2.5 py-1.5 rounded-lg border flex items-start gap-2 ${
+                <div className={`mb-2.5 px-2.5 py-1.5 rounded-lg border flex items-center justify-between gap-2 ${
                     isHalted
                         ? 'border-rose-500/40 bg-rose-900/30 text-rose-300'
                         : 'border-amber-500/30 bg-amber-900/20 text-amber-300'
                 }`}>
-                    <span className={`mt-0.5 w-1.5 h-1.5 rounded-full shrink-0 ${
-                        isHalted ? 'bg-rose-400 animate-pulse' : 'bg-amber-400'
-                    }`} />
-                    <span className="text-[9px] font-mono font-bold uppercase leading-tight tracking-wide">
-                        {primaryBlocker}
-                    </span>
+                    <div className="flex items-center gap-2 min-w-0">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            isHalted ? 'bg-rose-400 animate-pulse' : 'bg-amber-400'
+                        }`} />
+                        <span className="text-[9px] font-mono font-bold uppercase leading-tight tracking-wide truncate">
+                            {primaryBlocker}
+                        </span>
+                    </div>
+                    {isHalted && (
+                        <button
+                            type="button"
+                            onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                    await fetch('/api/trading/risk/reset', { method: 'POST' });
+                                } catch (err) {
+                                    console.error('Failed to reset risk', err);
+                                }
+                            }}
+                            className="px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider rounded bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/40 text-rose-200 transition-colors shrink-0"
+                            title="Reset daily risk limits and loss streak"
+                        >
+                            Reset Risk
+                        </button>
+                    )}
                 </div>
             )}
             {/* 1. Header Bar */}

@@ -54,9 +54,15 @@ def rescore_aggression_with_direction(ctx: DecisionContext) -> float:
         return 0.0
 
     cvd_state = getattr(ctx, "cvd_state", None)
-    cvd_slope = cvd_state.slope if cvd_state else None
+    cvd_slope = (
+        cvd_state.slope if hasattr(cvd_state, "slope")
+        else (cvd_state.get("slope") if isinstance(cvd_state, dict) else None)
+    ) if cvd_state else None
     ofi_result = getattr(ctx, "ofi_result", None)
-    ofi = ofi_result.ofi if ofi_result else None
+    ofi = (
+        ofi_result.ofi if hasattr(ofi_result, "ofi")
+        else (ofi_result.get("ofi") if isinstance(ofi_result, dict) else None)
+    ) if ofi_result else None
     norm_delta = getattr(ctx, "norm_delta", None)
     absorption_side = getattr(ctx, "absorption_side", "")
 

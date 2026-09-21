@@ -24,7 +24,10 @@ class AnalysisService:
     def run_amt(self, req):
         data = [dto_to_ohlc(d) for d in req.data]
         ob = dto_to_order_book(req.order_book)
-        return self._amt_analyzer.analyze(data, ob)
+        # The caller sends its live chart series, so the newest candle is the one
+        # currently forming: the dead-volume veto must ignore it rather than read a
+        # partially-filled bucket as a collapsed auction.
+        return self._amt_analyzer.analyze(data, ob, latest_is_forming=True)
 
     def run_footprint(self, req):
         data = [dto_to_ohlc(d) for d in req.data]

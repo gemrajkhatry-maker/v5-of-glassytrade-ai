@@ -242,15 +242,19 @@ def test_all_scenarios_deterministic():
 
 
 def test_zero_size_position_never_opens():
-    """Regression (live finding): when the risk budget affords 0 lots
-    (MIDCPNIFTY: 120-lot × 27pt risk > 0.25% budget), the engine must NOT
-    open a zero-size position — it produced a phantom UI trade with frozen
-    P&L at 0.00."""
+    """Regression (live finding): when the risk budget affords 0 lots,
+    the engine must NOT open a zero-size position — it produced a phantom
+    UI trade with frozen P&L at 0.00.
+
+    Note: with margin-aware sizing (15% derivative margin), the aggressive
+    deployment path costs lot_size × entry × 0.15 per lot. A small account
+    still cannot afford even one lot — that is the zero-guard invariant."""
     from quant.execution.risk import SessionRisk
     from quant.decision.context import DecisionContext
 
-    r = SessionRisk(starting_equity=1_000_000.0, storage=None, symbol="S")
-    # MIDCPNIFTY-like economics: 120 lot × 27pt stop vs 0.25% of ₹10L
+    # Tiny account: 50% deployment = 50K budget; 120-lot × 14912 × 0.15
+    # = 268K/lot → 0 lots affordable.
+    r = SessionRisk(starting_equity=100_000.0, storage=None, symbol="S")
     q = r.position_size(entry=14912.20, sl=14939.46, lot_size=120)
     assert q == 0.0, "sizing must return 0 when budget < 1 lot risk"
 

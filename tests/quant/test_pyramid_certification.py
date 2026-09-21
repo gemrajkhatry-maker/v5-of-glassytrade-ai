@@ -65,7 +65,7 @@ def test_e9_live_pyramid_never_ghosts():
     pm._exits.evaluate(pos, bar_close=101.0, bar_index=3, bar_high=101.0, bar_low=100.9)
     assert pm._exits.is_risk_free(pos), "breakeven should arm at 0.8R+"
 
-    dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+    dto = {"legLvns": [100.0], "absorptionSide": "SELL_ABSORBED"}
     # LiveOMS.add_pyramid raises ValueError
     with pytest.raises(ValueError) as exc_info:
         oms.add_pyramid(pos, 100.05, 99.0, 1.0, "2026-08-17T09:30:00+05:30", 1)
@@ -93,7 +93,7 @@ def test_e9_live_close_does_not_send_broker_order_for_ghost():
     pm._exits.evaluate(pos, bar_close=101.0, bar_index=3, bar_high=101.0, bar_low=100.9)
     assert pm._exits.is_risk_free(pos)
 
-    dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+    dto = {"legLvns": [100.0], "absorptionSide": "SELL_ABSORBED"}
     pm.check_pyramid(dto, _bar(100.05), pos, bar_index=5)
 
     # No pyramid positions → the close loop has nothing to send to the broker.
@@ -123,7 +123,7 @@ def test_e10_base_sl_ratcheted_at_pyramid_fill():
 
     new_sl = structural_stop("LONG", 100.05, leg_lvn, tick)
 
-    dto = {"legLvn": leg_lvn, "absorptionSide": "SELL_ABSORBED"}
+    dto = {"legLvns": [leg_lvn], "absorptionSide": "SELL_ABSORBED"}
     pm.check_pyramid(dto, _bar(100.05), pos, bar_index=5)
 
     assert len(pm.pyramid_positions) == 1, "P1 should have fired"
@@ -157,7 +157,7 @@ def test_e11_pyramid_reserves_portfolio_risk():
     pm._exits.evaluate(pos, bar_close=101.0, bar_index=3, bar_high=101.0, bar_low=100.9)
     assert pm._exits.is_risk_free(pos)
 
-    dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+    dto = {"legLvns": [100.0], "absorptionSide": "SELL_ABSORBED"}
     pm.check_pyramid(dto, _bar(100.05), pos, bar_index=5)
 
     assert len(pm.pyramid_positions) == 1, "P1 should have fired"

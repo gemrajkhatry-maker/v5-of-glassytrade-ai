@@ -38,9 +38,23 @@ async def _safe_send(ws: WebSocket, data: dict) -> bool:
         # Session closed or invalid state
         logger.debug("WS send failed (runtime): %s", e)
         return False
+    except TypeError as e:
+        logger.warning(
+            "WS send TypeError (%s) on keys=%s — falling back to json.dumps(default=str)",
+            e, list(data.keys())[:5], exc_info=True,
+        )
+        try:
+            text = json.dumps(data, default=str)
+            await ws.send_text(text)
+            return True
+        except (WebSocketDisconnect, asyncio.TimeoutError):
+            return False
+        except Exception as e_fallback:
+            logger.error("WS fallback send failed: %s", e_fallback)
+            return False
     except Exception as e:
         logger.warning(
-            "WS send failed: %s (keys=%s)", type(e).__name__, list(data.keys())[:5]
+            "WS send failed: %s (keys=%s)", type(e).__name__, list(data.keys())[:5], exc_info=True
         )
         return False
 

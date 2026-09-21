@@ -214,8 +214,10 @@ class DhanWebSocketClient(IWebSocketClient):
         await self._cancel_tasks()
 
         # Lazily create the queue inside a running event loop (Python 3.10+)
+        # Capacity is sized for burst tolerance: at ~500 msgs/s sustained
+        # with 12 symbols, this gives ~100s of buffer before backpressure.
         if self._message_queue is None:
-            self._message_queue = asyncio.Queue(maxsize=10000)
+            self._message_queue = asyncio.Queue(maxsize=50000)
 
         auth_url = self._build_auth_url()
         logger.info(f"Connecting to Dhan market feed WS (clientId={self._client_id})")

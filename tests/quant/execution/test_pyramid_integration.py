@@ -66,7 +66,7 @@ def test_refused_add_leaves_no_ghost():
     pm._exits.evaluate(pos, bar_close=101.0, bar_index=3, bar_high=101.0, bar_low=100.9)
     assert pm._exits.is_risk_free(pos)
 
-    dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+    dto = {"legLvns": [100.0], "absorptionSide": "SELL_ABSORBED"}
     pm.check_pyramid(
         dto,
         Bar(time="t1", open=100.0, high=100.05, low=99.95, close=100.05, volume=100),
@@ -162,7 +162,8 @@ def test_pyramid_reads_leg_lvn_from_the_dto_key_that_exists():
     resolved = pm._resolve_leg_lvn({"legLvns": [99.5, 101.25], "legLvn": None}, close_px=101.0)
     assert resolved == 101.25
 
-    legacy = pm._resolve_leg_lvn({"legLvn": 100.0}, close_px=100.0)
-    assert legacy == 100.0
+    # The singular spelling is not a producer key: a DTO carrying only it has
+    # no leg LVN, so the pyramid guard must return rather than invent one.
+    assert pm._resolve_leg_lvn({"legLvn": 100.0}, close_px=100.0) == 0.0
 
     assert pm._resolve_leg_lvn({}, close_px=100.0) == 0.0

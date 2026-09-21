@@ -114,10 +114,9 @@ class TestMarketDataIngestion:
 class TestSignalGeneration:
     def test_long_signal_builds_valid_rr(self):
         sb = SignalBuilder()
-        # close 100, VAL 98 (anchor), step 1; SL sits 1 tick INSIDE the
-        # structural level toward entry: 98 + 1 = 99.0 (2-tick offset would
-        # reach entry, so the fallback places 1 tick inside the anchor).
-        state = _state(close=100.0, val=98.0, step=1.0, nearest=98.0)
+        # close 100, VAL 98 (anchor), step 0.5; SL sits 2 ticks (1.0 point) INSIDE
+        # the structural level toward entry: 98 + 2 * 0.5 = 99.0, satisfying min_stop_distance.
+        state = _state(close=100.0, val=98.0, step=0.5, nearest=98.0)
         sig = sb.build(_ctx(state, "LONG"), _pass_results())
         assert sig is not None
         assert sig.type == "LONG"
@@ -129,10 +128,9 @@ class TestSignalGeneration:
 
     def test_short_signal_is_sell(self):
         sb = SignalBuilder()
-        # close 100, anchor level 102 (nearest, above entry); SL sits 1 tick
-        # INSIDE it toward entry: 102 - 1 = 101.0 (2-tick offset would reach
-        # entry, so the fallback places 1 tick inside the anchor).
-        state = _state(close=100.0, val=98.0, step=1.0, nearest=102.0)
+        # close 100, anchor level 102 (nearest, above entry), step 0.5; SL sits 2 ticks
+        # (1.0 point) INSIDE it toward entry: 102 - 2 * 0.5 = 101.0, satisfying min_stop_distance.
+        state = _state(close=100.0, val=98.0, step=0.5, nearest=102.0)
         sig = sb.build(_ctx(state, "SHORT"), _pass_results())
         assert sig is not None
         assert sig.type == "SHORT"

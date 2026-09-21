@@ -202,3 +202,10 @@ amt_duration = metrics.histogram("amt_pipeline_duration_seconds", "AMT pipeline 
 signals_generated = metrics.counter("signals_generated_total", "Signals generated")
 errors_total = metrics.counter("errors_total", "Total errors")
 active_positions = metrics.gauge("positions_active", "Currently open positions")
+
+# Dashboard metrics — decision pipeline and trade execution tracking
+decisions_evaluated = metrics.counter("decisions_evaluated_total", "Total entry decisions evaluated")
+decisions_approved = metrics.counter("decisions_approved_total", "Entry decisions that passed gates")
+decisions_blocked = metrics.counter("decisions_blocked_total", "Entry decisions blocked by gates")
+trades_executed = metrics.counter("trades_executed_total", "Trades successfully executed")
+

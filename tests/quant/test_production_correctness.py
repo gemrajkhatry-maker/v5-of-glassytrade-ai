@@ -235,15 +235,40 @@ def test_absorption_without_accumulation_is_not_entry():
 
 
 def test_triple_a_machine_requires_cluster_close():
+    """Full 4-phase progression: WAITING → ABSORBING → ACCUMULATING → AGGRESSION."""
     m = TripleAMachine()
-    s = m.update(close=100.0, high=100.2, low=99.8, absorption_side="", vwap=99.5, cvd_slope=0.1)
+    # No absorption → WAITING.
+    s = m.update(close=100.0, high=100.2, low=99.8, vwap=99.5, cvd_slope=0.1)
     assert s.phase == WAITING
-    # Detector pulse = displacement already confirmed → AGGRESSION this bar.
-    s = m.update(close=100.5, high=100.6, low=100.2, absorption_side="SELL_ABSORBED", vwap=99.5, cvd_slope=0.4)
+
+    # Absorption signature detected (pending, no breakout yet) → ABSORBING.
+    s = m.update(
+        close=100.0, high=100.1, low=99.9, vwap=99.5, cvd_slope=0.1,
+        absorption_active=True, absorption_cluster_high=100.1, absorption_cluster_low=99.9,
+        poc=100.0, tick_size=0.05,
+    )
+    assert s.phase == ABSORBING
+
+    # Second bar consolidating near POC → ACCUMULATING (2+ bars near POC).
+    s = m.update(
+        close=100.0, high=100.1, low=99.9, vwap=99.5, cvd_slope=0.1,
+        absorption_active=True, absorption_cluster_high=100.1, absorption_cluster_low=99.9,
+        poc=100.0, tick_size=0.05,
+    )
+    assert s.phase == ACCUMULATING
+
+    # Breakout beyond cluster with VWAP/CVD confirming → AGGRESSION.
+    s = m.update(
+        close=100.2, high=100.3, low=100.0, vwap=100.0, cvd_slope=0.4,
+        absorption_side="SELL_ABSORBED",
+        absorption_active=True, absorption_cluster_high=100.1, absorption_cluster_low=99.9,
+        poc=100.0, tick_size=0.05,
+    )
     assert s.phase == AGGRESSION
     assert s.signal == "LONG"
-    # Next bar is not sticky.
-    s = m.update(close=100.6, high=100.7, low=100.3, absorption_side="", vwap=99.5, cvd_slope=0.4)
+
+    # Next bar is not sticky — resets to WAITING.
+    s = m.update(close=100.6, high=100.7, low=100.3, vwap=100.0, cvd_slope=0.4)
     assert s.phase == WAITING
 
 

@@ -11,6 +11,14 @@ system:
   log_level: "INFO"
   capital: 1000000.0
 
+# ── Operator Environment Variables ──
+# These env vars override config values at runtime (no code changes needed):
+#   GLASSYTRADE_USE_RANGE_BARS=1   Enable ATR-dynamic range bars (spec §4).
+#                                   Off by default (fixed-interval candles).
+#                                   Accepts: 1/true/yes/on | 0/false/no/off
+#   GLASSYTRADE_HOTPATH_TRACE=1    Enable opt-in hot-path phase tracing.
+#   GLASSYTRADE_SEED_INTERVAL_SEC  History seed fetch rate-limit interval.
+
 # ── Global Constants (migrated from constants.py) ──
 globals:
   # Volume Profile

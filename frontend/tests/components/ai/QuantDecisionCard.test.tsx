@@ -40,6 +40,25 @@ describe('QuantDecisionCard', () => {
     expect(screen.getByText(/Phase: AGGRESSION/i)).toBeInTheDocument();
   });
 
+  it('does not show stale HALTED after live risk is cleared', () => {
+    const halted: QuantDecisionAnalysis = {
+      approved: false,
+      reason: 'HALTED',
+      phase: '',
+      blockReasons: ['Risk: external/emergency: SIGTERM shutdown'],
+      signal: null,
+    };
+    render(<QuantDecisionCard quantDecision={halted} riskState={{
+      halted: false,
+      haltReason: '',
+      consecutiveLosses: 0,
+      dailyPnl: 0,
+    }} />);
+    expect(screen.queryByText(/HALTED:/i)).toBeNull();
+    expect(screen.queryByText(/SIGTERM shutdown/i)).toBeNull();
+    expect(screen.getByText(/Standing By/i)).toBeInTheDocument();
+  });
+
   it('renders Standing By state and reason when there is no signal', () => {
     render(<QuantDecisionCard quantDecision={rejected} />);
     expect(screen.getByText(/Standing By/i)).toBeInTheDocument();

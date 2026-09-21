@@ -32,6 +32,29 @@ def check_cvd_kill(position: Position, dto: dict, cvd_kill_threshold: float) -> 
     return None
 
 
+def check_stacked_imbalance_tighten(
+    position: Position, dto: dict,
+) -> ExitDecision | None:
+    """Rule 2b: Opposing stacked footprint imbalance — tighten SL.
+
+    Fabio Gap #2: when the latest footprint shows stacked imbalance
+    opposing the held position, the institutional side is overpowering
+    us. Tighten by moving SL to entry (breakeven) instead of full exit.
+    Returns ExitDecision ONLY when the stacked imbalance is strong
+    enough (magnitude >= 3 consecutive 3:1 levels) and directly
+    opposing.
+    """
+    si_dir = str(dto.get("stackedImbalanceDirection") or dto.get("stacked_imbalance_direction", ""))
+    si_mag = int(dto.get("stackedImbalanceMagnitude") or dto.get("stacked_imbalance_magnitude", 0))
+    if not si_dir or si_mag < 3:
+        return None
+    long = position.size > 0
+    opposing = (long and si_dir == "SELL") or (not long and si_dir == "BUY")
+    if not opposing:
+        return None
+    return ExitDecision(True, "STACKED_IMBALANCE_TIGHTEN", 0.0)
+
+
 def tp2_level(entry: float, tp: float) -> float:
     """Rule 4 second-tier target (tier>=1): entry ± 2×|tp−entry|.
 

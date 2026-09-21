@@ -235,6 +235,31 @@ def _order_importer_allowed(rel: str) -> bool:
     return rel.startswith(_ORDER_ALLOWED_PREFIXES)
 
 
+# --- Brain -> host direction: quant must not import the application --------
+#
+# quant is the deterministic brain and must run standalone (replay, scripts,
+# CI, an embedding) with the backend package absent from sys.path. The host
+# imports quant, never the reverse; the seam for anything quant needs from the
+# host is a port in quant/contracts/ports (implemented by a backend adapter).
+#
+# Concrete regression this gates: the decision-loop telemetry hook reached for
+# app.infrastructure.metrics behind `try/except ImportError` and kept counting
+# into a counter nothing served — silently, and only where the backend
+# package happened to be importable.
+_QUANT_PREFIX = "quant/"
+_HOST_IMPORT_RE = r"^\s*(?:from|import)\s+(?:app|backend)\b"
+
+
+def test_quant_never_imports_the_host_application():
+    bad: list = []
+    for rel in _py_files():
+        if not rel.startswith(_QUANT_PREFIX):
+            continue
+        if re.search(_HOST_IMPORT_RE, _read(rel), re.MULTILINE):
+            bad.append(rel)
+    assert bad == [], bad
+
+
 def test_engine_order_imports_stay_in_allowlist():
     bad: list = []
     for rel in _py_files():

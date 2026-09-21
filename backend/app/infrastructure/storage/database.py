@@ -244,6 +244,18 @@ class SQLiteStorageAdapter(IStorage):
                 logger.debug("Failed to create ticks index (may already exist)", exc_info=True)
             self._conn.commit()
             logger.info("SQLite database initialized at %s (WAL mode)", self._db_path)
+            if os.environ.get("CLEAR_POSITIONS_ON_RESTART", "").lower() in ("1", "true", "yes"):
+                try:
+                    count_row = self._conn.execute("SELECT COUNT(*) FROM open_positions").fetchone()
+                    count = count_row[0] if count_row else 0
+                    if count > 0:
+                        self._conn.execute("DELETE FROM open_positions")
+                        self._conn.commit()
+                        logger.info("STARTUP: Cleared %d stale open positions from database (CLEAR_POSITIONS_ON_RESTART)", count)
+                except sqlite3.Error:
+                    self._conn.rollback()
+                    logger.error("Failed to clear open positions on startup", exc_info=True)
+
 
     def _execute_write(self, query: str, params: tuple = (), *, auto_commit: bool = True) -> None:
         """Execute a write query with lock, commit, and rollback on error.

@@ -33,7 +33,7 @@ def _capture_amt_trace(ticks, symbol="SYM"):
             "priorPoc": e.amt.get("priorPoc") if e.amt else None,
             "npocAbove": e.amt.get("npocAbove") if e.amt else None,
             "npocBelow": e.amt.get("npocBelow") if e.amt else None,
-            "legLvn": e.amt.get("legLvn") if e.amt else None,
+            "legLvns": e.amt.get("legLvns") if e.amt else None,
             "isSecondDrive": e.amt.get("isSecondDrive") if e.amt else None,
         }
         for e in amt_events

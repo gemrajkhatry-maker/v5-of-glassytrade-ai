@@ -171,6 +171,37 @@ class SignalBuilder:
         return sig
 
     @staticmethod
+    def _shield_tp(
+        tp: float,
+        entry: float,
+        direction: str,
+        tick: float,
+        shield_ticks: int = 2,
+    ) -> float:
+        """Spec §11 tick-inside profit target shield.
+
+        When the take-profit sits at a major structural level (NPOC, prior POC,
+        VAH/VAL), place it 1-2 ticks **inside** the level (toward entry) so the
+        limit fill executes BEFORE the liquidity cascade at the exact structural
+        level triggers slippage. Returns the unmodified ``tp`` if doing so would
+        invert the signal or if ``tp`` is not at a structural extreme.
+        """
+        if tick <= 0 or tp <= 0 or entry <= 0:
+            return tp
+        offset = tick * shield_ticks
+        if direction == "LONG":
+            shielded = tp - offset
+            # Never shield above entry (would invert the signal)
+            if shielded <= entry:
+                return tp
+            return shielded
+        else:  # SHORT
+            shielded = tp + offset
+            if shielded >= entry:
+                return tp
+            return shielded
+
+    @staticmethod
     def _structural_tp(
         ctx: DecisionContext,
         entry: float,
@@ -186,10 +217,15 @@ class SignalBuilder:
         R:R multiplier when no structural target qualifies.
 
         Priority: nearest NPOC > prior POC > opposite VA edge > fixed R:R.
+
+        Per spec §11, structural TP levels are shielded 1-2 ticks inside (toward
+        entry) to fill before slippage cascades at the exact structural level.
         """
         risk = abs(entry - sl)
         if risk <= 0:
             return fallback_tp
+
+        tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else TICK_SIZE_NSE_OPTIONS
 
         # MEAN_REVERSION exits at balance (Fabio Model 2): a VA_FADE always
         # targets the POC. The generic filter below would drop the POC when its
@@ -197,10 +233,13 @@ class SignalBuilder:
         # is the wrong exit for a balance-return trade.
         is_va_fade = getattr(ctx, "setup_evidence", None) and getattr(ctx.setup_evidence, "setup_type", "") == "VA_FADE"
         if is_va_fade and ctx.poc and ctx.poc > 0:
-            if direction == "LONG" and ctx.poc > entry:
-                return ctx.poc
-            if direction == "SHORT" and ctx.poc < entry:
-                return ctx.poc
+            raw_tp = ctx.poc
+            if direction == "LONG" and raw_tp > entry:
+                # VA-fade mean-reversion targets exact POC — do NOT shield
+                # away from balance or the exit fires before price rotates
+                return raw_tp
+            if direction == "SHORT" and raw_tp < entry:
+                return raw_tp
 
         candidates: list[float] = []
 
@@ -237,7 +276,14 @@ class SignalBuilder:
         if valid:
             # Pick nearest qualifying structural target
             valid.sort()
-            return valid[0][1]
+            raw_tp = valid[0][1]
+            # Spec §11 shield applies to trend structural targets (NPOC, prior
+            # POC, VAH/VAL) but NOT to VA-fade mean-reversion POC exits —
+            # those target the exact balance level, and shielding would cause
+            # a premature exit before price rotates to POC.
+            if is_va_fade and ctx.poc and abs(raw_tp - ctx.poc) < tick:
+                return raw_tp
+            return SignalBuilder._shield_tp(raw_tp, entry, direction, tick)
 
         return fallback_tp
 

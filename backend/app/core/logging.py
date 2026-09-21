@@ -2,12 +2,19 @@
 
 import json
 import logging
+import logging.handlers
 import re
+import os
 import sys
 from datetime import datetime, timezone
 from typing import Any
 
 from app.core.correlation import get_correlation_id
+
+# Log rotation settings: 10MB per file, keep 5 rotated files (~60MB total)
+_LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+_LOG_BACKUP_COUNT = 5
+_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
 
 
 # P1-14: scrub broker tokens/secrets before they reach JSON log aggregators.
@@ -58,18 +65,40 @@ class StructuredFormatter(logging.Formatter):
 
 
 def setup_logging() -> None:
-    """Configure structured logging for the application."""
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(StructuredFormatter())
-    
+    """Configure structured logging with rotation.
+
+    Logs to both stdout (WARNING+) and a rotating file handler (INFO+).
+    Rotation prevents unbounded disk growth — 10MB × 5 files = ~60MB cap.
+    """
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
-    root_logger.addHandler(handler)
     root_logger.setLevel(logging.INFO)
-    
+
+    formatter = StructuredFormatter()
+
+    # Rotating file handler — captures everything INFO+ for post-mortem debugging
+    os.makedirs(_LOG_DIR, exist_ok=True)
+    file_handler = logging.handlers.RotatingFileHandler(
+        os.path.join(_LOG_DIR, "backend.log"),
+        maxBytes=_LOG_MAX_BYTES,
+        backupCount=_LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
+
+    # Console handler — only WARNING+ to stdout to keep operator output clean
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.WARNING)
+    root_logger.addHandler(console_handler)
+
     # Reduce noise from third-party libraries
     logging.getLogger("uvicorn").setLevel(logging.WARNING)
     logging.getLogger("websockets").setLevel(logging.WARNING)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
 class LoggerAdapter(logging.LoggerAdapter):

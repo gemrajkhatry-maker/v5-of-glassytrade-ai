@@ -299,7 +299,7 @@ async def readiness_check(request: Request):
 
 
 @router.get("/v1/metrics")
-async def metrics():
+async def metrics(request: Request):
     """Return current pipeline metrics.
 
     Uses CoordinatorMetricsProvider to read per-engine activity from the

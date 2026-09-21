@@ -24,7 +24,17 @@ def gate_risk_reward(
     anchor = structural_anchor(ctx, direction)
     sl = float(structural_stop(direction, entry, anchor, tick))
     risk = abs(entry - sl)
-    scaled_cap_ticks = max(max_distance_ticks, (entry * 0.0075) / tick)
+    # Stop-cap formula differs for options vs futures:
+    #   Futures (NIFTY ~23,000): 0.0075 factor → ~3,500 ticks — adapts correctly.
+    #   Options (premium ~150–300): 0.0075 factor → ~39 ticks, always dominated by
+    #   the 200-tick hard cap (= ₹10 absolute), which is too tight for high-LTP
+    #   options. Use 5% of option premium (entry × 0.05 / tick) instead.
+    from quant.contracts.instrument_registry import is_option_contract
+    if is_option_contract(ctx.symbol):
+        dynamic_factor = entry * 0.05 / tick   # 5% of option premium in ticks
+    else:
+        dynamic_factor = entry * 0.0075 / tick  # 0.75% of futures price in ticks
+    scaled_cap_ticks = max(max_distance_ticks, dynamic_factor)
     if risk > scaled_cap_ticks * tick:
         return GateResult(
             4, False,

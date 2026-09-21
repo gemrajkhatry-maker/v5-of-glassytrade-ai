@@ -17,6 +17,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Dead-volume veto thresholds. The DEAD state is a data-quality veto, so its
+# thresholds live beside the check that owns it.
+VOLUME_EMA_WINDOW = 20           # completed candles the volume EMA is built from
+DEAD_VOLUME_RATIO = 0.01         # underlying auction: newest closed volume < 1% of its EMA
+DEAD_PREMIUM_MIN_VOLUME = 10.0   # option premium: a closed candle this thin is not trading
+
 
 def classify_market_structure(
     data: list,
@@ -118,23 +124,50 @@ def compute_effective_market_state(
     market_state: MarketState,
     recent_data: list,
     current: "OHLC",
-    cvd_source: str = "",
+    *,
+    volume_scale: str = "underlying",
+    latest_is_forming: bool = False,
 ) -> str:
-    """Override market state to DEAD when volume is dead."""
+    """Override market state to DEAD when the volume feeding the auction is dead.
+
+    ``volume_scale`` names the series being judged and is deliberately separate
+    from any CVD-mixing concern, so fixing one can never silently disable the
+    other:
+
+    - ``"underlying"`` — futures/index candles: the relative veto. A closed candle
+      trading under ``DEAD_VOLUME_RATIO`` of its own EMA is a dead auction.
+    - ``"option"`` — an option contract's premium candles: only an absolute
+      collapse (``DEAD_PREMIUM_MIN_VOLUME``) is dead. A sub-1%-of-EMA reading on a
+      thin premium is normal for that strike, not a dead auction; judging it by the
+      ratio alone vetoed every quiet premium. (Skipping the veto altogether for
+      options made DEAD unproducible, which also silenced the DEAD_MARKET exit and
+      the Triple-A dead-market rejection — see tests for option symbols.)
+
+    ``latest_is_forming`` says whether the newest entry in ``recent_data`` is a
+    still-open candle (history seeds and client-supplied series can end mid-bucket).
+    Only completed candles are ever judged: the series is trimmed to its closed
+    candles when the flag is set, and used as-is when the newest entry is already
+    closed. The candle judged is always the newest *closed* one, never a partially
+    built bar and never the bar before the one the caller is deciding on.
+    """
     effective: str = market_state.value
-    # Option-premium candles are the wrong scale for futures volume EMA — never
-    # force DEAD from this gate when AMT is still on option ticks only.
-    if cvd_source == "option":
+    closed = recent_data[:-1] if latest_is_forming else recent_data
+    if len(closed) < VOLUME_EMA_WINDOW:
+        # Too few completed candles for the EMA to mean anything.
         return effective
-    if len(recent_data) >= 20:
-        alpha = 2.0 / 21
-        ema_vol = float(recent_data[-20].volume)
-        for d in recent_data[-19:]:
-            ema_vol = alpha * float(d.volume) + (1 - alpha) * ema_vol
-        latest_vol = float(recent_data[-1].volume)
+    window = closed[-VOLUME_EMA_WINDOW:]
+    alpha = 2.0 / (VOLUME_EMA_WINDOW + 1)
+    ema_vol = float(window[0].volume)
+    for candle in window[1:]:
+        ema_vol = alpha * float(candle.volume) + (1 - alpha) * ema_vol
+    latest_vol = float(closed[-1].volume)
+    if volume_scale == "option":
+        dead = latest_vol < DEAD_PREMIUM_MIN_VOLUME
+    else:
         vol_ratio = latest_vol / ema_vol if ema_vol > 0 else 0.0
-        if float(current.close) <= 0 or vol_ratio < 0.01:
-            effective = MarketState.DEAD.value
+        dead = vol_ratio < DEAD_VOLUME_RATIO
+    if float(current.close) <= 0 or dead:
+        effective = MarketState.DEAD.value
     return effective
 
 

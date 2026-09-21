@@ -101,17 +101,25 @@ def gate_session_phase(ctx: DecisionContext) -> GateResult:
                 ),
             )
 
-    # Bid-Ask spread filter: Ask - Bid <= 2 * tau (with fallback to 0.40 currency units / 3 ticks)
+    # Bid-Ask spread filter: spread must be within a reasonable fraction of
+    # premium. Uses percentage-based threshold (consistent with scanner's 4%
+    # limit) rather than an absolute minimum — the old fixed 0.40 floor blocked
+    # every low-premium option (e.g. BANKNIFTY 56400 PUT @ ₹460 with ₹1.65
+    # spread = 0.36% was blocked by the 0.40 absolute minimum).
     if ctx.ask > 0 and ctx.bid > 0 and ctx.ask >= ctx.bid:
         spread = ctx.ask - ctx.bid
         tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
         close_px = float(getattr(ctx.bar, "close", 0) or 0) if ctx.bar is not None else 0.0
-        max_spread = max(2.0 * tick, close_px * 0.001, 0.40)
+        # Percentage-based threshold: 4% of premium, with tick-based minimum
+        # for high-priced instruments where 4% would be too wide.
+        pct_threshold = close_px * 0.04 if close_px > 0 else float("inf")
+        tick_floor = 2.0 * tick
+        max_spread = max(pct_threshold, tick_floor)
         if spread > max_spread:
             return GateResult(
                 gate=1,
                 passed=False,
-                reason=f"Wide spread ({spread:.2f} > {max_spread:.2f}) — slippage risk",
+                reason=f"Wide spread ({spread:.2f} > {max_spread:.2f}, {spread/close_px*100:.1f}%) — slippage risk",
             )
 
     return GateResult(gate=1, passed=True)

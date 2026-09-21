@@ -22,10 +22,11 @@ def _find_last_startup_window(log_text: str, marker: str) -> str:
 
 
 def main() -> int:
+    # Primary log is now backend/logs/backend.log (managed by RotatingFileHandler)
     log_path = Path(
         os.getenv("BACKEND_RUNTIME_LOG_PATH")
         or os.getenv("BACKEND_LOG_PATH")
-        or (Path(__file__).resolve().parents[1] / "backend.log")
+        or (Path(__file__).resolve().parents[1] / "logs" / "backend.log")
     )
     if not log_path.exists():
         print(f"SKIP: startup log not found at {log_path}")

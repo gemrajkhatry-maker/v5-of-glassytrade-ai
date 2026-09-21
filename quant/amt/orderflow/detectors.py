@@ -268,6 +268,9 @@ class AbsorptionResult:
     side: str  # "SELL_ABSORBED" (bullish) | "BUY_ABSORBED" (bearish) | ""
     range_ratio: float  # candle_range / ATR
     vol_ratio: float  # candle_volume / avg_volume
+    cluster_high: float = 0.0  # high of the absorption cluster (valid when detected or active)
+    cluster_low: float = 0.0   # low of the absorption cluster (valid when detected or active)
+    active: bool = False       # True when a pending absorption is awaiting displacement
 
 
 class AbsorptionDetector:
@@ -306,12 +309,20 @@ class AbsorptionDetector:
             
             if self._pending_side == "SELL_ABSORBED" and displaced_bullish:
                 # Validated bullish absorption!
-                res = AbsorptionResult(True, "SELL_ABSORBED", self._pending_range_ratio, self._pending_vol_ratio)
+                res = AbsorptionResult(
+                    True, "SELL_ABSORBED", self._pending_range_ratio, self._pending_vol_ratio,
+                    cluster_high=float(self._pending_candle.high),
+                    cluster_low=float(self._pending_candle.low),
+                )
                 self._clear_pending()
                 return res
             elif self._pending_side == "BUY_ABSORBED" and displaced_bearish:
                 # Validated bearish absorption!
-                res = AbsorptionResult(True, "BUY_ABSORBED", self._pending_range_ratio, self._pending_vol_ratio)
+                res = AbsorptionResult(
+                    True, "BUY_ABSORBED", self._pending_range_ratio, self._pending_vol_ratio,
+                    cluster_high=float(self._pending_candle.high),
+                    cluster_low=float(self._pending_candle.low),
+                )
                 self._clear_pending()
                 return res
             
@@ -319,36 +330,81 @@ class AbsorptionDetector:
             if self._candles_since_pending >= 3 or (self._pending_side == "SELL_ABSORBED" and displaced_bearish) or (self._pending_side == "BUY_ABSORBED" and displaced_bullish):
                 self._clear_pending()
                 
+        # 1b. Pending absorption still active (not displaced, not expired): report
+        #     active state with the pending cluster bounds so the Triple-A machine
+        #     can track the ABSORBING phase before breakout.
+        if self._pending_candle is not None:
+            side_now = self._pending_side if self._pending_side else ""
+            ch = float(self._pending_candle.high)
+            cl = float(self._pending_candle.low)
+        else:
+            side_now = ""
+            ch = 0.0
+            cl = 0.0
+
         # 2. Detect NEW absorption signatures
         candle_range = float(candle.high - candle.low)
         candle_vol = float(candle.volume)
 
         if atr <= 0 or avg_vol <= 0:
-            return AbsorptionResult(False, "", 0.0, 0.0)
+            return AbsorptionResult(False, "", 0.0, 0.0, cluster_high=ch, cluster_low=cl, active=self._pending_candle is not None)
 
         range_ratio = candle_range / atr
         vol_ratio = candle_vol / avg_vol
 
         # Dual condition check
         if range_ratio < ABSORPTION_RANGE_ATR and vol_ratio >= ABSORPTION_VOL_MULT:
-            delta = float(candle.delta)
-            # Classify direction from delta:
-            # delta < 0: Aggressive sellers hitting the bid are absorbed by passive buyers (support floor) -> SELL_ABSORBED (bullish)
-            # delta > 0: Aggressive buyers hitting the ask are absorbed by passive sellers (resistance ceiling) -> BUY_ABSORBED (bearish)
-            if delta < 0:
-                self._pending_side = "SELL_ABSORBED"  # Buyers absorbing sellers → bullish support
-            elif delta > 0:
-                self._pending_side = "BUY_ABSORBED"  # Sellers absorbing buyers → bearish resistance
+            # Spec §7.2: Classify absorption direction using the 60% volume
+            # concentration rule + close-position confirmation. This replaces
+            # raw delta sign, which is a noisy proxy for aggression direction.
+            #
+            #   BUY absorption (bullish): aggressive sellers >= 60% of volume
+            #       AND close in upper half of range -> SELL_ABSORBED
+            #   SELL absorption (bearish): aggressive buyers >= 60% of volume
+            #       AND close in lower half of range -> BUY_ABSORBED
+            candle_vol = float(candle.volume)
+            taker_buy = float(getattr(candle, "taker_buy_volume", 0.0) or 0.0)
+
+            if 0.0 < taker_buy < candle_vol:
+                # Use directly reported taker buy volume (live data path)
+                buy_vol = taker_buy
+                sell_vol = candle_vol - taker_buy
             else:
-                return AbsorptionResult(False, "", range_ratio, vol_ratio)
+                # Derive buy/sell split from delta (clamped to ±volume)
+                delta_val = float(candle.delta)
+                if abs(delta_val) > candle_vol:
+                    delta_val = candle_vol if delta_val > 0 else -candle_vol
+                buy_vol = (candle_vol + delta_val) / 2.0
+                sell_vol = (candle_vol - delta_val) / 2.0
+
+            rng = float(candle.high - candle.low)
+            close_px = float(candle.close)
+            mid_low = float(candle.low) + 0.5 * rng
+            mid_high = float(candle.high) - 0.5 * rng
+
+            if sell_vol >= 0.60 * candle_vol and close_px >= mid_low:
+                self._pending_side = "SELL_ABSORBED"  # Sellers absorbed by hidden buyers -> bullish
+            elif buy_vol >= 0.60 * candle_vol and close_px <= mid_high:
+                self._pending_side = "BUY_ABSORBED"  # Buyers absorbed by hidden sellers -> bearish
+            else:
+                # Volume/range signature present but no directional concentration
+                return AbsorptionResult(
+                    False, "", range_ratio, vol_ratio,
+                    cluster_high=ch, cluster_low=cl, active=self._pending_candle is not None,
+                )
 
             # Store as pending, wait for displacement
             self._pending_candle = candle
             self._pending_range_ratio = range_ratio
             self._pending_vol_ratio = vol_ratio
             self._candles_since_pending = 0
-            
-        return AbsorptionResult(False, "", range_ratio, vol_ratio)
+            ch = float(candle.high)
+            cl = float(candle.low)
+
+        return AbsorptionResult(
+            False, "", range_ratio, vol_ratio,
+            cluster_high=ch, cluster_low=cl, active=self._pending_candle is not None,
+        )
 
     def _clear_pending(self):
         self._pending_candle = None

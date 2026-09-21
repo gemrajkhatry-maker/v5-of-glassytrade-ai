@@ -17,7 +17,9 @@ export MLX_DEFER_LOADING=1
 # Local preflight guard with explicit failure categories
 bash "$SCRIPT_DIR/start_preflight.sh"
 export SKIP_START_PREFLIGHT=1
-export BACKEND_RUNTIME_LOG_PATH="${BACKEND_RUNTIME_LOG_PATH:-$SCRIPT_DIR/backend.log}"
+# Primary log is managed by Python's RotatingFileHandler at backend/logs/backend.log
+# This shell redirect captures only WARNING+ (stdout) plus startup diagnostics
+export BACKEND_RUNTIME_LOG_PATH="${BACKEND_RUNTIME_LOG_PATH:-$SCRIPT_DIR/logs/backend.log}"
 
 # Note: startup log contract enforcement is implemented in backend/start.sh
 # and can be enabled here too with ENFORCE_STARTUP_LOG_CONTRACT=1.

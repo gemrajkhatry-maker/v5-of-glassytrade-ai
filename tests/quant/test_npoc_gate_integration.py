@@ -32,7 +32,7 @@ def _make_bar(time_str: str, o: float, h: float, l: float, c: float, vol: float 
 def test_structural_tp_targets_npoc_above_for_long():
     """LONG: with a qualifying NPOC above entry, it must win as the TP —
     NPOC is the highest-priority structural target (ahead of prior POC and
-    the opposite VA edge)."""
+    the opposite VA edge). Spec §11: shielded 2 ticks inside (toward entry)."""
     entry, sl = 24500.0, 24450.0  # risk = 50
     ctx = DecisionContext(
         npoc_above=24650.0,   # rr = 150/50 = 3.0 >= min_rr
@@ -40,11 +40,13 @@ def test_structural_tp_targets_npoc_above_for_long():
         vah=24800.0,
     )
     tp = SignalBuilder._structural_tp(ctx, entry, sl, "LONG", fallback_tp=24575.0)
-    assert tp == 24650.0, "NPOC above must be selected over prior_poc/vah for LONG"
+    # Shielded 2 ticks (0.10) inside NPOC toward entry: 24650.0 - 0.10 = 24649.9
+    assert tp == 24649.9, "NPOC above must be selected over prior_poc/vah for LONG"
 
 
 def test_structural_tp_targets_npoc_below_for_short():
-    """SHORT: symmetric case — NPOC below entry wins as the TP."""
+    """SHORT: symmetric case — NPOC below entry wins as the TP.
+    Spec §11: shielded 2 ticks inside (toward entry)."""
     entry, sl = 24500.0, 24550.0  # risk = 50
     ctx = DecisionContext(
         npoc_below=24350.0,   # rr = 150/50 = 3.0 >= min_rr
@@ -52,7 +54,8 @@ def test_structural_tp_targets_npoc_below_for_short():
         val=24200.0,
     )
     tp = SignalBuilder._structural_tp(ctx, entry, sl, "SHORT", fallback_tp=24425.0)
-    assert tp == 24350.0, "NPOC below must be selected over prior_poc/val for SHORT"
+    # Shielded 2 ticks (0.10) inside NPOC toward entry: 24350.0 + 0.10 = 24350.1
+    assert tp == 24350.1, "NPOC below must be selected over prior_poc/val for SHORT"
 
 
 def test_structural_tp_skips_npoc_that_fails_min_rr():
@@ -65,7 +68,8 @@ def test_structural_tp_skips_npoc_that_fails_min_rr():
         prior_poc=24700.0,    # reward=200, rr=4.0 -> qualifies
     )
     tp = SignalBuilder._structural_tp(ctx, entry, sl, "LONG", fallback_tp=24575.0)
-    assert tp == 24700.0
+    # Shielded 2 ticks (0.10) inside prior_poc toward entry: 24700.0 - 0.10 = 24699.9
+    assert tp == 24699.9
 
 
 def test_gates_edge_never_references_npoc():

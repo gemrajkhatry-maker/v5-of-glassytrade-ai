@@ -400,3 +400,60 @@ class TestH5StopPolarity:
             assert got > anchor, "code places the long stop ABOVE the level (inside)"
         else:
             assert got < anchor, "code places the short stop BELOW the level (inside)"
+
+
+# ---------------------------------------------------------------------------
+# M2 — the spec's 2.0% MDL hardcode shadows the operator's configured limit
+# ---------------------------------------------------------------------------
+
+class TestM2HardcodedMDLShadowsConfig:
+    """Spec 12.1 fixes the session kill switch at 2.0% of E0, and that is what
+    ``risk.py:253`` implements. But ``max_daily_loss_pct`` is also exposed as an
+    operator-configurable knob (``runtime.py:333`` -> ``SessionRisk(...)``), and
+    the hardcoded 0.02 branch is checked *first*.
+
+    This drives the real ``record_trade`` API, so it exercises the production
+    halt path rather than a re-implementation of it.
+
+    Consequence, measured: with any *looser* operator setting the session still
+    halts at 2.0% and the configuration is silently ignored; with the shipped
+    default (0.020) the configured branch is unreachable for every input.
+    """
+
+    def _risk(self, mdl: float, starting: float = 100_000.0):
+        from quant.execution.risk import SessionRisk
+
+        r = SessionRisk(starting_equity=starting, max_daily_loss_pct=mdl)
+        r._halted = False
+        r._daily_pnl = 0.0
+        return r
+
+    def test_a_looser_configured_limit_is_silently_ignored(self):
+        """An operator who sets 5.0% still halts at 2.0%."""
+        r = self._risk(0.05)
+        r.record_trade(-3_000.0, count_as_trade=False)  # -3.0%, past 2.0%
+        assert r.is_halted is True
+        assert "2.0%" in r.halt_reason, r.halt_reason
+        assert r.halt_reason != "daily loss limit reached"
+
+    def test_the_shipped_config_makes_the_configured_branch_dead(self):
+        """With the shipped default the two branches coincide, so the configured
+        branch can never be the decisive one for any input."""
+        r = self._risk(0.020)
+        r.record_trade(-2_500.0, count_as_trade=False)  # -2.5%
+        assert r.is_halted is True
+        # the kill-switch branch fired, not the configured-MDL branch
+        assert "2.0%" in r.halt_reason, r.halt_reason
+
+    def test_a_tighter_configured_limit_is_honoured(self):
+        """The asymmetry: a *tighter* operator setting (1.5%) still fires
+        correctly at -1.6% because the 2.0% hardcode has not fired yet. Only
+        *looser* settings are overridden."""
+        r = self._risk(0.015)
+        r.record_trade(-1_600.0, count_as_trade=False)  # -1.6%
+        assert r.is_halted is True
+        assert r.halt_reason == "daily loss limit reached", r.halt_reason
+        # and a session just inside the tighter limit is still live
+        r2 = self._risk(0.015)
+        r2.record_trade(-1_400.0, count_as_trade=False)  # -1.4%
+        assert r2.is_halted is False

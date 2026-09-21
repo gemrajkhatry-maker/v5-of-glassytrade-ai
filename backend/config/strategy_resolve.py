@@ -12,6 +12,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _STRATEGY_ALIASES: dict[str, str] = {
+    "nse": "nse_options",
     "nse_index_options": "nse_options",
     "nse_index": "nse_options",
     "index_options": "nse_options",

@@ -8,11 +8,12 @@ def test_resolve_leg_lvn_prefers_nearest_positive_plural_level():
     assert result.source == "legLvns"
 
 
-def test_resolve_leg_lvn_uses_legacy_fallback():
+def test_resolve_leg_lvn_ignores_the_legacy_singular_key():
+    """The DTO only ever emits ``legLvns``; ``legLvn`` is not a producer key."""
     result = resolve_leg_lvn({"legLvn": 99.5}, 100.0)
-    assert result.available is True
-    assert result.level == 99.5
-    assert result.source == "legLvn"
+    assert result.available is False
+    assert result.level == 0.0
+    assert result.reason == "NO_LVN"
 
 
 def test_resolve_leg_lvn_reports_unavailable_without_a_level():

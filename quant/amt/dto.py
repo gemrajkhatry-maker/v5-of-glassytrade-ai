@@ -46,6 +46,76 @@ def _derive_stacked_imbalance(footprints: dict) -> tuple[str, int]:
     return best_dir, best_n
 
 
+class CVDStateDict(dict):
+    @property
+    def value(self) -> float:
+        return float(self.get("value", 0.0))
+
+    @property
+    def slope(self) -> float:
+        return float(self.get("slope", 0.0))
+
+    @property
+    def has_divergence(self) -> bool:
+        return bool(self.get("hasDivergence", False))
+
+    @property
+    def divergence_type(self) -> str:
+        return str(self.get("divergenceType", "NONE"))
+
+    @property
+    def z_score(self) -> float:
+        return float(self.get("zScore", 0.0))
+
+
+class OFIResultDict(dict):
+    @property
+    def ofi(self) -> float:
+        return float(self.get("ofi", 0.0))
+
+    @property
+    def window(self) -> int:
+        return int(self.get("window", 0))
+
+
+def _to_cvd_state_dto(cs: object) -> CVDStateDict | None:
+    if cs is None:
+        return None
+    if isinstance(cs, CVDStateDict):
+        return cs
+    if isinstance(cs, dict):
+        return CVDStateDict(
+            value=float(cs.get("value", 0.0)),
+            slope=float(cs.get("slope", 0.0)),
+            hasDivergence=bool(cs.get("hasDivergence") or cs.get("has_divergence", False)),
+            divergenceType=str(cs.get("divergenceType") or cs.get("divergence_type", "NONE")),
+            zScore=float(cs.get("zScore") or cs.get("z_score", 0.0)),
+        )
+    return CVDStateDict(
+        value=float(getattr(cs, "value", 0.0)),
+        slope=float(getattr(cs, "slope", 0.0)),
+        hasDivergence=bool(getattr(cs, "has_divergence", False)),
+        divergenceType=str(getattr(cs, "divergence_type", "NONE")),
+        zScore=float(getattr(cs, "z_score", 0.0)),
+    )
+
+
+def _to_ofi_result_dto(o: object) -> OFIResultDict | None:
+    if o is None:
+        return None
+    if isinstance(o, OFIResultDict):
+        return o
+    if isinstance(o, dict):
+        return OFIResultDict(
+            ofi=float(o.get("ofi", 0.0)),
+            window=int(o.get("window", 0)),
+        )
+    return OFIResultDict(
+        ofi=float(getattr(o, "ofi", 0.0)),
+        window=int(getattr(o, "window", 0)),
+    )
+
+
 def amt_result_to_dto(r) -> dict:
     """Convert a domain AMTResult to the camelCase WS DTO dict."""
     quality = normalize_data_quality(getattr(r, "data_quality", ""))
@@ -201,8 +271,8 @@ def amt_result_to_dto(r) -> dict:
         "gapProfileVal": float(getattr(r, "gap_profile_val", 0.0)),
         # Raw aggression components for direction-gated re-scoring
         "aggressionComponents": getattr(r, "aggression_components", {}),
-        "cvdState": getattr(r, "cvd_state", None),
-        "ofiResult": getattr(r, "ofi_result", None),
+        "cvdState": _to_cvd_state_dto(getattr(r, "cvd_state", None)),
+        "ofiResult": _to_ofi_result_dto(getattr(r, "ofi_result", None)),
         "normDelta": getattr(r, "norm_delta", 0.0),
         # Displacement
         "swingDelta": r.swing_delta,

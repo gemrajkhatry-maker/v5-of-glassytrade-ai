@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "timestamp": "2026-09-11T09:43:01Z",
+  "timestamp": "2026-09-18T16:44:53Z",
   "index": {
     "conftest.py": [
       1787394159.112,
@@ -10,16 +10,16 @@
       1787634111.924,
       122
     ],
-    "Makefile": [
-      1789031927.93,
-      2044
+    "MERGED_NODES.md": [
+      1789138824.839,
+      298
     ],
-    "ARCHITECTURE_AND_FLOWS.md": [
-      1789114225.182,
-      56246
+    "Makefile": [
+      1789123600.451,
+      2380
     ],
     "glassytrade.db": [
-      1789115993.804,
+      1789721386.652,
       139264
     ],
     ".gitignore": [
@@ -31,8 +31,8 @@
       120883
     ],
     ".env": [
-      1789119673.465,
-      2652
+      1789706668.693,
+      2781
     ],
     "start_frontend.sh": [
       1785927513.366,
@@ -43,7 +43,7 @@
       574
     ],
     ".env.example": [
-      1787323645.87,
+      1789548463.709,
       2343
     ],
     "AGENTS.md": [
@@ -51,8 +51,8 @@
       472
     ],
     "start.sh": [
-      1789119683.486,
-      2680
+      1789732345.839,
+      3205
     ],
     "CLAUDE.md": [
       1785928266.661,
@@ -82,41 +82,321 @@
       1788866046.472,
       117262
     ],
+    "automation/monitor.py": [
+      1789582952.647,
+      7628
+    ],
+    "automation/__init__.py": [
+      1789581594.635,
+      0
+    ],
+    "automation/cli.py": [
+      1789584446.81,
+      6482
+    ],
+    "automation/orchestrator.py": [
+      1789582241.742,
+      5898
+    ],
+    "automation/config/quality_rules.yaml": [
+      1789581596.373,
+      449
+    ],
+    "automation/coverage/analyzer.py": [
+      1789584034.735,
+      4157
+    ],
+    "automation/coverage/__init__.py": [
+      1789584032.412,
+      0
+    ],
+    "automation/fixes/__init__.py": [
+      1789582712.28,
+      0
+    ],
+    "automation/fixes/generator.py": [
+      1789582713.04,
+      7034
+    ],
+    "automation/hooks/pre_commit.py": [
+      1789584744.633,
+      2363
+    ],
+    "automation/hooks/install.sh": [
+      1789584746.785,
+      741
+    ],
+    "automation/hooks/__init__.py": [
+      1789584742.4,
+      0
+    ],
+    "automation/performance/detector.py": [
+      1789583594.131,
+      3960
+    ],
+    "automation/performance/__init__.py": [
+      1789583592.379,
+      0
+    ],
+    "automation/quality/scanner.py": [
+      1789582504.592,
+      4499
+    ],
+    "automation/quality/patterns.py": [
+      1789586159.85,
+      5049
+    ],
+    "automation/quality/__init__.py": [
+      1789582489.194,
+      312
+    ],
+    "automation/reports/monitor_report_20260917_170034.json": [
+      1789644634.24,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_002321.json": [
+      1789584801.016,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_002032.json": [
+      1789584632.865,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_170038.json": [
+      1789644638.378,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_161700.json": [
+      1789642020.493,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_001330.json": [
+      1789584210.176,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_173402.json": [
+      1789646642.175,
+      947
+    ],
+    "automation/reports/monitor_report_20260918_120816.json": [
+      1789713496.413,
+      947
+    ],
+    "automation/reports/monitor_report_20260916_235645.json": [
+      1789583205.327,
+      944
+    ],
+    "automation/reports/monitor_report_20260917_001337.json": [
+      1789584217.536,
+      945
+    ],
+    "automation/reports/monitor_report_20260917_004637.json": [
+      1789586197.719,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_161658.json": [
+      1789642018.088,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_000711.json": [
+      1789583831.046,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_000802.json": [
+      1789583882.439,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_010551.json": [
+      1789587351.993,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_104627.json": [
+      1789622187.446,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_170032.json": [
+      1789644632.058,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_001839.json": [
+      1789584519.556,
+      947
+    ],
+    "automation/reports/monitor_report_20260916_235326.json": [
+      1789583006.013,
+      944
+    ],
+    "automation/reports/monitor_report_20260917_001140.json": [
+      1789584100.684,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_160910.json": [
+      1789641550.403,
+      947
+    ],
+    "automation/reports/monitor_report_20260916_235255.json": [
+      1789582975.345,
+      944
+    ],
+    "automation/reports/monitor_report_20260917_161705.json": [
+      1789642025.047,
+      947
+    ],
+    "automation/reports/monitor_report_20260916_235305.json": [
+      1789582985.658,
+      944
+    ],
+    "automation/reports/monitor_report_20260917_173407.json": [
+      1789646647.002,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_001211.json": [
+      1789584131.266,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_001354.json": [
+      1789584234.778,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_002329.json": [
+      1789584809.835,
+      946
+    ],
+    "automation/reports/monitor_report_20260916_235348.json": [
+      1789583028.261,
+      944
+    ],
+    "automation/reports/monitor_report_20260917_001904.json": [
+      1789584544.312,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_002040.json": [
+      1789584640.353,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_160908.json": [
+      1789641548.317,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_002056.json": [
+      1789584656.272,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_104632.json": [
+      1789622192.028,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_104628.json": [
+      1789622188.971,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_004629.json": [
+      1789586189.826,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_002354.json": [
+      1789584834.185,
+      947
+    ],
+    "automation/reports/monitor_report_20260916_235358.json": [
+      1789583038.228,
+      944
+    ],
+    "automation/reports/monitor_report_20260917_001831.json": [
+      1789584511.706,
+      946
+    ],
+    "automation/reports/monitor_report_20260916_235417.json": [
+      1789583057.824,
+      945
+    ],
+    "automation/reports/monitor_report_20260917_010559.json": [
+      1789587359.782,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_000735.json": [
+      1789583855.751,
+      947
+    ],
+    "automation/reports/monitor_report_20260916_235712.json": [
+      1789583232.845,
+      945
+    ],
+    "automation/reports/monitor_report_20260917_160914.json": [
+      1789641554.149,
+      946
+    ],
+    "automation/reports/monitor_report_20260918_120818.json": [
+      1789713498.332,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_004632.json": [
+      1789586192.585,
+      946
+    ],
+    "automation/reports/monitor_report_20260917_001125.json": [
+      1789584085.721,
+      947
+    ],
+    "automation/reports/monitor_report_20260918_120822.json": [
+      1789713502.38,
+      947
+    ],
+    "automation/reports/monitor_report_20260916_235748.json": [
+      1789583268.755,
+      945
+    ],
+    "automation/reports/monitor_report_20260917_010554.json": [
+      1789587354.708,
+      947
+    ],
+    "automation/reports/monitor_report_20260917_173359.json": [
+      1789646639.949,
+      946
+    ],
+    "automation/testing/runner.py": [
+      1789582038.19,
+      3283
+    ],
+    "automation/testing/__init__.py": [
+      1789582037.093,
+      0
+    ],
     "backend/.importlinter": [
       1786039205.192,
       1595
     ],
-    "backend/backend.log": [
-      1789119780.315,
-      124349
+    "backend/glassytrade.db.bak": [
+      1789449495.254,
+      1376256
     ],
     "backend/conftest.py": [
       1785927513.086,
       612
     ],
     "backend/backend_e2e.log": [
-      1788975997.338,
-      4989960
+      1789646760.027,
+      5602695
     ],
     "backend/start_nse.sh": [
-      1785927513.091,
-      2772
+      1789732345.83,
+      2941
     ],
     "backend/pytest.ini": [
       1785927513.087,
       246
     ],
     "backend/requirements.txt": [
-      1786072072.034,
-      762
+      1789548463.74,
+      849
     ],
     "backend/start_paper.sh": [
       1786072072.982,
       1180
     ],
     "backend/.active_contracts.json": [
-      1789119768.099,
-      426
+      1789749867.283,
+      423
     ],
     "backend/start_deferred.sh": [
       1785927513.091,
@@ -126,37 +406,41 @@
       1787728101.269,
       4999
     ],
+    "backend/startup.log": [
+      1789749867.616,
+      105171
+    ],
     "backend/STARTUP_RUNBOOK.md": [
       1785927513.034,
       1965
     ],
     "backend/glassytrade.db-shm": [
-      1789119691.267,
+      1789746638.033,
       32768
     ],
     "backend/glassytrade.db-wal": [
-      1789119767.871,
-      1569752
+      1789749867.094,
+      2084752
     ],
     "backend/setup.py": [
       1785927513.09,
       108
     ],
     "backend/glassytrade.db": [
-      1789104349.13,
-      1007616
+      1789749544.245,
+      1376256
     ],
     "backend/.env": [
-      1789099209.558,
-      2653
+      1789706673.954,
+      2781
     ],
     "backend/start_mcx_local.sh": [
       1785927513.091,
       658
     ],
     "backend/.session_levels.json": [
-      1789119766.936,
-      104576
+      1789749674.049,
+      151978
     ],
     "backend/start.sh": [
       1785927513.091,
@@ -207,28 +491,36 @@
       2648
     ],
     "backend/app/api/routers/health.py": [
-      1789065697.731,
-      16869
+      1789732345.827,
+      16913
     ],
     "backend/app/api/routers/__init__.py": [
       1787421861.402,
       524
     ],
     "backend/app/api/routers/trading.py": [
-      1788463024.277,
-      3494
+      1789732345.828,
+      3987
     ],
     "backend/app/api/routers/observability.py": [
-      1786071343.851,
-      2118
+      1789732345.828,
+      3762
+    ],
+    "backend/app/api/routers/dashboard.html": [
+      1789723244.203,
+      15168
     ],
     "backend/app/api/routers/testing.py": [
       1788374603.94,
       2582
     ],
+    "backend/app/api/websocket/auth.py": [
+      1789124377.174,
+      7226
+    ],
     "backend/app/api/websocket/gameloop.py": [
-      1789066987.865,
-      15559
+      1789124411.243,
+      16090
     ],
     "backend/app/api/websocket/__init__.py": [
       1785927045.516,
@@ -247,8 +539,8 @@
       5955
     ],
     "backend/app/application/di/composition_root.py": [
-      1789065697.735,
-      10889
+      1789732345.828,
+      11217
     ],
     "backend/app/application/services/trading_query_service.py": [
       1786122880.858,
@@ -267,8 +559,8 @@
       24
     ],
     "backend/app/application/services/analysis_service.py": [
-      1786616778.657,
-      998
+      1789732345.828,
+      1246
     ],
     "backend/app/config_models/validator.py": [
       1788805251.747,
@@ -279,11 +571,11 @@
       17137
     ],
     "backend/app/config_models/__init__.py": [
-      1788805196.594,
-      7197
+      1789569555.039,
+      7165
     ],
     "backend/app/config_models/loader.py": [
-      1788805311.301,
+      1789548463.73,
       13957
     ],
     "backend/app/core/alerts.py": [
@@ -291,12 +583,12 @@
       2713
     ],
     "backend/app/core/logging.py": [
-      1785927513.048,
-      2814
+      1789732345.828,
+      4933
     ],
     "backend/app/core/metrics.py": [
-      1788463024.277,
-      6803
+      1789732345.829,
+      7270
     ],
     "backend/app/core/async_boundary.py": [
       1786071344.728,
@@ -323,7 +615,7 @@
       110
     ],
     "backend/app/domain/ops/startup_reconciliation.py": [
-      1788463024.277,
+      1789548463.73,
       5893
     ],
     "backend/app/domain/ops/gate_rejection_tracker.py": [
@@ -337,6 +629,14 @@
     "backend/app/infrastructure/__init__.py": [
       1785927045.525,
       67
+    ],
+    "backend/app/infrastructure/telemetry.py": [
+      1789719655.843,
+      1387
+    ],
+    "backend/app/infrastructure/adapters/dhan_market_data.py": [
+      1789141901.354,
+      340
     ],
     "backend/app/infrastructure/adapters/dhan_order_feed.py": [
       1789066987.875,
@@ -359,24 +659,28 @@
       24386
     ],
     "backend/app/infrastructure/adapters/dhan_broker_adapter.py": [
-      1788855023.568,
-      50075
+      1789548463.732,
+      52378
     ],
     "backend/app/infrastructure/serialization/__init__.py": [
       1785927045.526,
       23
     ],
     "backend/app/infrastructure/serialization/schemas.py": [
-      1787048178.514,
+      1789548463.733,
       16103
     ],
     "backend/app/infrastructure/storage/database.py": [
-      1788797943.178,
-      43041
+      1789141456.252,
+      43745
     ],
     "backend/app/infrastructure/storage/__init__.py": [
       1785927045.526,
       0
+    ],
+    "backend/app/infrastructure/storage/sqlite_storage.py": [
+      1789141896.92,
+      378
     ],
     "backend/app/infrastructure/strategies/__init__.py": [
       1786290069.14,
@@ -387,7 +691,7 @@
       1374
     ],
     "backend/config/strategy_resolve.py": [
-      1785927513.086,
+      1789548463.739,
       1360
     ],
     "backend/config/feature_flags.yaml": [
@@ -407,11 +711,11 @@
       10141
     ],
     "backend/config/base.yaml": [
-      1788532981.858,
-      14674
+      1789732345.829,
+      15177
     ],
     "backend/config/environments/paper.yaml": [
-      1788864781.787,
+      1789548463.735,
       759
     ],
     "backend/config/environments/live.yaml": [
@@ -423,16 +727,20 @@
       836
     ],
     "backend/config/strategies/mcx_options.yaml": [
-      1788954138.549,
+      1789548463.737,
       2768
     ],
     "backend/config/strategies/nse_options.yaml": [
-      1788864781.788,
+      1789548463.738,
       2256
     ],
     "backend/journals/2026-09-10_FINNIFTY 29 SEP 25450 PUT.jsonl": [
       1789026299.234,
       1961772
+    ],
+    "backend/journals/2026-09-15_NIFTY 15 SEP 23250 PUT.jsonl": [
+      1789467286.576,
+      2194969
     ],
     "backend/journals/2026-09-08_MIDCPNIFTY 29 SEP 14675 CALL.jsonl": [
       1788860605.394,
@@ -442,6 +750,10 @@
       1788937444.105,
       684737
     ],
+    "backend/journals/2026-09-11_GOLDM 25 SEP 151500 CALL.jsonl": [
+      1789138940.335,
+      1150057
+    ],
     "backend/journals/2026-09-02_SILVERM 24 SEP 228000 CALL.jsonl": [
       1788357694.502,
       259179
@@ -450,9 +762,21 @@
       1788765958.69,
       11181863
     ],
+    "backend/journals/2026-09-16_GOLDM 25 SEP 150000 PUT.jsonl": [
+      1789532402.019,
+      447044
+    ],
     "backend/journals/2026-09-01_CRUDEOIL SEP FUT.jsonl": [
       1788286879.957,
       8530284
+    ],
+    "backend/journals/2026-09-17_SILVERM 24 SEP 229000 CALL.jsonl": [
+      1789656809.13,
+      125438
+    ],
+    "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14275 PUT.jsonl": [
+      1789553361.729,
+      2724433
     ],
     "backend/journals/2026-09-10_SILVERM 24 SEP 234000 CALL.jsonl": [
       1789051413.1,
@@ -474,6 +798,10 @@
       1787941246.743,
       10312390
     ],
+    "backend/journals/2026-09-16_FINNIFTY 29 SEP 25200 CALL.jsonl": [
+      1789547414.638,
+      3646994
+    ],
     "backend/journals/2026-09-10_BANKNIFTY 29 SEP 56400 CALL.jsonl": [
       1789018813.121,
       341459
@@ -489,6 +817,10 @@
     "backend/journals/2026-09-01_BANKNIFTY 29 SEP 57200 PUT.jsonl": [
       1788255726.788,
       3927419
+    ],
+    "backend/journals/2026-09-16_FINNIFTY 29 SEP 25200 PUT.jsonl": [
+      1789547408.801,
+      3595648
     ],
     "backend/journals/2026-09-09_SILVERM 24 SEP 237000 PUT.jsonl": [
       1788955396.43,
@@ -550,6 +882,10 @@
       1788517784.432,
       12616950
     ],
+    "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9650 PUT.jsonl": [
+      1789490823.709,
+      3371596
+    ],
     "backend/journals/2026-09-11_BANKNIFTY 29 SEP 55900 CALL.jsonl": [
       1789099336.163,
       4700
@@ -574,6 +910,14 @@
       1788544446.932,
       1378250
     ],
+    "backend/journals/2026-09-18_MIDCPNIFTY 29 SEP 14500 PUT.jsonl": [
+      1789746109.351,
+      4143697
+    ],
+    "backend/journals/2026-09-17_CRUDEOIL 17 SEP 10200 CALL.jsonl": [
+      1789584812.819,
+      147961
+    ],
     "backend/journals/2026-08-28_NIFTY 1 SEP 24050 PUT.jsonl": [
       1787911141.267,
       11185775
@@ -593,6 +937,10 @@
     "backend/journals/2026-08-26_SILVERM_24_SEP_244000_CALL.jsonl": [
       1787751804.069,
       0
+    ],
+    "backend/journals/2026-09-17_MIDCPNIFTY 29 SEP 14400 CALL.jsonl": [
+      1789641617.786,
+      153940
     ],
     "backend/journals/2026-09-03_FINNIFTY 29 SEP 26100 CALL.jsonl": [
       1788410434.479,
@@ -614,9 +962,21 @@
       1787806345.254,
       1078977
     ],
+    "backend/journals/2026-09-15_NATURALGAS SEP FUT.jsonl": [
+      1789532522.624,
+      4028201
+    ],
+    "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56200 PUT.jsonl": [
+      1789543081.142,
+      3672662
+    ],
     "backend/journals/2026-09-04_SILVERM 24 SEP 236000 PUT.jsonl": [
       1788544743.165,
       23925770
+    ],
+    "backend/journals/2026-09-17_NIFTY 22 SEP 23250 PUT.jsonl": [
+      1789641617.808,
+      151730
     ],
     "backend/journals/2026-08-31_MIDCPNIFTY 29 SEP 14875 CALL.jsonl": [
       1788170441.138,
@@ -625,6 +985,10 @@
     "backend/journals/2026-09-02_SILVERM 24 SEP 229000 PUT.jsonl": [
       1788363396.264,
       19280689
+    ],
+    "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14500 PUT.jsonl": [
+      1789459080.854,
+      5097379
     ],
     "backend/journals/2026-08-24_GOLDM 28 AUG 160000 CALL.jsonl": [
       1787554141.405,
@@ -659,8 +1023,8 @@
       1887423
     ],
     "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9700 PUT.jsonl": [
-      1789098905.55,
-      136836
+      1789139047.144,
+      5252430
     ],
     "backend/journals/2026-09-03_GOLDM 25 SEP 153000 PUT.jsonl": [
       1788458426.12,
@@ -685,6 +1049,10 @@
     "backend/journals/2026-09-03_MIDCPNIFTY 29 SEP 14725 CALL.jsonl": [
       1788421745.238,
       5522414
+    ],
+    "backend/journals/2026-09-17_NATURALGAS 23 SEP 275 PUT.jsonl": [
+      1789667941.755,
+      4620566
     ],
     "backend/journals/2026-09-03_FINNIFTY SEP FUT.jsonl": [
       1788430114.58,
@@ -715,12 +1083,12 @@
       4164999
     ],
     "backend/journals/2026-09-11_NATURALGAS SEP FUT.jsonl": [
-      1789119738.397,
-      43623
+      1789139042.379,
+      1998059
     ],
     "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9750 CALL.jsonl": [
-      1789119738.395,
-      200027
+      1789138621.679,
+      5074011
     ],
     "backend/journals/2026-09-09_FINNIFTY SEP FUT.jsonl": [
       1788975930.923,
@@ -798,9 +1166,21 @@
       1788199045.454,
       7892255
     ],
+    "backend/journals/2026-09-11_SILVERM 24 SEP 228000 CALL.jsonl": [
+      1789139009.897,
+      353203
+    ],
+    "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14550 PUT.jsonl": [
+      1789449984.371,
+      746398
+    ],
     "backend/journals/2026-09-01_BANKNIFTY 29 SEP 57700 CALL.jsonl": [
       1788242460.653,
       1126045
+    ],
+    "backend/journals/2026-09-18_GOLDM OCT FUT.jsonl": [
+      1789749841.58,
+      4126203
     ],
     "backend/journals/2026-09-09_SILVERM 24 SEP 236000 PUT.jsonl": [
       1788975559.817,
@@ -809,6 +1189,10 @@
     "backend/journals/2026-09-07_MIDCPNIFTY 29 SEP 14650 PUT.jsonl": [
       1788775742.783,
       9687639
+    ],
+    "backend/journals/2026-09-15_FINNIFTY 29 SEP 25150 PUT.jsonl": [
+      1789467286.306,
+      586632
     ],
     "backend/journals/2026-08-27_NIFTY SEP FUT.jsonl": [
       1787825340.864,
@@ -830,6 +1214,10 @@
       1787853996.72,
       467042
     ],
+    "backend/journals/2026-09-15_SILVERM 24 SEP 228000 PUT.jsonl": [
+      1789532461.927,
+      5744909
+    ],
     "backend/journals/2026-09-04_BANKNIFTY 29 SEP 57600 PUT.jsonl": [
       1788502141.449,
       864363
@@ -837,6 +1225,14 @@
     "backend/journals/2026-09-10_NIFTY 15 SEP 23400 PUT.jsonl": [
       1789017060.236,
       631984
+    ],
+    "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14300 PUT.jsonl": [
+      1789553358.965,
+      5472112
+    ],
+    "backend/journals/2026-09-18_CRUDEOIL 15 OCT 9800 CALL.jsonl": [
+      1789749851.513,
+      1731052
     ],
     "backend/journals/2026-09-02_FINNIFTY 29 SEP 25800 CALL.jsonl": [
       1788339104.75,
@@ -887,8 +1283,8 @@
       2225411
     ],
     "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9700 CALL.jsonl": [
-      1789119738.491,
-      148276
+      1789138621.678,
+      5217971
     ],
     "backend/journals/2026-09-11_MIDCPNIFTY 29 SEP 14400 CALL.jsonl": [
       1789104937.227,
@@ -903,20 +1299,32 @@
       13271529
     ],
     "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9750 PUT.jsonl": [
-      1789098904.366,
-      125413
+      1789129215.864,
+      8012536
     ],
     "backend/journals/2026-08-26_NIFTY 1 SEP 24300 PUT.jsonl": [
       1787727485.951,
       3325346
     ],
+    "backend/journals/2026-09-16_FINNIFTY 29 SEP 25300 CALL.jsonl": [
+      1789546884.325,
+      1647994
+    ],
     "backend/journals/2026-08-31_BANKNIFTY SEP FUT.jsonl": [
       1788170463.732,
       14953483
     ],
+    "backend/journals/2026-09-18_NATURALGAS 23 SEP 280 PUT.jsonl": [
+      1789749600.985,
+      1390842
+    ],
     "backend/journals/2026-09-01_SILVERM 24 SEP 230000 PUT.jsonl": [
       1788286887.618,
       31348556
+    ],
+    "backend/journals/2026-09-18_MIDCPNIFTY 29 SEP 14475 PUT.jsonl": [
+      1789746109.438,
+      3799143
     ],
     "backend/journals/2026-09-11_MIDCPNIFTY 29 SEP 14300 CALL.jsonl": [
       1789102084.997,
@@ -938,6 +1346,10 @@
       1788438603.901,
       4808474
     ],
+    "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9650 CALL.jsonl": [
+      1789138621.678,
+      1505965
+    ],
     "backend/journals/2026-09-01_BANKNIFTY 29 SEP 57700 PUT.jsonl": [
       1788242461.127,
       1151829
@@ -954,6 +1366,10 @@
       1788890342.975,
       35480028
     ],
+    "backend/journals/2026-09-16_FINNIFTY 29 SEP 25250 CALL.jsonl": [
+      1789553283.501,
+      1662227
+    ],
     "backend/journals/2026-09-07_BANKNIFTY 29 SEP 57200 CALL.jsonl": [
       1788771795.66,
       283024
@@ -961,6 +1377,10 @@
     "backend/journals/2026-09-01_GOLDM 25 SEP 155000 CALL.jsonl": [
       1788233674.565,
       2035
+    ],
+    "backend/journals/2026-09-18_SILVERM NOV FUT.jsonl": [
+      1789749841.486,
+      3621664
     ],
     "backend/journals/2026-09-04_NIFTY 8 SEP 24000 PUT.jsonl": [
       1788517633.196,
@@ -981,6 +1401,10 @@
     "backend/journals/2026-09-02_MIDCPNIFTY 29 SEP 14625 PUT.jsonl": [
       1788342727.525,
       8398879
+    ],
+    "backend/journals/2026-09-15_NIFTY 15 SEP 23200 PUT.jsonl": [
+      1789467287.431,
+      956269
     ],
     "backend/journals/2026-09-03_BANKNIFTY SEP FUT.jsonl": [
       1788430141.19,
@@ -1054,6 +1478,14 @@
       1789098976.571,
       142037
     ],
+    "backend/journals/2026-09-16_MIDCPNIFTY SEP FUT.jsonl": [
+      1789553386.652,
+      5218144
+    ],
+    "backend/journals/2026-09-11_GOLDM 25 SEP 151500 PUT.jsonl": [
+      1789138805.186,
+      2300490
+    ],
     "backend/journals/2026-08-24_FINNIFTY 25 AUG 26200 PUT.jsonl": [
       1787553901.04,
       18215136
@@ -1066,9 +1498,17 @@
       1788775706.732,
       2415423
     ],
+    "backend/journals/2026-09-15_SILVERM 24 SEP 228000 CALL.jsonl": [
+      1789489003.598,
+      546877
+    ],
     "backend/journals/2026-08-31_NIFTY 1 SEP 24050 PUT.jsonl": [
       1788170460.268,
       17419205
+    ],
+    "backend/journals/2026-09-16_FINNIFTY 29 SEP 25250 PUT.jsonl": [
+      1789553389.855,
+      1641797
     ],
     "backend/journals/2026-09-03_GOLDM SEP FUT.jsonl": [
       1788458162.975,
@@ -1098,13 +1538,17 @@
       1788363256.978,
       21911925
     ],
+    "backend/journals/2026-09-16_FINNIFTY 29 SEP 25150 PUT.jsonl": [
+      1789532704.896,
+      109283
+    ],
     "backend/journals/2026-09-01_NIFTY 1 SEP 24050 PUT.jsonl": [
       1788240060.538,
       3374685
     ],
     "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9800 PUT.jsonl": [
-      1789098961.594,
-      78866
+      1789138994.9,
+      10209853
     ],
     "backend/journals/2026-09-10_SILVERM 24 SEP 237000 PUT.jsonl": [
       1789040829.25,
@@ -1130,6 +1574,14 @@
       1788975930.91,
       3389191
     ],
+    "backend/journals/2026-09-18_NIFTY 22 SEP 23350 PUT.jsonl": [
+      1789746109.456,
+      150709
+    ],
+    "backend/journals/2026-09-15_BANKNIFTY 29 SEP 56000 CALL.jsonl": [
+      1789467287.981,
+      2227752
+    ],
     "backend/journals/2026-08-23_GOLDM 28 AUG 160000 PUT.jsonl": [
       1787477906.647,
       0
@@ -1141,6 +1593,10 @@
     "backend/journals/2026-08-24_SILVERM 24 AUG 245000 PUT.jsonl": [
       1787553480.657,
       4365
+    ],
+    "backend/journals/2026-09-16_CRUDEOIL 17 SEP 10150 CALL.jsonl": [
+      1789532526.603,
+      163552
     ],
     "backend/journals/2026-09-03_CRUDEOIL SEP FUT.jsonl": [
       1788458341.15,
@@ -1158,6 +1614,14 @@
       1788860641.362,
       4324987
     ],
+    "backend/journals/2026-09-16_GOLDM 25 SEP 150000 CALL.jsonl": [
+      1789531325.126,
+      144848
+    ],
+    "backend/journals/2026-09-17_GOLDM OCT FUT.jsonl": [
+      1789667942.567,
+      14352105
+    ],
     "backend/journals/2026-09-09_FINNIFTY 29 SEP 25450 PUT.jsonl": [
       1788936651.616,
       309095
@@ -1165,6 +1629,10 @@
     "backend/journals/2026-09-11_FINNIFTY 29 SEP 25250 CALL.jsonl": [
       1789105599.869,
       1515581
+    ],
+    "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9800 PUT.jsonl": [
+      1789667941.747,
+      17246685
     ],
     "backend/journals/2026-08-28_BANKNIFTY AUG FUT.jsonl": [
       1787899513.566,
@@ -1178,6 +1646,10 @@
       1787727308.423,
       4979262
     ],
+    "backend/journals/2026-09-15_SILVERM 24 SEP 226000 CALL.jsonl": [
+      1789487404.493,
+      229717
+    ],
     "backend/journals/2026-09-01_BANKNIFTY 29 SEP 57400 PUT.jsonl": [
       1788256440.655,
       10860829
@@ -1189,6 +1661,10 @@
     "backend/journals/2026-09-08_SILVERM NOV FUT.jsonl": [
       1788890341.96,
       17009030
+    ],
+    "backend/journals/2026-09-18_SILVERM 24 SEP 236000 PUT.jsonl": [
+      1789749867.468,
+      6036085
     ],
     "backend/journals/2026-09-09_CRUDEOIL SEP FUT.jsonl": [
       1788976778.417,
@@ -1218,6 +1694,10 @@
       1788256293.955,
       4796423
     ],
+    "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14300 CALL.jsonl": [
+      1789547124.36,
+      3594453
+    ],
     "backend/journals/2026-09-10_CRUDEOIL 17 SEP 9250 PUT.jsonl": [
       1789052481.434,
       758162
@@ -1226,13 +1706,17 @@
       1788245060.563,
       4394482
     ],
+    "backend/journals/2026-09-17_BANKNIFTY 29 SEP 56100 CALL.jsonl": [
+      1789641617.766,
+      158619
+    ],
     "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9100 PUT.jsonl": [
       1789097642.337,
       7210
     ],
     "backend/journals/2026-09-11_SILVERM 24 SEP 231000 CALL.jsonl": [
-      1789119766.942,
-      61428
+      1789128618.726,
+      2391162
     ],
     "backend/journals/2026-09-03_NIFTY 8 SEP 24000 CALL.jsonl": [
       1788415566.921,
@@ -1251,8 +1735,8 @@
       2645625
     ],
     "backend/journals/2026-09-11_NATURALGAS 23 SEP 270 CALL.jsonl": [
-      1789119738.443,
-      42632
+      1789139043.836,
+      1977495
     ],
     "backend/journals/2026-09-10_NATURALGAS 23 SEP 270 PUT.jsonl": [
       1789098961.52,
@@ -1261,6 +1745,10 @@
     "backend/journals/2026-09-08_FINNIFTY 29 SEP 25700 CALL.jsonl": [
       1788857776.825,
       2728741
+    ],
+    "backend/journals/2026-09-17_MIDCPNIFTY SEP FUT.jsonl": [
+      1789641617.824,
+      8302967
     ],
     "backend/journals/2026-09-08_BANKNIFTY 29 SEP 56500 PUT.jsonl": [
       1788859441.07,
@@ -1302,9 +1790,17 @@
       1789098980.79,
       137506
     ],
+    "backend/journals/2026-09-18_BANKNIFTY 29 SEP 56300 PUT.jsonl": [
+      1789717140.987,
+      4269593
+    ],
     "backend/journals/2026-08-27_CRUDEOIL SEP FUT.jsonl": [
       1787853996.576,
       664658
+    ],
+    "backend/journals/2026-09-15_SILVERM 24 SEP 225000 PUT.jsonl": [
+      1789478187.834,
+      2080315
     ],
     "backend/journals/2026-09-03_BANKNIFTY 29 SEP 57600 PUT.jsonl": [
       1788430140.633,
@@ -1321,6 +1817,14 @@
     "backend/journals/2026-09-07_NIFTY 8 SEP 23850 PUT.jsonl": [
       1788775741.221,
       62345084
+    ],
+    "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14300 PUT.jsonl": [
+      1789467285.975,
+      449322
+    ],
+    "backend/journals/2026-09-15_GOLDM OCT FUT.jsonl": [
+      1789532528.803,
+      12524927
     ],
     "backend/journals/2026-09-03_SILVERM 24 SEP 233000 PUT.jsonl": [
       1788458312.486,
@@ -1362,6 +1866,10 @@
       1789105202.087,
       940423
     ],
+    "backend/journals/2026-09-18_SILVERM 24 SEP 237000 PUT.jsonl": [
+      1789749852.873,
+      8823047
+    ],
     "backend/journals/2026-08-28_NIFTY 1 SEP 24200 CALL.jsonl": [
       1787938895.687,
       2164514
@@ -1369,6 +1877,10 @@
     "backend/journals/2026-09-03_MIDCPNIFTY 29 SEP 14700 PUT.jsonl": [
       1788418567.883,
       919976
+    ],
+    "backend/journals/2026-09-18_NATURALGAS SEP FUT.jsonl": [
+      1789749841.925,
+      1372950
     ],
     "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9150 PUT.jsonl": [
       1789097649.315,
@@ -1418,9 +1930,17 @@
       1787765017.432,
       1881129
     ],
+    "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9750 CALL.jsonl": [
+      1789651946.437,
+      7504025
+    ],
     "backend/journals/2026-08-24_CRUDEOIL SEP FUT.jsonl": [
       1787589222.734,
       17272565
+    ],
+    "backend/journals/2026-09-17_FINNIFTY 29 SEP 25300 PUT.jsonl": [
+      1789641617.795,
+      151744
     ],
     "backend/journals/2026-09-04_BANKNIFTY SEP FUT.jsonl": [
       1788517723.903,
@@ -1446,13 +1966,25 @@
       1788148831.591,
       0
     ],
+    "backend/journals/2026-09-16_NIFTY 22 SEP 23300 PUT.jsonl": [
+      1789547162.936,
+      1940279
+    ],
     "backend/journals/2026-09-02_MIDCPNIFTY 29 SEP 14625 CALL.jsonl": [
       1788341878.385,
       8106126
     ],
+    "backend/journals/2026-09-16_CRUDEOIL 17 SEP 10100 CALL.jsonl": [
+      1789532523.018,
+      158999
+    ],
     "backend/journals/2026-08-28_NATURALGAS 23 SEP 280 CALL.jsonl": [
       1787941252.195,
       43028
+    ],
+    "backend/journals/2026-09-17_BANKNIFTY SEP FUT.jsonl": [
+      1789641617.752,
+      5406369
     ],
     "backend/journals/2026-09-02_SILVERM NOV FUT.jsonl": [
       1788363194.908,
@@ -1467,8 +1999,8 @@
       3576946
     ],
     "backend/journals/2026-09-11_GOLDM OCT FUT.jsonl": [
-      1789119738.374,
-      128880
+      1789139042.156,
+      6799362
     ],
     "backend/journals/2026-09-03_GOLDM 25 SEP 153000 CALL.jsonl": [
       1788458342.937,
@@ -1497,6 +2029,10 @@
     "backend/journals/2026-08-31_MIDCPNIFTY 29 SEP 14875 PUT.jsonl": [
       1788170411.183,
       10680733
+    ],
+    "backend/journals/2026-09-17_GOLDM 25 SEP 151000 PUT.jsonl": [
+      1789667942.379,
+      11467338
     ],
     "backend/journals/2026-09-03_MIDCPNIFTY 29 SEP 14800 CALL.jsonl": [
       1788410846.604,
@@ -1550,9 +2086,17 @@
       1788168540.71,
       980134
     ],
+    "backend/journals/2026-09-17_SILVERM 24 SEP 230000 CALL.jsonl": [
+      1789667238.827,
+      6402226
+    ],
     "backend/journals/2026-08-28_SILVERM 24 SEP 240000 PUT.jsonl": [
       1787896022.749,
       113831
+    ],
+    "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9800 CALL.jsonl": [
+      1789531331.969,
+      10208181
     ],
     "backend/journals/2026-09-08_SILVERM 24 SEP 234000 CALL.jsonl": [
       1788871731.328,
@@ -1578,6 +2122,10 @@
       1788244893.033,
       1532961
     ],
+    "backend/journals/2026-09-15_NATURALGAS 23 SEP 275 CALL.jsonl": [
+      1789532541.665,
+      4110441
+    ],
     "backend/journals/2026-09-09_FINNIFTY 29 SEP 25400 PUT.jsonl": [
       1788975930.907,
       105943
@@ -1590,6 +2138,10 @@
       1788331311.793,
       0
     ],
+    "backend/journals/2026-09-15_NIFTY 15 SEP 23400 PUT.jsonl": [
+      1789461856.188,
+      6667221
+    ],
     "backend/journals/2026-09-09_GOLDM OCT FUT.jsonl": [
       1788976778.422,
       16606092
@@ -1597,6 +2149,22 @@
     "backend/journals/2026-09-11_FINNIFTY 29 SEP 25200 CALL.jsonl": [
       1789101830.991,
       429816
+    ],
+    "backend/journals/2026-09-15_FINNIFTY 29 SEP 25350 CALL.jsonl": [
+      1789464431.863,
+      3338581
+    ],
+    "backend/journals/2026-09-15_SILVERM 24 SEP 225000 CALL.jsonl": [
+      1789477514.76,
+      1228700
+    ],
+    "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9850 PUT.jsonl": [
+      1789667942.632,
+      19366646
+    ],
+    "backend/journals/2026-09-18_BANKNIFTY SEP FUT.jsonl": [
+      1789746109.349,
+      7621311
     ],
     "backend/journals/2026-09-07_NATURALGAS 23 SEP 280 CALL.jsonl": [
       1788842434.061,
@@ -1610,6 +2178,10 @@
       1789119329.067,
       10423873
     ],
+    "backend/journals/2026-09-18_NIFTY 22 SEP 23400 PUT.jsonl": [
+      1789725531.389,
+      4570008
+    ],
     "backend/journals/2026-08-25_MIDCPNIFTY AUG FUT.jsonl": [
       1787651478.525,
       36467944
@@ -1622,6 +2194,10 @@
       1788199121.304,
       26779742
     ],
+    "backend/journals/2026-09-18_MIDCPNIFTY 29 SEP 14450 PUT.jsonl": [
+      1789746109.389,
+      150884
+    ],
     "backend/journals/2026-09-08_BANKNIFTY 29 SEP 56800 CALL.jsonl": [
       1788860646.922,
       11942993
@@ -1629,6 +2205,10 @@
     "backend/journals/2026-09-04_FINNIFTY 29 SEP 26150 PUT.jsonl": [
       1788517754.061,
       3603134
+    ],
+    "backend/journals/2026-09-17_FINNIFTY SEP FUT.jsonl": [
+      1789641617.811,
+      1869977
     ],
     "backend/journals/2026-09-04_SILVERM 24 SEP 236000 CALL.jsonl": [
       1788524610.969,
@@ -1638,6 +2218,10 @@
       1788337376.423,
       1295485
     ],
+    "backend/journals/2026-09-16_NIFTY 22 SEP 23150 PUT.jsonl": [
+      1789532642.582,
+      54734
+    ],
     "backend/journals/2026-09-09_CRUDEOIL 17 SEP 8900 PUT.jsonl": [
       1788971103.983,
       2149485
@@ -1646,9 +2230,17 @@
       1788937080.31,
       805201
     ],
+    "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9700 PUT.jsonl": [
+      1789490821.495,
+      3466286
+    ],
     "backend/journals/2026-09-07_FINNIFTY 29 SEP 25950 PUT.jsonl": [
       1788775770.748,
       2497795
+    ],
+    "backend/journals/2026-09-18_NATURALGAS 23 SEP 280 CALL.jsonl": [
+      1789749842.494,
+      1385060
     ],
     "backend/journals/2026-08-28_FINNIFTY 29 SEP 26250 PUT.jsonl": [
       1787905909.338,
@@ -1657,6 +2249,10 @@
     "backend/journals/2026-09-04_NATURALGAS SEP FUT.jsonl": [
       1788544740.903,
       4979934
+    ],
+    "backend/journals/2026-09-15_BANKNIFTY 29 SEP 56500 PUT.jsonl": [
+      1789461662.79,
+      7866320
     ],
     "backend/journals/2026-09-08_FINNIFTY 29 SEP 25800 PUT.jsonl": [
       1788845411.509,
@@ -1678,6 +2274,10 @@
       1788502140.708,
       1416876
     ],
+    "backend/journals/2026-09-18_GOLDM 25 SEP 153000 PUT.jsonl": [
+      1789749841.941,
+      4712383
+    ],
     "backend/journals/2026-09-02_GOLDM 25 SEP 150000 PUT.jsonl": [
       1788363203.839,
       10875284
@@ -1698,17 +2298,25 @@
       1788233614.185,
       2034
     ],
+    "backend/journals/2026-09-15_MIDCPNIFTY SEP FUT.jsonl": [
+      1789467287.691,
+      9225508
+    ],
     "backend/journals/2026-08-31_CRUDEOIL SEP FUT.jsonl": [
       1788199140.749,
       9604003
+    ],
+    "backend/journals/2026-09-18_NIFTY 22 SEP 23350 CALL.jsonl": [
+      1789746109.49,
+      146041
     ],
     "backend/journals/2026-08-26_GOLDM 28 AUG 161500 CALL.jsonl": [
       1787689862.39,
       1315030
     ],
     "backend/journals/2026-09-11_NATURALGAS 23 SEP 270 PUT.jsonl": [
-      1789119738.444,
-      42804
+      1789139045.784,
+      3660420
     ],
     "backend/journals/2026-08-27_NIFTY 1 SEP 24200 CALL.jsonl": [
       1787825340.199,
@@ -1729,6 +2337,10 @@
     "backend/journals/2026-09-10_SILVERM 24 SEP 234000 PUT.jsonl": [
       1789053904.293,
       5923414
+    ],
+    "backend/journals/2026-09-18_CRUDEOIL SEP FUT.jsonl": [
+      1789749841.486,
+      2236221
     ],
     "backend/journals/2026-08-25_FINNIFTY 25 AUG 26150 CALL.jsonl": [
       1787651478.806,
@@ -1754,6 +2366,10 @@
       1788937206.392,
       538214
     ],
+    "backend/journals/2026-09-18_CRUDEOIL 15 OCT 9750 CALL.jsonl": [
+      1789749855.632,
+      1706506
+    ],
     "backend/journals/2026-09-10_NIFTY SEP FUT.jsonl": [
       1789032961.109,
       4895450
@@ -1766,9 +2382,17 @@
       1788976779.176,
       16472559
     ],
+    "backend/journals/2026-09-15_SILVERM 24 SEP 226000 PUT.jsonl": [
+      1789532532.8,
+      8058228
+    ],
     "backend/journals/2026-09-09_MIDCPNIFTY 29 SEP 14575 PUT.jsonl": [
       1788927709.011,
       56204
+    ],
+    "backend/journals/2026-09-18_BANKNIFTY 29 SEP 56400 CALL.jsonl": [
+      1789746109.423,
+      2590859
     ],
     "backend/journals/2026-08-27_SILVERM 24 SEP 240000 CALL.jsonl": [
       1787853998.989,
@@ -1777,6 +2401,10 @@
     "backend/journals/2026-09-01_CRUDEOIL 17 SEP 7900 PUT.jsonl": [
       1788233553.929,
       2035
+    ],
+    "backend/journals/2026-09-18_SILVERM 24 SEP 238000 CALL.jsonl": [
+      1789727882.803,
+      288585
     ],
     "backend/journals/2026-09-10_FINNIFTY SEP FUT.jsonl": [
       1789032922.491,
@@ -1794,6 +2422,10 @@
       1789105297.168,
       385850
     ],
+    "backend/journals/2026-09-15_GOLDM 25 SEP 150000 CALL.jsonl": [
+      1789491788.489,
+      7128327
+    ],
     "backend/journals/2026-09-01_BANKNIFTY 29 SEP 57900 CALL.jsonl": [
       1788250802.842,
       12935093
@@ -1810,6 +2442,10 @@
       1787738102.829,
       9010603
     ],
+    "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14400 CALL.jsonl": [
+      1789463820.553,
+      2703831
+    ],
     "backend/journals/2026-09-07_SILVERM 24 SEP 233000 PUT.jsonl": [
       1788803967.609,
       57073653
@@ -1825,6 +2461,10 @@
     "backend/journals/2026-09-11_BANKNIFTY SEP FUT.jsonl": [
       1789104608.898,
       2359900
+    ],
+    "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9650 PUT.jsonl": [
+      1789139052.083,
+      1781671
     ],
     "backend/journals/2026-08-23_CRUDEOIL 17 SEP 8300 CALL.jsonl": [
       1787477906.233,
@@ -1846,6 +2486,10 @@
       1788427741.366,
       11737533
     ],
+    "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14300 CALL.jsonl": [
+      1789467286.874,
+      1972942
+    ],
     "backend/journals/2026-09-09_NIFTY SEP FUT.jsonl": [
       1788975926.145,
       12698801
@@ -1854,13 +2498,29 @@
       1788783001.527,
       14930991
     ],
+    "backend/journals/2026-09-15_FINNIFTY 29 SEP 25150 CALL.jsonl": [
+      1789467285.959,
+      296086
+    ],
     "backend/journals/2026-09-09_NIFTY 15 SEP 23500 CALL.jsonl": [
       1788937380.527,
       803864
     ],
+    "backend/journals/2026-09-17_SILVERM 24 SEP 228000 PUT.jsonl": [
+      1789667953.139,
+      13200088
+    ],
+    "backend/journals/2026-09-17_SILVERM 24 SEP 231000 CALL.jsonl": [
+      1789639616.555,
+      117713
+    ],
     "backend/journals/2026-09-10_MIDCPNIFTY 29 SEP 14500 PUT.jsonl": [
       1789021941.208,
       2254555
+    ],
+    "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14450 PUT.jsonl": [
+      1789461965.402,
+      6743324
     ],
     "backend/journals/2026-08-25_SILVERM 24 SEP 242000 CALL.jsonl": [
       1787682271.786,
@@ -1870,6 +2530,10 @@
       1789119244.787,
       7331297
     ],
+    "backend/journals/2026-09-15_CRUDEOIL SEP FUT.jsonl": [
+      1789532522.549,
+      7342036
+    ],
     "backend/journals/2026-09-02_MIDCPNIFTY 29 SEP 14600 PUT.jsonl": [
       1788337307.232,
       1014646
@@ -1878,9 +2542,17 @@
       1788860641.691,
       11442560
     ],
+    "backend/journals/2026-09-17_NIFTY 22 SEP 23300 PUT.jsonl": [
+      1789641617.816,
+      150248
+    ],
     "backend/journals/2026-08-28_NIFTY 1 SEP 24150 CALL.jsonl": [
       1787911869.091,
       9508939
+    ],
+    "backend/journals/2026-09-11_SILVERM 24 SEP 230000 PUT.jsonl": [
+      1789138693.775,
+      6130403
     ],
     "backend/journals/2026-09-08_NATURALGAS 23 SEP 280 PUT.jsonl": [
       1788890340.974,
@@ -1893,6 +2565,14 @@
     "backend/journals/2026-09-03_NATURALGAS 23 SEP 280 CALL.jsonl": [
       1788458682.656,
       5708709
+    ],
+    "backend/journals/2026-09-17_FINNIFTY 29 SEP 25300 CALL.jsonl": [
+      1789641617.776,
+      101903
+    ],
+    "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14200 PUT.jsonl": [
+      1789538901.225,
+      371357
     ],
     "backend/journals/2026-09-04_BANKNIFTY 29 SEP 57700 PUT.jsonl": [
       1788517240.677,
@@ -1910,9 +2590,17 @@
       1788890340.872,
       5195524
     ],
+    "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14350 CALL.jsonl": [
+      1789465384.113,
+      405654
+    ],
     "backend/journals/2026-09-07_MIDCPNIFTY 29 SEP 14725 CALL.jsonl": [
       1788765957.926,
       9508945
+    ],
+    "backend/journals/2026-09-17_NIFTY SEP FUT.jsonl": [
+      1789641612.665,
+      8755997
     ],
     "backend/journals/2026-08-25_FINNIFTY AUG FUT.jsonl": [
       1787651478.526,
@@ -1925,6 +2613,10 @@
     "backend/journals/2026-09-11_FINNIFTY 29 SEP 25200 PUT.jsonl": [
       1789101879.063,
       456147
+    ],
+    "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14450 CALL.jsonl": [
+      1789462515.791,
+      747060
     ],
     "backend/journals/2026-09-03_NIFTY 8 SEP 23950 PUT.jsonl": [
       1788430140.298,
@@ -1945,6 +2637,10 @@
     "backend/journals/2026-09-07_FINNIFTY 29 SEP 25900 CALL.jsonl": [
       1788774161.182,
       449081
+    ],
+    "backend/journals/2026-09-17_NATURALGAS 23 SEP 280 PUT.jsonl": [
+      1789584811.47,
+      42703
     ],
     "backend/journals/2026-09-11_BANKNIFTY 29 SEP 56100 CALL.jsonl": [
       1789119244.519,
@@ -1978,9 +2674,17 @@
       1787825340.316,
       10220880
     ],
+    "backend/journals/2026-09-15_NATURALGAS 23 SEP 275 PUT.jsonl": [
+      1789532525.565,
+      4027808
+    ],
     "backend/journals/2026-08-28_GOLDM SEP FUT.jsonl": [
       1787941246.193,
       27119774
+    ],
+    "backend/journals/2026-09-18_BANKNIFTY 29 SEP 56400 PUT.jsonl": [
+      1789746109.376,
+      2522717
     ],
     "backend/journals/2026-08-26_CRUDEOIL 17 SEP 8200 CALL.jsonl": [
       1787689862.084,
@@ -1990,6 +2694,10 @@
       1789034804.703,
       50994
     ],
+    "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56300 PUT.jsonl": [
+      1789547164.165,
+      4650981
+    ],
     "backend/journals/2026-08-26_NATURALGAS AUG FUT.jsonl": [
       1787765017.401,
       527058
@@ -1998,13 +2706,29 @@
       1787938890.23,
       5145871
     ],
+    "backend/journals/2026-09-18_FINNIFTY 29 SEP 25500 PUT.jsonl": [
+      1789746109.355,
+      5471473
+    ],
+    "backend/journals/2026-09-17_NATURALGAS 23 SEP 275 CALL.jsonl": [
+      1789667948.411,
+      4647479
+    ],
     "backend/journals/2026-09-08_MIDCPNIFTY 29 SEP 14675 PUT.jsonl": [
       1788860583.166,
       6016478
     ],
+    "backend/journals/2026-09-17_SILVERM 24 SEP 232000 CALL.jsonl": [
+      1789639907.099,
+      352834
+    ],
     "backend/journals/2026-09-08_BANKNIFTY 29 SEP 56900 CALL.jsonl": [
       1788851400.616,
       5347691
+    ],
+    "backend/journals/2026-09-16_NIFTY SEP FUT.jsonl": [
+      1789553342.745,
+      5203634
     ],
     "backend/journals/2026-08-31_NIFTY AUG FUT.jsonl": [
       1788148831.381,
@@ -2013,6 +2737,10 @@
     "backend/journals/2026-08-28_MIDCPNIFTY 29 SEP 15000 CALL.jsonl": [
       1787895696.799,
       1379311
+    ],
+    "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14250 PUT.jsonl": [
+      1789547398.167,
+      1337596
     ],
     "backend/journals/2026-08-28_NIFTY AUG FUT.jsonl": [
       1787899513.563,
@@ -2066,21 +2794,37 @@
       1788774106.686,
       306607
     ],
+    "backend/journals/2026-09-16_BANKNIFTY 29 SEP 55800 PUT.jsonl": [
+      1789532702.086,
+      481240
+    ],
+    "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9750 PUT.jsonl": [
+      1789490822.711,
+      5836213
+    ],
     "backend/journals/2026-09-11_SILVERM NOV FUT.jsonl": [
-      1789119738.436,
-      145933
+      1789139041.296,
+      6865979
     ],
     "backend/journals/2026-08-25_GOLDM 28 AUG 161000 CALL.jsonl": [
       1787682272.05,
       11225615
     ],
     "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9800 CALL.jsonl": [
-      1789119738.412,
-      195075
+      1789138568.116,
+      3784820
     ],
     "backend/journals/2026-08-31_NIFTY 1 SEP 24100 PUT.jsonl": [
       1788170461.12,
       12337113
+    ],
+    "backend/journals/2026-09-17_SILVERM 24 SEP 229000 PUT.jsonl": [
+      1789667944.386,
+      12864466
+    ],
+    "backend/journals/2026-09-16_FINNIFTY 29 SEP 25300 PUT.jsonl": [
+      1789546923.549,
+      1704449
     ],
     "backend/journals/2026-09-09_NIFTY 15 SEP 23400 CALL.jsonl": [
       1788937141.426,
@@ -2106,6 +2850,14 @@
       1788199184.619,
       26613842
     ],
+    "backend/journals/2026-09-18_NIFTY 22 SEP 23450 PUT.jsonl": [
+      1789709700.971,
+      949163
+    ],
+    "backend/journals/2026-09-15_NIFTY SEP FUT.jsonl": [
+      1789467286.0,
+      8469927
+    ],
     "backend/journals/2026-08-24_MIDCPNIFTY 25 AUG 14875 CALL.jsonl": [
       1787571822.455,
       65831050
@@ -2117,6 +2869,10 @@
     "backend/journals/2026-08-28_SILVERM 24 SEP 244000 PUT.jsonl": [
       1787939947.252,
       17575545
+    ],
+    "backend/journals/2026-09-11_SILVERM 24 SEP 231000 PUT.jsonl": [
+      1789129209.04,
+      2193337
     ],
     "backend/journals/2026-09-10_GOLDM 25 SEP 153000 PUT.jsonl": [
       1789061943.31,
@@ -2142,6 +2898,10 @@
       1789098977.892,
       173127
     ],
+    "backend/journals/2026-09-17_GOLDM 25 SEP 152000 PUT.jsonl": [
+      1789584811.922,
+      140250
+    ],
     "backend/journals/2026-09-03_SILVERM 24 SEP 231000 PUT.jsonl": [
       1788458376.529,
       26314329
@@ -2150,6 +2910,10 @@
       1787938897.288,
       2860932
     ],
+    "backend/journals/2026-09-18_CRUDEOIL 15 OCT 9700 CALL.jsonl": [
+      1789749843.075,
+      1713198
+    ],
     "backend/journals/2026-09-07_MIDCPNIFTY 29 SEP 14625 PUT.jsonl": [
       1788768043.096,
       2211170
@@ -2157,6 +2921,10 @@
     "backend/journals/2026-09-09_FINNIFTY 29 SEP 25600 PUT.jsonl": [
       1788937946.946,
       0
+    ],
+    "backend/journals/2026-09-15_NIFTY 15 SEP 23350 PUT.jsonl": [
+      1789463820.902,
+      6341218
     ],
     "backend/journals/2026-09-01_BANKNIFTY 29 SEP 57300 PUT.jsonl": [
       1788256450.673,
@@ -2167,16 +2935,20 @@
       8872704
     ],
     "backend/journals/2026-09-11_SILVERM 24 SEP 230000 CALL.jsonl": [
-      1789119768.135,
-      289745
+      1789138991.226,
+      6461481
+    ],
+    "backend/journals/2026-09-16_CRUDEOIL 17 SEP 10200 CALL.jsonl": [
+      1789532526.605,
+      161746
     ],
     "backend/journals/2026-09-01_BANKNIFTY 29 SEP 58000 CALL.jsonl": [
       1788249536.863,
       8973040
     ],
     "backend/journals/2026-09-11_CRUDEOIL SEP FUT.jsonl": [
-      1789119733.222,
-      83408
+      1789139044.985,
+      2865639
     ],
     "backend/journals/2026-08-27_NIFTY 1 SEP 24250 CALL.jsonl": [
       1787805002.908,
@@ -2185,6 +2957,10 @@
     "backend/journals/2026-09-02_NATURALGAS 23 SEP 275 PUT.jsonl": [
       1788363276.372,
       6525570
+    ],
+    "backend/journals/2026-09-15_BANKNIFTY SEP FUT.jsonl": [
+      1789467285.997,
+      7199373
     ],
     "backend/journals/2026-09-03_FINNIFTY 29 SEP 25900 CALL.jsonl": [
       1788430145.409,
@@ -2198,6 +2974,10 @@
       1788803952.168,
       52596355
     ],
+    "backend/journals/2026-09-18_NIFTY 22 SEP 23300 CALL.jsonl": [
+      1789725531.77,
+      5496874
+    ],
     "backend/journals/2026-08-27_MIDCPNIFTY SEP FUT.jsonl": [
       1787825393.921,
       4367602
@@ -2209,6 +2989,10 @@
     "backend/journals/2026-09-02_BANKNIFTY 29 SEP 57200 CALL.jsonl": [
       1788338341.557,
       209041
+    ],
+    "backend/journals/2026-09-11_GOLDM 25 SEP 152000 PUT.jsonl": [
+      1789130486.113,
+      754695
     ],
     "backend/journals/2026-09-10_CRUDEOIL SEP FUT.jsonl": [
       1789098964.222,
@@ -2234,6 +3018,10 @@
       1787853996.776,
       1653856
     ],
+    "backend/journals/2026-09-17_CRUDEOIL 17 SEP 10100 CALL.jsonl": [
+      1789584812.08,
+      147574
+    ],
     "backend/journals/2026-09-07_GOLDM 25 SEP 152500 PUT.jsonl": [
       1788841618.945,
       43563332
@@ -2242,9 +3030,21 @@
       1788975561.397,
       12983596
     ],
+    "backend/journals/2026-09-11_SILVERM 24 SEP 229000 PUT.jsonl": [
+      1789138662.164,
+      4402527
+    ],
+    "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9800 CALL.jsonl": [
+      1789651946.433,
+      9516328
+    ],
     "backend/journals/2026-08-27_GOLDM 28 AUG 158500 CALL.jsonl": [
       1787853998.947,
       8610914
+    ],
+    "backend/journals/2026-09-17_NATURALGAS 23 SEP 280 CALL.jsonl": [
+      1789584811.593,
+      44935
     ],
     "backend/journals/2026-09-02_NIFTY 8 SEP 23900 PUT.jsonl": [
       1788343921.976,
@@ -2282,9 +3082,17 @@
       1788421745.492,
       3417274
     ],
+    "backend/journals/2026-09-15_FINNIFTY SEP FUT.jsonl": [
+      1789467288.247,
+      2474442
+    ],
     "backend/journals/2026-09-11_NIFTY 15 SEP 23300 CALL.jsonl": [
       1789105800.494,
       491991
+    ],
+    "backend/journals/2026-09-17_SILVERM NOV FUT.jsonl": [
+      1789667942.122,
+      14120991
     ],
     "backend/journals/2026-09-08_BANKNIFTY 29 SEP 56800 PUT.jsonl": [
       1788860583.038,
@@ -2293,6 +3101,14 @@
     "backend/journals/2026-09-04_NATURALGAS 23 SEP 275 PUT.jsonl": [
       1788544743.192,
       9121580
+    ],
+    "backend/journals/2026-09-18_NIFTY SEP FUT.jsonl": [
+      1789746104.13,
+      3273485
+    ],
+    "backend/journals/2026-09-16_NIFTY 22 SEP 23200 PUT.jsonl": [
+      1789544340.399,
+      2740588
     ],
     "backend/journals/2026-09-02_MIDCPNIFTY SEP FUT.jsonl": [
       1788343921.975,
@@ -2314,6 +3130,10 @@
       1788775740.795,
       22269694
     ],
+    "backend/journals/2026-09-15_BANKNIFTY 29 SEP 56300 PUT.jsonl": [
+      1789467287.137,
+      10044622
+    ],
     "backend/journals/2026-08-31_BANKNIFTY AUG FUT.jsonl": [
       1788148831.482,
       0
@@ -2321,6 +3141,10 @@
     "backend/journals/2026-08-28_FINNIFTY 29 SEP 26100 PUT.jsonl": [
       1787906229.627,
       2312756
+    ],
+    "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9600 CALL.jsonl": [
+      1789531353.584,
+      1608766
     ],
     "backend/journals/2026-09-01_SILVERM NOV FUT.jsonl": [
       1788286882.069,
@@ -2334,9 +3158,17 @@
       1787938898.014,
       2383609
     ],
+    "backend/journals/2026-09-18_CRUDEOIL 15 OCT 9700 PUT.jsonl": [
+      1789732813.096,
+      2937465
+    ],
     "backend/journals/2026-09-09_NIFTY 15 SEP 23450 PUT.jsonl": [
       1788975930.856,
       4342822
+    ],
+    "backend/journals/2026-09-17_NATURALGAS SEP FUT.jsonl": [
+      1789667941.188,
+      4683680
     ],
     "backend/journals/2026-08-23_NATURALGAS AUG FUT.jsonl": [
       1787477906.073,
@@ -2346,21 +3178,37 @@
       1788256440.177,
       18137948
     ],
+    "backend/journals/2026-09-16_BANKNIFTY SEP FUT.jsonl": [
+      1789553341.019,
+      5567147
+    ],
     "backend/journals/2026-09-10_FINNIFTY 29 SEP 25500 CALL.jsonl": [
       1789032979.405,
       4928437
     ],
     "backend/journals/2026-09-11_SILVERM 24 SEP 229000 CALL.jsonl": [
-      1789119738.513,
-      100831
+      1789139011.438,
+      2564901
     ],
     "backend/journals/2026-09-03_CRUDEOIL 17 SEP 8650 CALL.jsonl": [
       1788458343.038,
       21609566
     ],
+    "backend/journals/2026-09-17_CRUDEOIL SEP FUT.jsonl": [
+      1789667941.133,
+      7018050
+    ],
     "backend/journals/2026-09-08_GOLDM 25 SEP 152500 PUT.jsonl": [
       1788890346.612,
       15986649
+    ],
+    "backend/journals/2026-09-18_SILVERM 24 SEP 239000 PUT.jsonl": [
+      1789732813.036,
+      3345654
+    ],
+    "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9750 CALL.jsonl": [
+      1789495141.809,
+      9639927
     ],
     "backend/journals/2026-08-26_MIDCPNIFTY SEP FUT.jsonl": [
       1787738107.343,
@@ -2383,12 +3231,20 @@
       13816886
     ],
     "backend/journals/2026-09-11_GOLDM 25 SEP 152000 CALL.jsonl": [
-      1789119738.484,
-      130310
+      1789128604.736,
+      2438906
+    ],
+    "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56000 PUT.jsonl": [
+      1789532760.468,
+      319635
     ],
     "backend/journals/2026-08-25_GOLDM SEP FUT.jsonl": [
       1787682268.895,
       662295
+    ],
+    "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14150 PUT.jsonl": [
+      1789532650.174,
+      55257
     ],
     "backend/journals/2026-09-11_NIFTY 15 SEP 23250 CALL.jsonl": [
       1789105321.825,
@@ -2397,6 +3253,10 @@
     "backend/journals/2026-08-25_SILVERM AUG FUT.jsonl": [
       1787682270.518,
       670012
+    ],
+    "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56200 CALL.jsonl": [
+      1789547520.769,
+      1458782
     ],
     "backend/journals/2026-09-09_MIDCPNIFTY 29 SEP 14625 PUT.jsonl": [
       1788944167.988,
@@ -2409,6 +3269,10 @@
     "backend/journals/2026-09-02_BANKNIFTY 29 SEP 57300 PUT.jsonl": [
       1788333547.331,
       5839065
+    ],
+    "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56500 CALL.jsonl": [
+      1789553340.696,
+      3289610
     ],
     "backend/journals/2026-09-03_NIFTY SEP FUT.jsonl": [
       1788430142.729,
@@ -2446,6 +3310,10 @@
       1788430140.364,
       7146183
     ],
+    "backend/journals/2026-09-17_BANKNIFTY 29 SEP 56100 PUT.jsonl": [
+      1789641617.852,
+      63121
+    ],
     "backend/journals/2026-09-03_MIDCPNIFTY 29 SEP 14750 CALL.jsonl": [
       1788430161.754,
       3906704
@@ -2458,6 +3326,10 @@
       1788492997.64,
       147748
     ],
+    "backend/journals/2026-09-16_NIFTY 22 SEP 23200 CALL.jsonl": [
+      1789553340.661,
+      3256055
+    ],
     "backend/journals/2026-08-24_GOLDM SEP FUT.jsonl": [
       1787589223.31,
       42551415
@@ -2466,9 +3338,17 @@
       1789115291.75,
       5214186
     ],
+    "backend/journals/2026-09-18_FINNIFTY SEP FUT.jsonl": [
+      1789746109.487,
+      2936215
+    ],
     "backend/journals/2026-09-04_SILVERM 24 SEP 235000 PUT.jsonl": [
       1788544743.167,
       30690397
+    ],
+    "backend/journals/2026-09-17_GOLDM 25 SEP 152000 CALL.jsonl": [
+      1789639625.764,
+      216037
     ],
     "backend/journals/2026-09-10_SILVERM 24 SEP 238000 PUT.jsonl": [
       1789041676.824,
@@ -2490,13 +3370,29 @@
       1788166759.252,
       3262848
     ],
+    "backend/journals/2026-09-18_FINNIFTY 29 SEP 25300 PUT.jsonl": [
+      1789710540.949,
+      1886971
+    ],
     "backend/journals/2026-09-01_NATURALGAS SEP FUT.jsonl": [
       1788286880.516,
       5662638
     ],
+    "backend/journals/2026-09-18_BANKNIFTY 29 SEP 56200 PUT.jsonl": [
+      1789717141.174,
+      3981853
+    ],
+    "backend/journals/2026-09-17_MIDCPNIFTY 29 SEP 14425 CALL.jsonl": [
+      1789641617.864,
+      67492
+    ],
     "backend/journals/2026-09-04_BANKNIFTY 29 SEP 57400 PUT.jsonl": [
       1788497676.175,
       8413
+    ],
+    "backend/journals/2026-09-15_SILVERM NOV FUT.jsonl": [
+      1789532527.12,
+      13849023
     ],
     "backend/journals/2026-09-03_SILVERM NOV FUT.jsonl": [
       1788458340.899,
@@ -2522,9 +3418,17 @@
       1789017807.228,
       175638
     ],
+    "backend/journals/2026-09-15_FINNIFTY 29 SEP 25350 PUT.jsonl": [
+      1789463904.246,
+      3841563
+    ],
     "backend/journals/2026-08-27_BANKNIFTY 29 SEP 58000 CALL.jsonl": [
       1787825341.244,
       18814368
+    ],
+    "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9700 CALL.jsonl": [
+      1789531347.728,
+      9157493
     ],
     "backend/journals/2026-08-25_NIFTY 25 AUG 24200 PUT.jsonl": [
       1787651478.792,
@@ -2546,6 +3450,10 @@
       1787689864.1,
       1335755
     ],
+    "backend/journals/2026-09-15_GOLDM 25 SEP 150000 PUT.jsonl": [
+      1789530606.411,
+      6005271
+    ],
     "backend/journals/2026-09-08_GOLDM 25 SEP 152000 PUT.jsonl": [
       1788846338.267,
       209903
@@ -2553,6 +3461,10 @@
     "backend/journals/2026-08-31_GOLDM 25 SEP 155000 PUT.jsonl": [
       1788199143.61,
       24214423
+    ],
+    "backend/journals/2026-09-18_FINNIFTY 29 SEP 25450 CALL.jsonl": [
+      1789717095.476,
+      2296613
     ],
     "backend/journals/2026-09-08_FINNIFTY 29 SEP 25750 PUT.jsonl": [
       1788859714.269,
@@ -2574,6 +3486,14 @@
       1788517421.907,
       5312277
     ],
+    "backend/journals/2026-09-16_NIFTY 22 SEP 23250 CALL.jsonl": [
+      1789553340.573,
+      3256412
+    ],
+    "backend/journals/2026-09-17_SILVERM 24 SEP 230000 PUT.jsonl": [
+      1789667942.838,
+      10590939
+    ],
     "backend/journals/2026-09-11_GOLDM 25 SEP 153000 PUT.jsonl": [
       1789098972.585,
       1247728
@@ -2589,6 +3509,10 @@
     "backend/journals/2026-08-31_SILVERM 24 SEP 235000 PUT.jsonl": [
       1788176978.507,
       4925487
+    ],
+    "backend/journals/2026-09-17_GOLDM 25 SEP 151000 CALL.jsonl": [
+      1789667980.035,
+      16063536
     ],
     "backend/journals/2026-09-01_BANKNIFTY 29 SEP 57400 CALL.jsonl": [
       1788250502.768,
@@ -2630,9 +3554,17 @@
       1788256389.904,
       5208402
     ],
+    "backend/journals/2026-09-11_SILVERM 24 SEP 228000 PUT.jsonl": [
+      1789138701.199,
+      3242799
+    ],
     "backend/journals/2026-09-03_SILVERM 24 SEP 232000 CALL.jsonl": [
       1788439629.083,
       0
+    ],
+    "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9900 PUT.jsonl": [
+      1789663322.011,
+      15645070
     ],
     "backend/journals/2026-09-09_NATURALGAS SEP FUT.jsonl": [
       1788976778.347,
@@ -2646,9 +3578,17 @@
       1787805002.902,
       771830
     ],
+    "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9850 CALL.jsonl": [
+      1789651181.067,
+      4477677
+    ],
     "backend/journals/2026-09-09_FINNIFTY 29 SEP 25550 PUT.jsonl": [
       1788946260.599,
       1742298
+    ],
+    "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56300 CALL.jsonl": [
+      1789553342.881,
+      6257303
     ],
     "backend/journals/2026-09-07_GOLDM 25 SEP 152000 PUT.jsonl": [
       1788841081.17,
@@ -2658,9 +3598,17 @@
       1788845102.538,
       1025647
     ],
+    "backend/journals/2026-09-18_FINNIFTY 29 SEP 25500 CALL.jsonl": [
+      1789725247.442,
+      2069920
+    ],
     "backend/journals/2026-08-25_CRUDEOIL 17 SEP 8150 PUT.jsonl": [
       1787682271.953,
       10510093
+    ],
+    "backend/journals/2026-09-17_CRUDEOIL 17 SEP 10150 CALL.jsonl": [
+      1789584812.18,
+      148906
     ],
     "backend/journals/2026-08-28_MIDCPNIFTY AUG FUT.jsonl": [
       1787899513.572,
@@ -2702,6 +3650,14 @@
       1788952487.127,
       840368
     ],
+    "backend/journals/2026-09-18_GOLDM 25 SEP 153000 CALL.jsonl": [
+      1789732812.97,
+      2937419
+    ],
+    "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9650 CALL.jsonl": [
+      1789480503.077,
+      1653766
+    ],
     "backend/journals/2026-09-09_NATURALGAS 23 SEP 275 PUT.jsonl": [
       1788976778.399,
       5311684
@@ -2713,6 +3669,10 @@
     "backend/journals/2026-09-03_BANKNIFTY 29 SEP 57500 CALL.jsonl": [
       1788424410.413,
       3365559
+    ],
+    "backend/journals/2026-09-18_SILVERM 24 SEP 238000 PUT.jsonl": [
+      1789749867.324,
+      9470516
     ],
     "backend/journals/2026-08-31_GOLDM 25 SEP 154500 PUT.jsonl": [
       1788177753.052,
@@ -2734,9 +3694,21 @@
       1789115521.48,
       5993798
     ],
+    "backend/journals/2026-09-18_MIDCPNIFTY SEP FUT.jsonl": [
+      1789746109.336,
+      3543751
+    ],
     "backend/journals/2026-09-11_NIFTY 15 SEP 23450 PUT.jsonl": [
       1789115702.112,
       313194
+    ],
+    "backend/journals/2026-09-16_FINNIFTY 29 SEP 25150 CALL.jsonl": [
+      1789538901.357,
+      336319
+    ],
+    "backend/journals/2026-09-16_NIFTY 22 SEP 23250 PUT.jsonl": [
+      1789547162.892,
+      3589656
     ],
     "backend/journals/2026-08-25_NIFTY 25 AUG 24200 CALL.jsonl": [
       1787651479.582,
@@ -2746,9 +3718,17 @@
       1787853997.05,
       1641188
     ],
+    "backend/journals/2026-09-16_FINNIFTY SEP FUT.jsonl": [
+      1789553281.495,
+      1289561
+    ],
     "backend/journals/2026-09-08_SILVERM 24 SEP 231000 PUT.jsonl": [
       1788846319.39,
       1265386
+    ],
+    "backend/logs/backend.log": [
+      1789749891.518,
+      2754633
     ],
     "backend/rl_models/checkpoint_100000.zip": [
       1785927045.527,
@@ -2803,8 +3783,8 @@
       3940
     ],
     "backend/scripts/check_startup_log_contract.py": [
-      1785927513.088,
-      1766
+      1789732345.829,
+      1858
     ],
     "backend/scripts/start_nse.sh": [
       1785927513.089,
@@ -2907,8 +3887,8 @@
       9002
     ],
     "backend/tests/runtime_validation/test_phase1_leaf_components.py": [
-      1789065697.739,
-      11644
+      1789732345.83,
+      11568
     ],
     "backend/tests/unit/test_startup_reconciliation_live_gate.py": [
       1788374662.428,
@@ -2958,6 +3938,10 @@
       1788978151.748,
       4195
     ],
+    "backend/tests/unit/api/test_gameloop_ws_auth.py": [
+      1789124308.845,
+      7297
+    ],
     "backend/tests/unit/api/test_gameloop_workers.py": [
       1788179464.484,
       1870
@@ -2979,8 +3963,8 @@
       3430
     ],
     "backend/tests/unit/application/test_composition_root.py": [
-      1789065697.739,
-      2783
+      1789732345.83,
+      3417
     ],
     "backend/tests/unit/application/test_session_persistence.py": [
       1786039206.241,
@@ -3159,8 +4143,12 @@
       5063
     ],
     "backend/tests/unit/infrastructure/test_dhan_ledger_truthfulness.py": [
-      1788527304.538,
+      1789548463.741,
       6946
+    ],
+    "backend/tests/unit/infrastructure/test_telemetry_adapter.py": [
+      1789719655.844,
+      1788
     ],
     "backend/tests/unit/infrastructure/test_database_wal.py": [
       1786041436.148,
@@ -51567,7 +52555,7 @@
       9149
     ],
     "brokers/broker/dhan/__init__.py": [
-      1786077156.597,
+      1789548463.742,
       3089
     ],
     "brokers/broker/dhan/application/exchange_resolver.py": [
@@ -51687,19 +52675,19 @@
       26284
     ],
     "brokers/broker/dhan/infrastructure/auth_provider.py": [
-      1787340833.069,
+      1789548463.745,
       41525
     ],
     "brokers/broker/dhan/infrastructure/websocket_client.py": [
-      1788860797.397,
-      32004
+      1789732345.831,
+      32153
     ],
     "brokers/broker/dhan/infrastructure/depth_websocket_client.py": [
       1785927513.256,
       12349
     ],
     "brokers/broker/dhan/infrastructure/__init__.py": [
-      1786071342.711,
+      1789548463.743,
       2854
     ],
     "brokers/broker/dhan/infrastructure/symbol_mapper.py": [
@@ -51831,8 +52819,12 @@
       2975
     ],
     "docs/PRE_RELEASE_READINESS_CHECKLIST.md": [
-      1789104042.072,
-      17393
+      1789641976.24,
+      17848
+    ],
+    "docs/PAPER_READINESS_RELEASE_VALIDATION.md": [
+      1789121762.928,
+      1996
     ],
     "docs/AMT_UNIFICATION.md": [
       1786069304.838,
@@ -51891,8 +52883,8 @@
       7413
     ],
     "docs/amt/fabio_decision_pipeline.md": [
-      1788453039.6,
-      8198
+      1789641788.271,
+      9222
     ],
     "docs/amt/Valentini Scalper Build Guide.pdf": [
       1785927513.031,
@@ -51902,13 +52894,25 @@
       1788452983.929,
       11129
     ],
+    "docs/architecture/2026-09-11-v6-findings-reconciliation-and-workplan.md": [
+      1789123660.449,
+      29482
+    ],
+    "docs/architecture/2026-09-24-dual-position-authority-consolidation.md": [
+      1789572126.167,
+      18272
+    ],
     "docs/architecture/DUPLICATION_CODE_SMELLS_AND_ARCHITECTURAL_ISSUES_REVIEW.md": [
       1789114909.285,
       25198
     ],
     "docs/architecture/ARCHITECTURE_AND_FLOWS.md": [
-      1789114220.652,
-      56246
+      1789641793.232,
+      56688
+    ],
+    "docs/architecture/2026-09-11-v6-execution-graph.json": [
+      1789139131.797,
+      21325
     ],
     "docs/architecture/predeploy-refactor-execution-plan.md": [
       1788527374.467,
@@ -51922,6 +52926,14 @@
       1787909954.509,
       39018
     ],
+    "docs/architecture/2026-09-11-v6-parallel-execution-plan.md": [
+      1789123613.651,
+      14131
+    ],
+    "docs/architecture/2026-09-11-next-parallel-batch.md": [
+      1789138938.846,
+      4006
+    ],
     "docs/architecture/2026-09-11-design-level-refactoring-specification.md": [
       1789117413.355,
       12422
@@ -51933,6 +52945,18 @@
     "docs/architecture/baselines/2026-09-11-approved-refactor-baseline.txt": [
       1789119631.948,
       490
+    ],
+    "docs/archive/plans/2026-09-16-ws-b-gate3-two-models-brief.md": [
+      1789641045.258,
+      3052
+    ],
+    "docs/archive/plans/2026-09-16-ws-c-test-integrity-ledger-brief.md": [
+      1789641045.259,
+      2138
+    ],
+    "docs/archive/plans/2026-09-16-ws-a-gate-convergence-brief.md": [
+      1789641045.258,
+      2374
     ],
     "docs/audit/PRODUCTION_REWORK_AUDIT_2026-08-24.md": [
       1787569872.178,
@@ -51946,9 +52970,17 @@
       1787725427.288,
       15555
     ],
+    "docs/performance/submission_handler_performance_profile.md": [
+      1789581172.581,
+      7151
+    ],
     "docs/plans/2026-09-11-live-safety-adversarial-remediation.md": [
       1789112536.579,
       13684
+    ],
+    "docs/plans/2026-09-16-fabio-simplification-program.md": [
+      1789554680.421,
+      3019
     ],
     "docs/reviews/2026-09-06-valentini-guide-platform-review.md": [
       1788637324.969,
@@ -51957,6 +52989,10 @@
     "docs/reviews/certification-results-20260826.md": [
       1789070301.129,
       728
+    ],
+    "docs/reviews/2026-09-16-test-integrity-ledger.md": [
+      1789559218.936,
+      7618
     ],
     "docs/reviews/certification-results-20260907.md": [
       1788792125.928,
@@ -51977,6 +53013,10 @@
     "docs/reviews/certification-results-20260908.md": [
       1788848774.164,
       725
+    ],
+    "docs/reviews/2026-09-17-single-authority-convergence-report.md": [
+      1789647147.947,
+      7268
     ],
     "docs/reviews/2026-09-07-deep-production-readiness-review.md": [
       1788752774.155,
@@ -52002,9 +53042,17 @@
       1789065686.114,
       38520
     ],
+    "docs/superpowers/plans/2026-09-16-architecture-review-remediation.md": [
+      1789566240.58,
+      34865
+    ],
     "docs/superpowers/plans/2026-09-07-phase0-agent-ownership.md": [
       1788786726.826,
       4148
+    ],
+    "docs/superpowers/plans/2026-09-17-complexity-refactoring.md": [
+      1789586922.289,
+      7920
     ],
     "docs/superpowers/plans/2026-09-09-timesfm-compatibility-facade-plan.md": [
       1788955654.187,
@@ -52014,6 +53062,10 @@
       1788542306.623,
       53076
     ],
+    "docs/superpowers/plans/2026-09-17-fabio-playbook-alignment-production-readiness.md": [
+      1789631402.729,
+      25970
+    ],
     "docs/superpowers/plans/2026-09-10-decision-pipeline-fixes.md": [
       1789019863.145,
       26569
@@ -52021,6 +53073,10 @@
     "docs/superpowers/plans/2026-09-05-simplification-refactor.md": [
       1788635472.601,
       26605
+    ],
+    "docs/superpowers/plans/2026-09-18-amt-live-safety-remediation.md": [
+      1789749051.586,
+      21039
     ],
     "docs/superpowers/plans/2026-09-03-plan-e-merge-and-final-scope.md": [
       1788462330.283,
@@ -52062,6 +53118,14 @@
       1788960538.097,
       4781
     ],
+    "docs/superpowers/plans/2026-08-18-hot-path-detox-and-spec-compliance.md": [
+      1789548463.746,
+      23265
+    ],
+    "docs/superpowers/plans/2026-09-17-amt-single-authority-convergence.md": [
+      1789633861.619,
+      56444
+    ],
     "docs/superpowers/plans/2026-09-04-quantv2-e2e.md": [
       1788537520.059,
       44097
@@ -52077,6 +53141,10 @@
     "docs/superpowers/plans/2026-09-11-residual-decision-integrity-remediation.md": [
       1789097391.7,
       14966
+    ],
+    "docs/superpowers/plans/2026-09-17-fabio-amt-alignment-code-quality.md": [
+      1789628099.42,
+      53577
     ],
     "docs/superpowers/plans/2026-09-07-phase0-status-and-plan.md": [
       1788759783.856,
@@ -52130,6 +53198,10 @@
       1788375602.644,
       21401
     ],
+    "docs/superpowers/plans/2026-09-16-automated-code-review-system.md": [
+      1789581318.132,
+      14719
+    ],
     "docs/superpowers/plans/2026-09-04-quantv2.md": [
       1788535936.689,
       15692
@@ -52173,6 +53245,10 @@
     "docs/superpowers/specs/2026-09-11-production-safety-remediation-plan.md": [
       1789115416.488,
       893
+    ],
+    "docs/superpowers/specs/2026-09-18-amt-live-safety-remediation-design.md": [
+      1789748947.107,
+      7747
     ],
     "docs/superpowers/specs/2026-09-09-timesfm-compatibility-facade-design.md": [
       1788955132.103,
@@ -52223,8 +53299,8 @@
       572
     ],
     "frontend/frontend.log": [
-      1789119728.631,
-      1458
+      1789749893.113,
+      3604
     ],
     "frontend/tsconfig.tsbuildinfo": [
       1786434708.532,
@@ -52235,7 +53311,7 @@
       7560
     ],
     "frontend/types.ts": [
-      1788926737.628,
+      1789548160.57,
       11321
     ],
     "frontend/.gitignore": [
@@ -52255,7 +53331,7 @@
       217
     ],
     "frontend/constants.ts": [
-      1788457035.596,
+      1789548160.568,
       309
     ],
     "frontend/tsconfig.json": [
@@ -52275,8 +53351,8 @@
       5908
     ],
     "frontend/components/AIAnalysisPanel.tsx": [
-      1788935625.045,
-      9416
+      1789749893.01,
+      9438
     ],
     "frontend/components/MarketSidebar.tsx": [
       1788974278.843,
@@ -52295,8 +53371,8 @@
       1319
     ],
     "frontend/components/ModelStateBanner.tsx": [
-      1787631963.356,
-      5834
+      1789548463.747,
+      6399
     ],
     "frontend/components/ErrorBoundary.tsx": [
       1785927513.346,
@@ -52311,7 +53387,7 @@
       15636
     ],
     "frontend/components/ai/AIAdvisorCard.tsx": [
-      1788926661.48,
+      1789548463.749,
       28100
     ],
     "frontend/components/ai/RecentExitsCard.tsx": [
@@ -52367,8 +53443,8 @@
       2997
     ],
     "frontend/components/ai/QuantDecisionCard.tsx": [
-      1788947114.69,
-      17296
+      1789749881.013,
+      18696
     ],
     "frontend/components/ai/index.ts": [
       1787914351.249,
@@ -52395,7 +53471,7 @@
       5394
     ],
     "frontend/components/chart/ExecutionMarkersManager.ts": [
-      1788532889.435,
+      1789548463.75,
       22011
     ],
     "frontend/components/chart/AMTLevelsOverlay.ts": [
@@ -52470,6 +53546,10 @@
       1786635121.41,
       3528
     ],
+    "frontend/tests/components/ModelStateBanner.test.tsx": [
+      1789125724.706,
+      2733
+    ],
     "frontend/tests/components/GlassPanel.test.tsx": [
       1787244892.055,
       2232
@@ -52499,7 +53579,7 @@
       3492
     ],
     "frontend/tests/components/chart/ExecutionMarkersManager.test.ts": [
-      1788532905.567,
+      1789548160.569,
       23207
     ],
     "frontend/tests/components/chart/DecisionCard.test.tsx": [
@@ -52775,7 +53855,7 @@
       96337
     ],
     "old.freebuff/desktop-v2.db": [
-      1787073488.307,
+      1789449368.294,
       33296384
     ],
     "old.freebuff/eval_lfm.log": [
@@ -52802,17 +53882,9 @@
       1786617867.847,
       31333
     ],
-    "old.freebuff/desktop-v2.db-shm": [
-      1787073440.095,
-      32768
-    ],
     "old.freebuff/probe_ws_bisect.py": [
       1786429983.165,
       2678
-    ],
-    "old.freebuff/desktop-v2.db-wal": [
-      1787073488.29,
-      4725672
     ],
     "old.freebuff/lfm_smoke_adapter/0000005_adapters.safetensors": [
       1786365836.043,
@@ -52827,203 +53899,211 @@
       1007
     ],
     "quant/amt_engine.py": [
-      1789066970.831,
-      23246
+      1789749539.837,
+      23976
     ],
     "quant/persistence.py": [
-      1789066987.844,
+      1789586136.803,
       2913
     ],
     "quant/reconciliation_service.py": [
-      1788851736.151,
+      1789586253.154,
       8058
     ],
     "quant/persistence_bridge.py": [
-      1788807083.332,
+      1789586253.152,
       6221
     ],
     "quant/aggregator.py": [
-      1789066961.926,
-      5142
+      1789586253.053,
+      5535
     ],
     "quant/events.py": [
-      1789100484.108,
-      7309
+      1789586253.125,
+      7925
     ],
     "quant/multi_engine.py": [
-      1789066987.842,
-      90142
+      1789732345.838,
+      99081
     ],
     "quant/__init__.py": [
       1786013917.55,
       76
     ],
     "quant/strategy.py": [
-      1789065697.809,
+      1789586253.165,
       1940
     ],
     "quant/ws_contract.py": [
-      1789119727.523,
+      1789586253.183,
       5227
     ],
     "quant/persistence_boundary.py": [
-      1789119732.887,
+      1789586253.151,
       1183
     ],
     "quant/runtime.py": [
-      1789119729.086,
-      98617
+      1789732345.839,
+      72503
     ],
     "quant/state_machine.py": [
-      1788634897.315,
+      1789586253.161,
       2950
     ],
     "quant/coordinator_view.py": [
-      1788459761.966,
+      1789586253.104,
       511
     ],
     "quant/event_store.py": [
-      1789066987.817,
-      35976
+      1789586253.124,
+      36330
     ],
     "quant/position_manager.py": [
-      1789101346.284,
-      31596
+      1789586253.153,
+      32918
     ],
     "quant/transitions.py": [
-      1789100545.403,
+      1789586253.166,
       14286
     ],
     "quant/session_gates.py": [
-      1789066987.859,
+      1789586253.156,
       7063
     ],
     "quant/bars.py": [
-      1788634891.622,
-      555
+      1789628981.897,
+      639
     ],
     "quant/ws_adapter.py": [
-      1788461066.19,
+      1789586253.181,
       2157
     ],
     "quant/session_levels.py": [
-      1789066987.861,
+      1789586253.157,
       7667
     ],
     "quant/state.py": [
-      1788763612.477,
+      1789586253.159,
       10425
     ],
     "quant/wiring_advisor.py": [
-      1789020611.29,
+      1789586253.167,
       5085
     ],
     "quant/hotpath.py": [
-      1788518642.778,
-      15664
+      1789586253.145,
+      15694
     ],
     "quant/amt/analyzer.py": [
-      1789102905.961,
-      47092
+      1789749497.986,
+      50286
     ],
     "quant/amt/__init__.py": [
       1786029013.228,
       0
     ],
     "quant/amt/dto.py": [
-      1789100190.482,
-      10855
+      1789749497.986,
+      11706
     ],
     "quant/amt/triple_a.py": [
-      1788196348.997,
-      4441
+      1789732345.833,
+      9592
     ],
     "quant/amt/compute.py": [
-      1787337109.373,
+      1789586253.057,
       10652
     ],
+    "quant/amt/bias/bias_resolver.py": [
+      1789629500.794,
+      3231
+    ],
+    "quant/amt/bias/__init__.py": [
+      1789629499.138,
+      114
+    ],
     "quant/amt/market/state_engine.py": [
-      1788196276.596,
-      5154
+      1789632211.795,
+      6459
     ],
     "quant/amt/market/half_trend.py": [
-      1788427838.059,
+      1789586253.063,
       12759
     ],
     "quant/amt/market/regime.py": [
-      1787898552.351,
+      1789586253.064,
       4651
     ],
     "quant/amt/market/lvn_play.py": [
-      1786030334.548,
+      1789586253.063,
       2767
     ],
     "quant/amt/market/acceptance_rejection.py": [
-      1789066970.823,
-      6207
+      1789586253.061,
+      6164
     ],
     "quant/amt/market/opening.py": [
-      1786030108.288,
+      1789586253.063,
       4207
     ],
     "quant/amt/market/break_detector.py": [
-      1787590442.41,
+      1789586253.061,
       6866
     ],
     "quant/amt/market/structure.py": [
-      1787337109.374,
+      1789586253.066,
       14714
     ],
     "quant/amt/market/vars_detector.py": [
-      1788258148.961,
+      1789586253.066,
       9183
     ],
     "quant/amt/market/displacement.py": [
-      1787765422.861,
+      1789586253.062,
       2582
     ],
     "quant/amt/models/observation.py": [
-      1788518339.738,
+      1789586253.066,
       1037
     ],
     "quant/amt/orderflow/footprint.py": [
-      1788636698.937,
+      1789586253.071,
       12127
     ],
     "quant/amt/orderflow/aggressive_prints.py": [
-      1786031159.806,
+      1789586253.067,
       5858
     ],
     "quant/amt/orderflow/aggression.py": [
-      1787337926.189,
-      9017
+      1789586253.067,
+      13334
     ],
     "quant/amt/orderflow/__init__.py": [
       1786031015.256,
       0
     ],
     "quant/amt/orderflow/detectors.py": [
-      1787893059.078,
-      12408
+      1789732345.833,
+      15195
     ],
     "quant/amt/orderflow/cvd.py": [
-      1787337109.375,
-      5894
+      1789586253.069,
+      6809
     ],
     "quant/amt/orderflow/drive.py": [
-      1789066970.825,
+      1789586253.07,
       11895
     ],
     "quant/amt/orderflow/compute.py": [
-      1787592542.92,
-      7012
+      1789749497.984,
+      7674
     ],
     "quant/amt/profile/classifier.py": [
-      1787337109.375,
+      1789586253.072,
       8989
     ],
     "quant/amt/profile/vwap.py": [
-      1787904805.769,
+      1789586253.077,
       7906
     ],
     "quant/amt/profile/__init__.py": [
@@ -53031,47 +54111,59 @@
       0
     ],
     "quant/amt/profile/lvn.py": [
-      1787135392.253,
+      1789586253.075,
       13890
     ],
     "quant/amt/profile/volume_profile.py": [
-      1786692788.308,
+      1789586253.076,
       18717
     ],
+    "quant/amt/profile/compression_box.py": [
+      1789724851.12,
+      6599
+    ],
     "quant/amt/profile/migration.py": [
-      1786634918.076,
+      1789586253.076,
       5984
     ],
+    "quant/amt/profile/gap_profile.py": [
+      1789728480.034,
+      9425
+    ],
     "quant/amt/profile/displacement.py": [
-      1789103065.439,
+      1789586253.073,
       6828
     ],
     "quant/amt/profile/gamma.py": [
-      1787915686.795,
+      1789586253.073,
       5915
     ],
     "quant/amt/profile/leg_lvn.py": [
-      1789101313.387,
-      1631
+      1789732345.833,
+      1615
+    ],
+    "quant/amt/profile/range_bars.py": [
+      1789728013.468,
+      8491
     ],
     "quant/amt/session/ib_scalp.py": [
-      1787337109.376,
+      1789586253.08,
       16472
     ],
     "quant/amt/session/ib_engine.py": [
-      1789066970.826,
+      1789586253.08,
       7591
     ],
     "quant/amt/session/scanner.py": [
-      1789066970.829,
-      36845
+      1789629600.246,
+      37572
     ],
     "quant/amt/session/symbol_registry.py": [
-      1788637732.577,
+      1789586253.085,
       8225
     ],
     "quant/amt/session/selector.py": [
-      1789065697.759,
+      1789586253.084,
       20554
     ],
     "quant/amt/session/__init__.py": [
@@ -53079,63 +54171,71 @@
       0
     ],
     "quant/amt/session/eia.py": [
-      1787337109.376,
+      1789586253.078,
       5741
     ],
     "quant/amt/session/context.py": [
-      1788869790.466,
+      1789586253.077,
       21620
     ],
     "quant/amt/session/npoc.py": [
-      1787337109.377,
+      1789586253.081,
       7482
     ],
     "quant/amt/session/structure.py": [
-      1787943180.102,
-      7425
+      1789732345.833,
+      9254
     ],
     "quant/amt/session/futures_provider.py": [
-      1787043862.669,
+      1789586253.079,
       10515
     ],
     "quant/amt/session/scanner_config.py": [
-      1789065697.758,
+      1789586253.083,
       3629
     ],
     "quant/brokers/gateway.py": [
-      1786082487.509,
+      1789586253.089,
       499
     ],
     "quant/brokers/multiplexed_feed.py": [
-      1789066970.833,
-      24220
+      1789732345.834,
+      26452
     ],
     "quant/brokers/live_gateway.py": [
-      1787851929.455,
+      1789586253.089,
       1717
     ],
     "quant/brokers/__init__.py": [
       1786015753.787,
       68
     ],
+    "quant/config/constants.py": [
+      1789570006.019,
+      2682
+    ],
+    "quant/config/__init__.py": [
+      1789570017.541,
+      650
+    ],
     "quant/contracts/enums.py": [
-      1787337773.729,
+      1789586253.093,
       6409
     ],
     "quant/contracts/instrument_registry.py": [
-      1788954130.792,
+      1789586253.095,
       8543
     ],
     "quant/contracts/sync_boundary.py": [
-      1788933317.319,
+      1789586253.1,
       1971
     ],
     "quant/contracts/constants.py": [
-      1789065909.389,
-      9403
+      1789630086.105,
+      10429
     ],
     "quant/contracts/market_calendar.py": [
-      1787579444.853,
+      1789586253.095,
       1324
     ],
     "quant/contracts/__init__.py": [
@@ -53143,219 +54243,307 @@
       67
     ],
     "quant/contracts/candle_metrics.py": [
-      1786027129.996,
+      1789586253.091,
       2319
     ],
     "quant/contracts/tick_utils.py": [
-      1786027126.039,
+      1789586253.1,
       2072
     ],
     "quant/contracts/market_data_utils.py": [
-      1786027126.042,
+      1789586253.096,
       634
     ],
     "quant/contracts/value_objects.py": [
-      1789100177.071,
-      13700
+      1789749539.836,
+      14353
     ],
     "quant/contracts/aggregates.py": [
-      1787590442.413,
-      23303
+      1789586253.09,
+      23291
     ],
     "quant/contracts/numeric.py": [
-      1788463024.282,
+      1789586253.096,
       194
     ],
     "quant/contracts/contracts.py": [
-      1788844088.834,
+      1789586253.091,
       3479
     ],
     "quant/contracts/decimal_utils.py": [
-      1788463024.282,
+      1789586253.091,
       254
     ],
     "quant/contracts/exchange_config.py": [
-      1787590442.414,
+      1789586253.093,
       12954
     ],
     "quant/contracts/entities.py": [
-      1788524571.742,
-      13390
+      1789586253.092,
+      13380
     ],
     "quant/contracts/execution_vocabulary.py": [
-      1789119702.584,
+      1789586253.094,
       1770
     ],
     "quant/contracts/vocabulary.py": [
-      1789115934.653,
+      1789586253.103,
       2494
     ],
+    "quant/contracts/options_converter.py": [
+      1789586253.097,
+      3988
+    ],
     "quant/contracts/timezones.py": [
-      1789066970.84,
+      1789586253.102,
       1907
     ],
     "quant/contracts/ports/__init__.py": [
-      1787765422.861,
-      475
+      1789732345.834,
+      614
+    ],
+    "quant/contracts/ports/telemetry.py": [
+      1789719678.811,
+      1896
     ],
     "quant/contracts/ports/npoc.py": [
-      1786027061.519,
+      1789586253.098,
       1746
     ],
     "quant/contracts/ports/config_port.py": [
-      1787765422.861,
+      1789586253.098,
       1140
     ],
     "quant/contracts/ports/storage.py": [
-      1788777271.635,
-      3752
+      1789586253.099,
+      3935
     ],
     "quant/contracts/ports/market_data.py": [
-      1786027074.718,
+      1789586253.098,
       4054
     ],
     "quant/contracts/ports/broker.py": [
-      1788846366.332,
-      848
+      1789586253.098,
+      1187
+    ],
+    "quant/decision/gap_architecture.workflow.visual-check.2048x1320.dark.png": [
+      1789748719.512,
+      188093
+    ],
+    "quant/decision/gap_architecture.workflow.visual-check.1440x900.light.png": [
+      1789748716.886,
+      135612
     ],
     "quant/decision/signal_builder.py": [
-      1788802280.943,
-      9094
-    ],
-    "quant/decision/gates_session_position.py": [
-      1788508658.988,
-      3390
+      1789732345.836,
+      11606
     ],
     "quant/decision/timesfm_advisor.py": [
-      1789066987.808,
-      11531
+      1789644608.703,
+      11817
     ],
     "quant/decision/stops.py": [
-      1787590899.935,
-      2987
+      1789645742.307,
+      4428
     ],
     "quant/decision/context_builder.py": [
-      1789100054.056,
-      24328
+      1789745068.586,
+      34169
     ],
     "quant/decision/timesfm_option_selector.py": [
-      1788926931.3,
+      1789586253.117,
       12145
     ],
     "quant/decision/timesfm_client.py": [
-      1789065697.776,
-      8933
+      1789644608.704,
+      11061
     ],
     "quant/decision/__init__.py": [
       1786014718.004,
       0
     ],
+    "quant/decision/gap_architecture.workflow.visual-check.json": [
+      1789748719.517,
+      17320
+    ],
     "quant/decision/decision_service.py": [
-      1789066076.623,
-      6471
+      1789732345.835,
+      8532
     ],
     "quant/decision/timesfm_agents.py": [
-      1789112913.394,
-      33384
+      1789630396.054,
+      33409
+    ],
+    "quant/decision/gap_architecture.workflow.json": [
+      1789748703.683,
+      4551
     ],
     "quant/decision/gates_edge.py": [
-      1788507444.686,
-      7644
+      1789732345.836,
+      13858
+    ],
+    "quant/decision/gap_architecture.workflow.html": [
+      1789748708.38,
+      716100
+    ],
+    "quant/decision/gap_architecture.workflow.visual-check.html": [
+      1789748719.516,
+      1994
     ],
     "quant/decision/result.py": [
-      1787337109.382,
-      829
+      1789641057.505,
+      997
+    ],
+    "quant/decision/result_factory.py": [
+      1789644608.702,
+      3594
     ],
     "quant/decision/context.py": [
-      1789059103.325,
-      7155
+      1789745064.391,
+      8640
     ],
     "quant/decision/timesfm_engine.py": [
-      1789065697.779,
-      31944
+      1789641779.282,
+      30533
     ],
     "quant/decision/timesfm_risk.py": [
-      1789100411.026,
+      1789586253.118,
       10086
     ],
     "quant/decision/pipeline.py": [
-      1788778452.073,
-      1550
+      1789141067.96,
+      1505
     ],
     "quant/decision/setup_state.py": [
-      1787155732.518,
+      1789586253.11,
       4764
     ],
+    "quant/decision/gap_architecture.workflow.visual-check.1440x900.dark.png": [
+      1789748718.961,
+      138648
+    ],
+    "quant/decision/forecast_provider.py": [
+      1789641048.982,
+      1026
+    ],
     "quant/decision/va_fade.py": [
-      1788258329.587,
-      2951
+      1789732345.836,
+      9079
+    ],
+    "quant/decision/model_router.py": [
+      1789641057.504,
+      2630
     ],
     "quant/decision/gates_rr.py": [
-      1787824174.327,
-      1977
+      1789732345.836,
+      2670
     ],
     "quant/decision/timesfm_forecast_factory.py": [
-      1789065697.782,
+      1789586253.116,
       2869
+    ],
+    "quant/decision/gap_architecture.workflow.visual-check.2048x1320.light.png": [
+      1789748718.372,
+      183912
     ],
     "quant/decision/data_quality.py": [
       1788778395.225,
       825
     ],
     "quant/decision/timesfm_sizing.py": [
-      1789065946.201,
+      1789586253.119,
       13268
     ],
+    "quant/decision/gates/gate_edge.py": [
+      1789586253.107,
+      423
+    ],
+    "quant/decision/gates/gate_risk_reward.py": [
+      1789586253.109,
+      977
+    ],
+    "quant/decision/gates/__init__.py": [
+      1789586253.107,
+      480
+    ],
+    "quant/decision/gates/gate_session_phase.py": [
+      1789732345.835,
+      5076
+    ],
+    "quant/decision/gates/gate_position_cooldown.py": [
+      1789586253.108,
+      1274
+    ],
+    "quant/engine/decision_loop.py": [
+      1789732345.837,
+      27727
+    ],
+    "quant/engine/exit_manager.py": [
+      1789586253.121,
+      28115
+    ],
+    "quant/engine/__init__.py": [
+      1789580040.095,
+      415
+    ],
+    "quant/engine/submission_handler.py": [
+      1789732345.837,
+      13163
+    ],
+    "quant/engine/tick_handler.py": [
+      1789586253.123,
+      10362
+    ],
     "quant/execution/execution_state_machine.py": [
-      1789119710.321,
+      1789586253.127,
       1742
     ],
     "quant/execution/trade_costs.py": [
-      1788776434.32,
+      1789586253.144,
       3231
     ],
     "quant/execution/paper_contracts.py": [
-      1788753732.373,
+      1789586253.138,
       1588
     ],
     "quant/execution/paper_simulator.py": [
-      1789116215.593,
+      1789586253.139,
       7986
     ],
     "quant/execution/exit_checks.py": [
-      1789065697.784,
-      7614
+      1789744730.259,
+      8613
     ],
     "quant/execution/protective_stop.py": [
-      1789100777.958,
+      1789586253.142,
       2204
     ],
     "quant/execution/portfolio_risk.py": [
-      1788864781.789,
-      8694
+      1789586253.141,
+      9428
     ],
     "quant/execution/flow_provenance.py": [
-      1789116241.315,
+      1789548463.781,
       749
     ],
     "quant/execution/exposure.py": [
-      1789115733.381,
+      1789586253.132,
       1625
     ],
     "quant/execution/oms.py": [
-      1789116254.097,
+      1789586253.136,
       13546
     ],
     "quant/execution/ports.py": [
-      1787729856.167,
+      1789586253.142,
       3384
     ],
     "quant/execution/exit_signal.py": [
-      1786026915.899,
+      1789586253.129,
       386
     ],
     "quant/execution/order.py": [
-      1788777180.556,
+      1789548463.79,
       3830
     ],
     "quant/execution/__init__.py": [
@@ -53363,23 +54551,23 @@
       0
     ],
     "quant/execution/ledger_reconstruction.py": [
-      1788787906.899,
+      1789586253.134,
       4894
     ],
     "quant/execution/live_oms.py": [
-      1789066987.82,
-      17909
+      1789641045.262,
+      17893
     ],
     "quant/execution/broker_mapper.py": [
-      1788518339.745,
+      1789586253.125,
       2251
     ],
     "quant/execution/exit_rules.py": [
-      1789065697.785,
-      5987
+      1789586253.129,
+      5766
     ],
     "quant/execution/oms_factory.py": [
-      1788773656.169,
+      1789586253.137,
       2281
     ],
     "quant/execution/test_flow_provenance.py": [
@@ -53387,63 +54575,63 @@
       673
     ],
     "quant/execution/lots.py": [
-      1788460960.525,
-      564
+      1789586253.136,
+      876
     ],
     "quant/execution/risk.py": [
-      1789101168.083,
-      25269
+      1789747224.301,
+      26514
     ],
     "quant/execution/readiness.py": [
-      1788778583.918,
+      1789586253.143,
       4071
     ],
     "quant/execution/paper_trading_contracts.py": [
-      1789116248.39,
+      1789586253.14,
       1676
     ],
     "quant/execution/fills.py": [
-      1788460960.525,
+      1789586253.132,
       1251
     ],
     "quant/execution/coordinator_metrics.py": [
-      1789065697.783,
+      1789586253.126,
       5105
     ],
     "quant/execution/exits.py": [
-      1789100911.397,
-      14502
+      1789744902.626,
+      14767
     ],
     "quant/execution/paper_reconciliation.py": [
-      1788757152.456,
+      1789586253.138,
       4862
     ],
     "quant/execution/seed_scheduler.py": [
-      1788776051.336,
+      1789586253.144,
       6700
     ],
     "quant/execution/execution_model.py": [
-      1788804928.776,
+      1789586253.127,
       1276
     ],
     "quant/llm/advisor.py": [
-      1789066987.826,
+      1789586253.146,
       8212
     ],
     "quant/llm/bridge.py": [
-      1789066987.829,
+      1789586253.147,
       10624
     ],
     "quant/llm/narrative.py": [
-      1789066076.627,
-      19291
+      1789745103.719,
+      20252
     ],
     "quant/llm/dataset_generator.py": [
-      1787901898.377,
+      1789586253.147,
       8455
     ],
     "quant/modeling/observation.py": [
-      1789112806.84,
+      1789586253.149,
       382
     ],
     "quant/modeling/__init__.py": [
@@ -53455,7 +54643,7 @@
       662
     ],
     "quant/modeling/forecast_provider.py": [
-      1788956285.945,
+      1789586253.149,
       2886
     ],
     "quant/modeling/contracts.py": [
@@ -53467,20 +54655,40 @@
       66
     ],
     "quant/probability/features.py": [
-      1787337109.383,
+      1789586253.154,
       16425
     ],
-    "quant/strategies/timesfm_strategy.py": [
-      1789065697.807,
-      14674
+    "quant/sidecars/__init__.py": [
+      1789586253.157,
+      191
+    ],
+    "quant/sidecars/narrative/__init__.py": [
+      1789586253.158,
+      193
+    ],
+    "quant/sidecars/narrative/llm_advisor.py": [
+      1789586253.158,
+      3379
+    ],
+    "quant/sidecars/volatility/regime_filter.py": [
+      1789586253.159,
+      2113
+    ],
+    "quant/sidecars/volatility/__init__.py": [
+      1789586253.158,
+      191
     ],
     "quant/strategies/amt_scalping.py": [
-      1788433461.729,
+      1789586253.162,
       2375
     ],
     "quant/strategies/__init__.py": [
-      1788932861.23,
-      434
+      1789641048.985,
+      411
+    ],
+    "quant/strategies/selection.py": [
+      1789641048.985,
+      709
     ],
     "runtime_audit/e2e/test_phase9_failure.py": [
       1789066712.214,
@@ -53559,20 +54767,28 @@
       124
     ],
     "scripts/pre_release_decision_check.py": [
-      1789065686.138,
-      20272
+      1789732345.839,
+      18320
     ],
-    "scripts/audit_e2e_entry_probe.py": [
-      1789065686.135,
-      4055
+    "scripts/inspect_gameloop.py": [
+      1789651869.17,
+      6178
     ],
     "scripts/audit_engine_race_probe.py": [
-      1789065686.136,
-      3164
+      1789641964.52,
+      3169
     ],
     "scripts/download_models.sh": [
       1787901898.378,
       2188
+    ],
+    "scripts/plan_waves.py": [
+      1789123596.269,
+      12754
+    ],
+    "scripts/triage_parallel_work.py": [
+      1789138866.372,
+      4649
     ],
     "shared/reconnect.py": [
       1788460960.524,
@@ -53603,8 +54819,8 @@
       0
     ],
     "tests/test_fabio_alignment.py": [
-      1787590442.476,
-      4110
+      1789641735.653,
+      4532
     ],
     "tests/__init__.py": [
       1787161247.621,
@@ -53623,12 +54839,12 @@
       1732
     ],
     "tests/architecture/test_no_layer_bypass.py": [
-      1788463099.366,
-      8804
+      1789732345.84,
+      9840
     ],
     "tests/architecture/test_no_dead_exports.py": [
-      1789065697.814,
-      1718
+      1789641048.988,
+      1493
     ],
     "tests/architecture/__init__.py": [
       1786696890.954,
@@ -53638,12 +54854,16 @@
       1787144650.39,
       3676
     ],
+    "tests/architecture/test_amt_dto_contract.py": [
+      1789749481.901,
+      8129
+    ],
     "tests/architecture/test_execution_boundaries.py": [
       1789119751.997,
       1958
     ],
     "tests/architecture/test_repo_hygiene.py": [
-      1789066712.215,
+      1789548463.817,
       1077
     ],
     "tests/architecture/test_no_drifting_literals.py": [
@@ -53654,6 +54874,66 @@
       1789066943.575,
       1111
     ],
+    "tests/automation/test_monitor.py": [
+      1789582915.293,
+      2704
+    ],
+    "tests/automation/test_coverage.py": [
+      1789583995.161,
+      3210
+    ],
+    "tests/automation/test_scanner.py": [
+      1789581576.767,
+      2090
+    ],
+    "tests/automation/test_patterns.py": [
+      1789582399.841,
+      2906
+    ],
+    "tests/automation/__init__.py": [
+      1789581576.073,
+      0
+    ],
+    "tests/automation/test_architecture.py": [
+      1789581902.322,
+      2508
+    ],
+    "tests/automation/test_orchestrator.py": [
+      1789582217.051,
+      3088
+    ],
+    "tests/automation/test_complexity.py": [
+      1789581777.29,
+      2034
+    ],
+    "tests/automation/test_hooks.py": [
+      1789584708.736,
+      1132
+    ],
+    "tests/automation/test_performance.py": [
+      1789583570.436,
+      3535
+    ],
+    "tests/automation/test_runner.py": [
+      1789582016.794,
+      2326
+    ],
+    "tests/automation/test_fixes.py": [
+      1789582682.614,
+      3308
+    ],
+    "tests/automation/test_cli.py": [
+      1789584409.132,
+      1615
+    ],
+    "tests/chaos/test_contingent_stop_flatten.py": [
+      1789141434.57,
+      4381
+    ],
+    "tests/determinism/test_golden_tape_replay.py": [
+      1789141511.361,
+      3576
+    ],
     "tests/e2e/__init__.py": [
       1787422033.957,
       0
@@ -53661,6 +54941,10 @@
     "tests/e2e/test_cross_process_injection.py": [
       1788849976.768,
       8442
+    ],
+    "tests/e2e/golden/refactoring_baseline/complexity.txt": [
+      1789586938.872,
+      4
     ],
     "tests/helpers/synthetic.py": [
       1787327521.489,
@@ -53678,9 +54962,13 @@
       1787394958.957,
       1086
     ],
+    "tests/integration/test_startup_three_way_reconciliation.py": [
+      1789142060.189,
+      3953
+    ],
     "tests/integration/test_fabio_india_scenarios.py": [
-      1787633276.913,
-      5249
+      1789641709.628,
+      5404
     ],
     "tests/qa/qa_sanity_components.py": [
       1787290032.346,
@@ -53699,16 +54987,16 @@
       2390
     ],
     "tests/quant/test_certification.py": [
-      1789065697.851,
-      13443
+      1789732345.842,
+      13778
     ],
     "tests/quant/test_type_unification.py": [
       1788641924.203,
       1141
     ],
     "tests/quant/test_portfolio_risk_guard.py": [
-      1788439599.799,
-      4302
+      1789576163.382,
+      4416
     ],
     "tests/quant/test_risk_config_propagation.py": [
       1788753560.354,
@@ -53723,15 +55011,15 @@
       8042
     ],
     "tests/quant/test_production_correctness.py": [
-      1787943704.219,
-      11015
+      1789732345.843,
+      12004
     ],
     "tests/quant/test_session_levels.py": [
       1787832742.109,
       3339
     ],
     "tests/quant/test_event_appender_boundary.py": [
-      1789119700.372,
+      1789548463.838,
       654
     ],
     "tests/quant/test_golden_file.py": [
@@ -53746,6 +55034,10 @@
       1789119717.774,
       5539
     ],
+    "tests/quant/test_decision_loop.py": [
+      1789732345.843,
+      28906
+    ],
     "tests/quant/test_event_store_jsonl.py": [
       1788630756.456,
       8083
@@ -53758,9 +55050,13 @@
       1788507752.65,
       5006
     ],
+    "tests/quant/test_exception_logging.py": [
+      1789644608.707,
+      1503
+    ],
     "tests/quant/test_pyramid_certification.py": [
-      1787906065.832,
-      8582
+      1789732345.843,
+      8594
     ],
     "tests/quant/test_no_duplicate_types.py": [
       1788635978.137,
@@ -53778,6 +55074,10 @@
       1788864781.794,
       32520
     ],
+    "tests/quant/test_dynamic_sizing_removed.py": [
+      1789548463.837,
+      723
+    ],
     "tests/quant/test_state_tick_interval.py": [
       1788461066.198,
       1103
@@ -53794,6 +55094,10 @@
       1788537809.48,
       2699
     ],
+    "tests/quant/test_journal_subscriber.py": [
+      1789569756.01,
+      1849
+    ],
     "tests/quant/__init__.py": [
       1787161247.621,
       0
@@ -53803,20 +55107,24 @@
       3603
     ],
     "tests/quant/test_golden_replay.py": [
-      1787634015.585,
-      10281
+      1789732473.993,
+      10494
     ],
     "tests/quant/test_india_session_contract.py": [
       1787156721.651,
       1493
     ],
     "tests/quant/test_stress_and_portfolio_risk.py": [
-      1788864781.795,
-      11144
+      1789732345.844,
+      11286
     ],
     "tests/quant/test_wave0_small.py": [
       1787333767.51,
       1001
+    ],
+    "tests/quant/test_tick_handler.py": [
+      1789566380.491,
+      11631
     ],
     "tests/quant/test_session_gates.py": [
       1787073656.802,
@@ -53835,8 +55143,8 @@
       9834
     ],
     "tests/quant/test_eod_square_off.py": [
-      1788439584.297,
-      12134
+      1789576150.045,
+      16841
     ],
     "tests/quant/test_bars.py": [
       1786013862.176,
@@ -53870,6 +55178,14 @@
       1787393694.954,
       1732
     ],
+    "tests/quant/test_submission_handler.py": [
+      1789580278.016,
+      9827
+    ],
+    "tests/quant/test_submission_handler_integration.py": [
+      1789580687.835,
+      19498
+    ],
     "tests/quant/test_underlying_required.py": [
       1787156782.216,
       745
@@ -53883,8 +55199,12 @@
       2751
     ],
     "tests/quant/test_event_store_import_integrity.py": [
-      1788376377.034,
+      1789548463.839,
       6261
+    ],
+    "tests/quant/test_transition_alias.py": [
+      1789569482.081,
+      1348
     ],
     "tests/quant/test_integration.py": [
       1788463024.286,
@@ -53898,8 +55218,12 @@
       1788234394.436,
       10349
     ],
+    "tests/quant/test_exit_manager.py": [
+      1789572313.852,
+      35157
+    ],
     "tests/quant/test_multiplexed_feed.py": [
-      1787620249.352,
+      1789548463.841,
       15724
     ],
     "tests/quant/test_multi_engine_startup.py": [
@@ -53934,21 +55258,29 @@
       1787138903.424,
       2663
     ],
+    "tests/quant/test_constants.py": [
+      1789570029.725,
+      1732
+    ],
     "tests/quant/test_reconciliation.py": [
       1788462603.393,
       2000
     ],
     "tests/quant/test_npoc_gate_integration.py": [
-      1787590442.474,
-      3510
+      1789732345.843,
+      3864
     ],
     "tests/quant/test_market_state_enum_guard.py": [
       1787943680.015,
       3622
     ],
     "tests/quant/test_phase1_safety_fixes.py": [
-      1788249458.74,
-      9730
+      1789732345.843,
+      9736
+    ],
+    "tests/quant/test_submission_handler_performance.py": [
+      1789581070.805,
+      13001
     ],
     "tests/quant/test_fabio_accuracy_battery.py": [
       1788864781.795,
@@ -53994,6 +55326,14 @@
       1787832742.108,
       3104
     ],
+    "tests/quant/amt/bias/test_bias_resolver.py": [
+      1789629537.469,
+      2238
+    ],
+    "tests/quant/amt/bias/__init__.py": [
+      1789629506.734,
+      0
+    ],
     "tests/quant/amt/market/test_structure.py": [
       1786030049.772,
       7833
@@ -54018,6 +55358,10 @@
       1786030142.14,
       2125
     ],
+    "tests/quant/amt/market/test_state_engine_contextual.py": [
+      1789632123.421,
+      5664
+    ],
     "tests/quant/amt/market/test_half_trend.py": [
       1788427838.061,
       6861
@@ -54038,6 +55382,14 @@
       1787393725.62,
       976
     ],
+    "tests/quant/amt/orderflow/test_directional_compute.py": [
+      1789749449.777,
+      2189
+    ],
+    "tests/quant/amt/orderflow/test_aggression_direction.py": [
+      1789123962.166,
+      9105
+    ],
     "tests/quant/amt/orderflow/test_drive.py": [
       1786041435.467,
       5697
@@ -54053,6 +55405,10 @@
     "tests/quant/amt/orderflow/test_aggression.py": [
       1786031124.047,
       6471
+    ],
+    "tests/quant/amt/orderflow/test_analyzer_flow_propagation.py": [
+      1789749511.002,
+      1613
     ],
     "tests/quant/amt/orderflow/test_setup_lifecycle.py": [
       1787156676.573,
@@ -54074,6 +55430,10 @@
       1786692871.535,
       8285
     ],
+    "tests/quant/amt/profile/test_range_bars.py": [
+      1789729044.765,
+      10580
+    ],
     "tests/quant/amt/profile/test_displacement.py": [
       1789103001.541,
       1024
@@ -54090,13 +55450,21 @@
       1786029013.229,
       0
     ],
+    "tests/quant/amt/profile/test_compression_box.py": [
+      1789724887.001,
+      6938
+    ],
+    "tests/quant/amt/profile/test_gap_profile.py": [
+      1789728558.237,
+      10255
+    ],
     "tests/quant/amt/profile/test_lvn_detector.py": [
       1786029153.944,
       12550
     ],
     "tests/quant/amt/profile/test_leg_lvn.py": [
-      1789101266.675,
-      1195
+      1789732345.84,
+      1287
     ],
     "tests/quant/amt/profile/test_profile_classifier.py": [
       1786029326.787,
@@ -54138,6 +55506,10 @@
       1787393725.623,
       3687
     ],
+    "tests/quant/amt/session/test_effective_market_state.py": [
+      1789711107.696,
+      7528
+    ],
     "tests/quant/amt/session/test_ib_scalp.py": [
       1787393725.624,
       7172
@@ -54159,8 +55531,8 @@
       6368
     ],
     "tests/quant/amt/session/test_scanner_timesfm.py": [
-      1789033443.09,
-      9312
+      1789641048.989,
+      8240
     ],
     "tests/quant/amt/session/test_symbol_registry.py": [
       1787590442.437,
@@ -54179,20 +55551,20 @@
       5234
     ],
     "tests/quant/certification/test_trace_compare.py": [
-      1787746704.616,
-      1774
+      1789645775.901,
+      2449
     ],
     "tests/quant/certification/test_signal_drop_reasons.py": [
-      1787756151.06,
-      3108
+      1789645826.929,
+      4672
     ],
     "tests/quant/certification/__init__.py": [
       1787743867.1,
       0
     ],
     "tests/quant/certification/trace_compare.py": [
-      1787746676.45,
-      1854
+      1789645746.84,
+      2085
     ],
     "tests/quant/certification/dataset.py": [
       1788193737.683,
@@ -54234,13 +55606,17 @@
       1789065697.819,
       7895
     ],
+    "tests/quant/contracts/test_fabio_constants.py": [
+      1789629980.876,
+      914
+    ],
     "tests/quant/contracts/test_timezones.py": [
       1787640142.27,
       231
     ],
     "tests/quant/contracts/test_telemetry_standards.py": [
-      1788463024.284,
-      2821
+      1789732345.84,
+      4557
     ],
     "tests/quant/contracts/__init__.py": [
       1786027181.388,
@@ -54283,7 +55659,7 @@
       813
     ],
     "tests/quant/contracts/test_order_domain.py": [
-      1788463024.283,
+      1789548463.818,
       4922
     ],
     "tests/quant/contracts/test_paper_contract_resolver.py": [
@@ -54307,20 +55683,32 @@
       4894
     ],
     "tests/quant/coordinator/test_dynamic_rotation.py": [
-      1788433669.23,
-      4795
+      1789732345.84,
+      10663
+    ],
+    "tests/quant/coordinator/test_coordinator_telemetry.py": [
+      1789719725.852,
+      1908
+    ],
+    "tests/quant/decision/test_model_router.py": [
+      1789641057.509,
+      2350
+    ],
+    "tests/quant/decision/test_bias_integration.py": [
+      1789629660.01,
+      901
     ],
     "tests/quant/decision/test_gates_5_pipeline.py": [
-      1787824174.333,
-      4281
+      1789631928.965,
+      4323
     ],
     "tests/quant/decision/test_strategy_behavior.py": [
-      1789034388.018,
-      18859
+      1789732345.841,
+      15157
     ],
     "tests/quant/decision/test_va_fade_risk.py": [
-      1787156252.192,
-      1773
+      1789641063.043,
+      1935
     ],
     "tests/quant/decision/test_option_signal_translation.py": [
       1787590442.441,
@@ -54330,41 +55718,89 @@
       1788926940.23,
       4925
     ],
+    "tests/quant/decision/test_forecast_provider.py": [
+      1789641048.989,
+      748
+    ],
     "tests/quant/decision/test_timesfm_forecast_factory.py": [
       1789065697.827,
       2299
     ],
     "tests/quant/decision/test_timesfm_sizing.py": [
-      1789065825.057,
-      7523
+      1789641521.91,
+      7498
+    ],
+    "tests/quant/decision/test_gate_compression_box_breakout.py": [
+      1789728882.006,
+      7609
+    ],
+    "tests/quant/decision/test_triple_a_lvn_proximity.py": [
+      1789631794.055,
+      1809
     ],
     "tests/quant/decision/test_setup_approval_flow.py": [
-      1787156162.447,
-      3575
+      1789641057.513,
+      3654
+    ],
+    "tests/quant/decision/test_va_fade_reclaim_semantics.py": [
+      1789641063.041,
+      1852
     ],
     "tests/quant/decision/test_timesfm_engine.py": [
-      1789065697.823,
-      17950
+      1789641048.991,
+      17243
+    ],
+    "tests/quant/decision/test_gate_edge_candle_acceptance.py": [
+      1789631913.98,
+      5362
     ],
     "tests/quant/decision/test_gate_triple_a_edge.py": [
-      1787893715.029,
-      7506
+      1789631885.983,
+      7566
     ],
     "tests/quant/decision/test_observation_identity.py": [
       1789113195.768,
       669
     ],
+    "tests/quant/decision/test_result_factory.py": [
+      1789630197.672,
+      2495
+    ],
+    "tests/quant/decision/test_gate_edge_directional_evidence.py": [
+      1789631919.5,
+      6023
+    ],
     "tests/quant/decision/__init__.py": [
       1786014709.47,
       0
+    ],
+    "tests/quant/decision/test_bias_direction_override.py": [
+      1789629805.765,
+      1529
+    ],
+    "tests/quant/decision/test_gate1_exchange_clock.py": [
+      1789555994.076,
+      2912
+    ],
+    "tests/quant/decision/test_gate3_setup_keys.py": [
+      1789641057.508,
+      914
     ],
     "tests/quant/decision/test_timesfm_risk.py": [
       1789100364.012,
       1070
     ],
+    "tests/quant/decision/test_va_fade_stop_extreme.py": [
+      1789641063.045,
+      3137
+    ],
     "tests/quant/decision/test_signal_builder_sl.py": [
       1787590442.442,
       3067
+    ],
+    "tests/quant/decision/test_timesfm_license_quarantine.py": [
+      1789155877.498,
+      727
     ],
     "tests/quant/decision/test_timesfm_client.py": [
       1789101076.692,
@@ -54378,13 +55814,9 @@
       1787824174.333,
       2688
     ],
-    "tests/quant/decision/test_timesfm_strategy_cache.py": [
-      1789029112.853,
-      3514
-    ],
     "tests/quant/decision/test_phase3_pipeline.py": [
-      1787893742.749,
-      6781
+      1789641057.511,
+      6810
     ],
     "tests/quant/decision/test_gate_pipeline_matrix.py": [
       1788453128.08,
@@ -54395,20 +55827,32 @@
       3543
     ],
     "tests/quant/decision/test_timesfm_agents.py": [
-      1789065697.822,
-      27216
+      1789548463.823,
+      25720
+    ],
+    "tests/quant/decision/test_model_router_enforcement.py": [
+      1789641057.51,
+      1618
     ],
     "tests/quant/decision/test_squeeze_pullback.py": [
-      1787824174.334,
-      3118
+      1789641057.514,
+      3459
+    ],
+    "tests/quant/decision/test_structural_anchor_noise.py": [
+      1789645771.233,
+      3266
     ],
     "tests/quant/decision/test_decision_service.py": [
-      1789020421.361,
-      5295
+      1789641099.001,
+      6182
     ],
     "tests/quant/decision/test_context.py": [
       1787138120.347,
       502
+    ],
+    "tests/quant/decision/test_mean_reversion_poc_exit.py": [
+      1789641063.039,
+      1169
     ],
     "tests/quant/decision/test_setup_evidence_cleanup.py": [
       1788433545.679,
@@ -54419,40 +55863,52 @@
       1614
     ],
     "tests/quant/decision/test_signal_builder_guards.py": [
-      1789065825.055,
-      4391
+      1789645821.774,
+      5133
     ],
     "tests/quant/decision/test_va_fade.py": [
-      1787234744.242,
-      1511
+      1789641063.04,
+      1916
     ],
     "tests/quant/decision/test_gates_1_2.py": [
-      1787631521.213,
-      1056
+      1789555994.077,
+      1039
     ],
     "tests/quant/decision/test_pipeline_e2e.py": [
       1789024054.451,
       4236
     ],
     "tests/quant/decision/test_context_builder_behavior.py": [
-      1789019630.774,
-      11504
+      1789555994.075,
+      11487
     ],
     "tests/quant/decision/test_setup_state.py": [
       1787155751.507,
       3704
     ],
     "tests/quant/decision/test_signal_builder.py": [
-      1787590442.442,
-      2429
+      1789646452.068,
+      2532
+    ],
+    "tests/quant/decision/test_tp_shield.py": [
+      1789731709.869,
+      3752
+    ],
+    "tests/quant/decision/test_gate_result_setup_key.py": [
+      1789641057.509,
+      242
     ],
     "tests/quant/decision/test_gate_names.py": [
       1786613686.076,
       609
     ],
     "tests/quant/decision/test_gate1_phase_permissions.py": [
-      1788508676.983,
-      6771
+      1789641057.508,
+      7118
+    ],
+    "tests/quant/decision/test_gap_fill_fade.py": [
+      1789731591.682,
+      6917
     ],
     "tests/quant/decision/gates/__init__.py": [
       1786035808.025,
@@ -54463,8 +55919,8 @@
       70
     ],
     "tests/quant/edge_cases/test_boundaries.py": [
-      1789065697.83,
-      76128
+      1789732345.841,
+      76131
     ],
     "tests/quant/execution/test_paper_trading_acceptance_vectors.py": [
       1789116232.043,
@@ -54475,8 +55931,8 @@
       987
     ],
     "tests/quant/execution/test_lot_aware_risk.py": [
-      1789101155.202,
-      10783
+      1789644608.805,
+      6413
     ],
     "tests/quant/execution/test_paper_close_timeout_fallback.py": [
       1789116206.243,
@@ -54487,12 +55943,16 @@
       4301
     ],
     "tests/quant/execution/test_pyramid_integration.py": [
-      1789065697.84,
-      6488
+      1789732345.842,
+      6622
     ],
     "tests/quant/execution/test_live_oms.py": [
-      1788518339.768,
+      1789548463.824,
       12888
+    ],
+    "tests/quant/execution/test_portfolio_hard_cap.py": [
+      1789156163.724,
+      1436
     ],
     "tests/quant/execution/test_seed_scheduler.py": [
       1788757605.829,
@@ -54511,7 +55971,7 @@
       6757
     ],
     "tests/quant/execution/test_paper_restart_reconciliation.py": [
-      1789116252.904,
+      1789548463.83,
       2178
     ],
     "tests/quant/execution/test_trade_costs.py": [
@@ -54525,6 +55985,10 @@
     "tests/quant/execution/test_engine_contract_identity.py": [
       1788805638.736,
       1487
+    ],
+    "tests/quant/execution/test_sizing_invariants.py": [
+      1789548463.831,
+      3733
     ],
     "tests/quant/execution/__init__.py": [
       1787333336.811,
@@ -54550,8 +56014,12 @@
       1788757332.308,
       3533
     ],
+    "tests/quant/execution/test_risk_sizing_derivatives.py": [
+      1789747268.587,
+      3062
+    ],
     "tests/quant/execution/test_risk.py": [
-      1789065825.052,
+      1789644608.806,
       6362
     ],
     "tests/quant/execution/test_oms_costs.py": [
@@ -54595,7 +56063,7 @@
       2684
     ],
     "tests/quant/execution/test_oms_conformance.py": [
-      1788463024.285,
+      1789548463.828,
       11309
     ],
     "tests/quant/execution/test_paper_failure_modes.py": [
@@ -54651,8 +56119,8 @@
       8577
     ],
     "tests/quant/llm/test_narrative_table_parity.py": [
-      1787765422.864,
-      14426
+      1789124730.442,
+      15644
     ],
     "tests/quant/llm/test_advisor_playbook.py": [
       1787765422.863,
@@ -54667,8 +56135,8 @@
       1759
     ],
     "tests/quant/llm/test_advisor_integration.py": [
-      1789020611.296,
-      2658
+      1789644608.916,
+      3869
     ],
     "tests/quant/llm/test_advisor_wiring_config.py": [
       1788453183.284,
@@ -54683,7 +56151,7 @@
       1311
     ],
     "tests/quant/modeling/test_observation_identity.py": [
-      1789112770.841,
+      1789548463.833,
       1116
     ],
     "tests/quant/parity/test_parity.py": [
@@ -54718,16 +56186,20 @@
       1788461936.895,
       4927
     ],
+    "tests/quant/runtime/test_single_authority.py": [
+      1789641048.991,
+      1584
+    ],
     "tests/quant/runtime/test_no_llm_hook.py": [
       1788461066.196,
       2862
     ],
     "tests/quant/runtime/test_amt_golden.py": [
-      1787073276.326,
-      3109
+      1789732345.842,
+      3111
     ],
     "tests/quant/runtime/test_tick_partial_adoption.py": [
-      1788246811.092,
+      1789548463.834,
       5081
     ],
     "tests/quant/runtime/test_decide_golden.py": [
@@ -54755,8 +56227,8 @@
       370
     ],
     "tests/quant/runtime/test_runtime.py": [
-      1789070357.141,
-      24684
+      1789644608.808,
+      24605
     ],
     "tests/quant/runtime/test_pyramid_accounting_parity.py": [
       1789065697.842,
@@ -54787,16 +56259,20 @@
       3161
     ],
     "tests/quant/runtime/test_positive_approval.py": [
-      1787727290.256,
-      3331
+      1789644608.918,
+      4006
     ],
     "tests/quant/runtime/test_engine_advisor_injection.py": [
       1787684806.127,
       2286
     ],
+    "tests/quant/runtime/test_bias_accumulation.py": [
+      1789629105.737,
+      894
+    ],
     "tests/quant/runtime/test_opposing_signal_exit.py": [
-      1788524321.145,
-      16712
+      1789644608.917,
+      16943
     ],
     "tests/quant/runtime/test_tick_level_exits.py": [
       1788246585.462,
@@ -54807,8 +56283,8 @@
       1762
     ],
     "tests/quant/runtime/test_signal_blocked_latch.py": [
-      1789065697.844,
-      10587
+      1789644608.81,
+      9466
     ],
     "tests/quant/runtime/test_interval_derivation.py": [
       1787682119.574,
@@ -54817,6 +56293,14 @@
     "tests/quant/runtime/test_signal_approval_truthful.py": [
       1788630688.895,
       4073
+    ],
+    "tests/quant/runtime/test_bias_aggregator.py": [
+      1789628985.592,
+      258
+    ],
+    "tests/quant/runtime/test_engine_telemetry_injection.py": [
+      1789719661.092,
+      1687
     ],
     "tests/quant/runtime/golden/decide_long.json": [
       1789029278.4,
@@ -54834,17 +56318,17 @@
       1786082829.124,
       0
     ],
-    "tests/quant/strategies/test_timesfm_provider_adoption.py": [
-      1788956238.496,
-      829
+    "tests/quant/strategies/test_selection.py": [
+      1789641048.992,
+      548
     ],
-    "tests/quant/strategies/test_timesfm_strategy.py": [
-      1789065697.847,
-      12582
+    "tests/release/test_paper_readiness_release.py": [
+      1789121755.078,
+      1125
     ],
     "tests/system/test_quant_runtime_e2e.py": [
-      1788461066.201,
-      2294
+      1789644608.924,
+      2469
     ],
     "tests/system/test_quant_execution_e2e.py": [
       1787634497.003,
@@ -54855,12 +56339,12 @@
       0
     ],
     "tests/system/test_paper_protocol.py": [
-      1788461066.2,
-      18619
+      1789646564.605,
+      19303
     ],
     "tests/system/test_fabio_behavior_trace.py": [
-      1787289923.035,
-      3521
+      1789644608.921,
+      3745
     ],
     "tests/system/test_quant_system_e2e.py": [
       1788461066.201,
@@ -54877,48 +56361,720 @@
   },
   "drift": {
     "first_scan": false,
-    "added": [],
-    "removed": [],
+    "added": [
+      "MERGED_NODES.md",
+      "automation/__init__.py",
+      "automation/cli.py",
+      "automation/config/quality_rules.yaml",
+      "automation/coverage/__init__.py",
+      "automation/coverage/analyzer.py",
+      "automation/fixes/__init__.py",
+      "automation/fixes/generator.py",
+      "automation/hooks/__init__.py",
+      "automation/hooks/install.sh",
+      "automation/hooks/pre_commit.py",
+      "automation/monitor.py",
+      "automation/orchestrator.py",
+      "automation/performance/__init__.py",
+      "automation/performance/detector.py",
+      "automation/quality/__init__.py",
+      "automation/quality/patterns.py",
+      "automation/quality/scanner.py",
+      "automation/reports/monitor_report_20260916_235255.json",
+      "automation/reports/monitor_report_20260916_235305.json",
+      "automation/reports/monitor_report_20260916_235326.json",
+      "automation/reports/monitor_report_20260916_235348.json",
+      "automation/reports/monitor_report_20260916_235358.json",
+      "automation/reports/monitor_report_20260916_235417.json",
+      "automation/reports/monitor_report_20260916_235645.json",
+      "automation/reports/monitor_report_20260916_235712.json",
+      "automation/reports/monitor_report_20260916_235748.json",
+      "automation/reports/monitor_report_20260917_000711.json",
+      "automation/reports/monitor_report_20260917_000735.json",
+      "automation/reports/monitor_report_20260917_000802.json",
+      "automation/reports/monitor_report_20260917_001125.json",
+      "automation/reports/monitor_report_20260917_001140.json",
+      "automation/reports/monitor_report_20260917_001211.json",
+      "automation/reports/monitor_report_20260917_001330.json",
+      "automation/reports/monitor_report_20260917_001337.json",
+      "automation/reports/monitor_report_20260917_001354.json",
+      "automation/reports/monitor_report_20260917_001831.json",
+      "automation/reports/monitor_report_20260917_001839.json",
+      "automation/reports/monitor_report_20260917_001904.json",
+      "automation/reports/monitor_report_20260917_002032.json",
+      "automation/reports/monitor_report_20260917_002040.json",
+      "automation/reports/monitor_report_20260917_002056.json",
+      "automation/reports/monitor_report_20260917_002321.json",
+      "automation/reports/monitor_report_20260917_002329.json",
+      "automation/reports/monitor_report_20260917_002354.json",
+      "automation/reports/monitor_report_20260917_004629.json",
+      "automation/reports/monitor_report_20260917_004632.json",
+      "automation/reports/monitor_report_20260917_004637.json",
+      "automation/reports/monitor_report_20260917_010551.json",
+      "automation/reports/monitor_report_20260917_010554.json",
+      "automation/reports/monitor_report_20260917_010559.json",
+      "automation/reports/monitor_report_20260917_104627.json",
+      "automation/reports/monitor_report_20260917_104628.json",
+      "automation/reports/monitor_report_20260917_104632.json",
+      "automation/reports/monitor_report_20260917_160908.json",
+      "automation/reports/monitor_report_20260917_160910.json",
+      "automation/reports/monitor_report_20260917_160914.json",
+      "automation/reports/monitor_report_20260917_161658.json",
+      "automation/reports/monitor_report_20260917_161700.json",
+      "automation/reports/monitor_report_20260917_161705.json",
+      "automation/reports/monitor_report_20260917_170032.json",
+      "automation/reports/monitor_report_20260917_170034.json",
+      "automation/reports/monitor_report_20260917_170038.json",
+      "automation/reports/monitor_report_20260917_173359.json",
+      "automation/reports/monitor_report_20260917_173402.json",
+      "automation/reports/monitor_report_20260917_173407.json",
+      "automation/reports/monitor_report_20260918_120816.json",
+      "automation/reports/monitor_report_20260918_120818.json",
+      "automation/reports/monitor_report_20260918_120822.json",
+      "automation/testing/__init__.py",
+      "automation/testing/runner.py",
+      "backend/app/api/routers/dashboard.html",
+      "backend/app/api/websocket/auth.py",
+      "backend/app/infrastructure/adapters/dhan_market_data.py",
+      "backend/app/infrastructure/storage/sqlite_storage.py",
+      "backend/app/infrastructure/telemetry.py",
+      "backend/glassytrade.db.bak",
+      "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9650 CALL.jsonl",
+      "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9650 PUT.jsonl",
+      "backend/journals/2026-09-11_GOLDM 25 SEP 151500 CALL.jsonl",
+      "backend/journals/2026-09-11_GOLDM 25 SEP 151500 PUT.jsonl",
+      "backend/journals/2026-09-11_GOLDM 25 SEP 152000 PUT.jsonl",
+      "backend/journals/2026-09-11_SILVERM 24 SEP 228000 CALL.jsonl",
+      "backend/journals/2026-09-11_SILVERM 24 SEP 228000 PUT.jsonl",
+      "backend/journals/2026-09-11_SILVERM 24 SEP 229000 PUT.jsonl",
+      "backend/journals/2026-09-11_SILVERM 24 SEP 230000 PUT.jsonl",
+      "backend/journals/2026-09-11_SILVERM 24 SEP 231000 PUT.jsonl",
+      "backend/journals/2026-09-15_BANKNIFTY 29 SEP 56000 CALL.jsonl",
+      "backend/journals/2026-09-15_BANKNIFTY 29 SEP 56300 PUT.jsonl",
+      "backend/journals/2026-09-15_BANKNIFTY 29 SEP 56500 PUT.jsonl",
+      "backend/journals/2026-09-15_BANKNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9600 CALL.jsonl",
+      "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9650 CALL.jsonl",
+      "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9650 PUT.jsonl",
+      "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9700 CALL.jsonl",
+      "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9700 PUT.jsonl",
+      "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9750 CALL.jsonl",
+      "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9750 PUT.jsonl",
+      "backend/journals/2026-09-15_CRUDEOIL 17 SEP 9800 CALL.jsonl",
+      "backend/journals/2026-09-15_CRUDEOIL SEP FUT.jsonl",
+      "backend/journals/2026-09-15_FINNIFTY 29 SEP 25150 CALL.jsonl",
+      "backend/journals/2026-09-15_FINNIFTY 29 SEP 25150 PUT.jsonl",
+      "backend/journals/2026-09-15_FINNIFTY 29 SEP 25350 CALL.jsonl",
+      "backend/journals/2026-09-15_FINNIFTY 29 SEP 25350 PUT.jsonl",
+      "backend/journals/2026-09-15_FINNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-15_GOLDM 25 SEP 150000 CALL.jsonl",
+      "backend/journals/2026-09-15_GOLDM 25 SEP 150000 PUT.jsonl",
+      "backend/journals/2026-09-15_GOLDM OCT FUT.jsonl",
+      "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14300 CALL.jsonl",
+      "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14300 PUT.jsonl",
+      "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14350 CALL.jsonl",
+      "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14400 CALL.jsonl",
+      "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14450 CALL.jsonl",
+      "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14450 PUT.jsonl",
+      "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14500 PUT.jsonl",
+      "backend/journals/2026-09-15_MIDCPNIFTY 29 SEP 14550 PUT.jsonl",
+      "backend/journals/2026-09-15_MIDCPNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-15_NATURALGAS 23 SEP 275 CALL.jsonl",
+      "backend/journals/2026-09-15_NATURALGAS 23 SEP 275 PUT.jsonl",
+      "backend/journals/2026-09-15_NATURALGAS SEP FUT.jsonl",
+      "backend/journals/2026-09-15_NIFTY 15 SEP 23200 PUT.jsonl",
+      "backend/journals/2026-09-15_NIFTY 15 SEP 23250 PUT.jsonl",
+      "backend/journals/2026-09-15_NIFTY 15 SEP 23350 PUT.jsonl",
+      "backend/journals/2026-09-15_NIFTY 15 SEP 23400 PUT.jsonl",
+      "backend/journals/2026-09-15_NIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-15_SILVERM 24 SEP 225000 CALL.jsonl",
+      "backend/journals/2026-09-15_SILVERM 24 SEP 225000 PUT.jsonl",
+      "backend/journals/2026-09-15_SILVERM 24 SEP 226000 CALL.jsonl",
+      "backend/journals/2026-09-15_SILVERM 24 SEP 226000 PUT.jsonl",
+      "backend/journals/2026-09-15_SILVERM 24 SEP 228000 CALL.jsonl",
+      "backend/journals/2026-09-15_SILVERM 24 SEP 228000 PUT.jsonl",
+      "backend/journals/2026-09-15_SILVERM NOV FUT.jsonl",
+      "backend/journals/2026-09-16_BANKNIFTY 29 SEP 55800 PUT.jsonl",
+      "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56000 PUT.jsonl",
+      "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56200 CALL.jsonl",
+      "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56200 PUT.jsonl",
+      "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56300 CALL.jsonl",
+      "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56300 PUT.jsonl",
+      "backend/journals/2026-09-16_BANKNIFTY 29 SEP 56500 CALL.jsonl",
+      "backend/journals/2026-09-16_BANKNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-16_CRUDEOIL 17 SEP 10100 CALL.jsonl",
+      "backend/journals/2026-09-16_CRUDEOIL 17 SEP 10150 CALL.jsonl",
+      "backend/journals/2026-09-16_CRUDEOIL 17 SEP 10200 CALL.jsonl",
+      "backend/journals/2026-09-16_FINNIFTY 29 SEP 25150 CALL.jsonl",
+      "backend/journals/2026-09-16_FINNIFTY 29 SEP 25150 PUT.jsonl",
+      "backend/journals/2026-09-16_FINNIFTY 29 SEP 25200 CALL.jsonl",
+      "backend/journals/2026-09-16_FINNIFTY 29 SEP 25200 PUT.jsonl",
+      "backend/journals/2026-09-16_FINNIFTY 29 SEP 25250 CALL.jsonl",
+      "backend/journals/2026-09-16_FINNIFTY 29 SEP 25250 PUT.jsonl",
+      "backend/journals/2026-09-16_FINNIFTY 29 SEP 25300 CALL.jsonl",
+      "backend/journals/2026-09-16_FINNIFTY 29 SEP 25300 PUT.jsonl",
+      "backend/journals/2026-09-16_FINNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-16_GOLDM 25 SEP 150000 CALL.jsonl",
+      "backend/journals/2026-09-16_GOLDM 25 SEP 150000 PUT.jsonl",
+      "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14150 PUT.jsonl",
+      "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14200 PUT.jsonl",
+      "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14250 PUT.jsonl",
+      "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14275 PUT.jsonl",
+      "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14300 CALL.jsonl",
+      "backend/journals/2026-09-16_MIDCPNIFTY 29 SEP 14300 PUT.jsonl",
+      "backend/journals/2026-09-16_MIDCPNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-16_NIFTY 22 SEP 23150 PUT.jsonl",
+      "backend/journals/2026-09-16_NIFTY 22 SEP 23200 CALL.jsonl",
+      "backend/journals/2026-09-16_NIFTY 22 SEP 23200 PUT.jsonl",
+      "backend/journals/2026-09-16_NIFTY 22 SEP 23250 CALL.jsonl",
+      "backend/journals/2026-09-16_NIFTY 22 SEP 23250 PUT.jsonl",
+      "backend/journals/2026-09-16_NIFTY 22 SEP 23300 PUT.jsonl",
+      "backend/journals/2026-09-16_NIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-17_BANKNIFTY 29 SEP 56100 CALL.jsonl",
+      "backend/journals/2026-09-17_BANKNIFTY 29 SEP 56100 PUT.jsonl",
+      "backend/journals/2026-09-17_BANKNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-17_CRUDEOIL 17 SEP 10100 CALL.jsonl",
+      "backend/journals/2026-09-17_CRUDEOIL 17 SEP 10150 CALL.jsonl",
+      "backend/journals/2026-09-17_CRUDEOIL 17 SEP 10200 CALL.jsonl",
+      "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9750 CALL.jsonl",
+      "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9800 CALL.jsonl",
+      "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9800 PUT.jsonl",
+      "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9850 CALL.jsonl",
+      "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9850 PUT.jsonl",
+      "backend/journals/2026-09-17_CRUDEOIL 17 SEP 9900 PUT.jsonl",
+      "backend/journals/2026-09-17_CRUDEOIL SEP FUT.jsonl",
+      "backend/journals/2026-09-17_FINNIFTY 29 SEP 25300 CALL.jsonl",
+      "backend/journals/2026-09-17_FINNIFTY 29 SEP 25300 PUT.jsonl",
+      "backend/journals/2026-09-17_FINNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-17_GOLDM 25 SEP 151000 CALL.jsonl",
+      "backend/journals/2026-09-17_GOLDM 25 SEP 151000 PUT.jsonl",
+      "backend/journals/2026-09-17_GOLDM 25 SEP 152000 CALL.jsonl",
+      "backend/journals/2026-09-17_GOLDM 25 SEP 152000 PUT.jsonl",
+      "backend/journals/2026-09-17_GOLDM OCT FUT.jsonl",
+      "backend/journals/2026-09-17_MIDCPNIFTY 29 SEP 14400 CALL.jsonl",
+      "backend/journals/2026-09-17_MIDCPNIFTY 29 SEP 14425 CALL.jsonl",
+      "backend/journals/2026-09-17_MIDCPNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-17_NATURALGAS 23 SEP 275 CALL.jsonl",
+      "backend/journals/2026-09-17_NATURALGAS 23 SEP 275 PUT.jsonl",
+      "backend/journals/2026-09-17_NATURALGAS 23 SEP 280 CALL.jsonl",
+      "backend/journals/2026-09-17_NATURALGAS 23 SEP 280 PUT.jsonl",
+      "backend/journals/2026-09-17_NATURALGAS SEP FUT.jsonl",
+      "backend/journals/2026-09-17_NIFTY 22 SEP 23250 PUT.jsonl",
+      "backend/journals/2026-09-17_NIFTY 22 SEP 23300 PUT.jsonl",
+      "backend/journals/2026-09-17_NIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-17_SILVERM 24 SEP 228000 PUT.jsonl",
+      "backend/journals/2026-09-17_SILVERM 24 SEP 229000 CALL.jsonl",
+      "backend/journals/2026-09-17_SILVERM 24 SEP 229000 PUT.jsonl",
+      "backend/journals/2026-09-17_SILVERM 24 SEP 230000 CALL.jsonl",
+      "backend/journals/2026-09-17_SILVERM 24 SEP 230000 PUT.jsonl",
+      "backend/journals/2026-09-17_SILVERM 24 SEP 231000 CALL.jsonl",
+      "backend/journals/2026-09-17_SILVERM 24 SEP 232000 CALL.jsonl",
+      "backend/journals/2026-09-17_SILVERM NOV FUT.jsonl",
+      "backend/journals/2026-09-18_BANKNIFTY 29 SEP 56200 PUT.jsonl",
+      "backend/journals/2026-09-18_BANKNIFTY 29 SEP 56300 PUT.jsonl",
+      "backend/journals/2026-09-18_BANKNIFTY 29 SEP 56400 CALL.jsonl",
+      "backend/journals/2026-09-18_BANKNIFTY 29 SEP 56400 PUT.jsonl",
+      "backend/journals/2026-09-18_BANKNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-18_CRUDEOIL 15 OCT 9700 CALL.jsonl",
+      "backend/journals/2026-09-18_CRUDEOIL 15 OCT 9700 PUT.jsonl",
+      "backend/journals/2026-09-18_CRUDEOIL 15 OCT 9750 CALL.jsonl",
+      "backend/journals/2026-09-18_CRUDEOIL 15 OCT 9800 CALL.jsonl",
+      "backend/journals/2026-09-18_CRUDEOIL SEP FUT.jsonl",
+      "backend/journals/2026-09-18_FINNIFTY 29 SEP 25300 PUT.jsonl",
+      "backend/journals/2026-09-18_FINNIFTY 29 SEP 25450 CALL.jsonl",
+      "backend/journals/2026-09-18_FINNIFTY 29 SEP 25500 CALL.jsonl",
+      "backend/journals/2026-09-18_FINNIFTY 29 SEP 25500 PUT.jsonl",
+      "backend/journals/2026-09-18_FINNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-18_GOLDM 25 SEP 153000 CALL.jsonl",
+      "backend/journals/2026-09-18_GOLDM 25 SEP 153000 PUT.jsonl",
+      "backend/journals/2026-09-18_GOLDM OCT FUT.jsonl",
+      "backend/journals/2026-09-18_MIDCPNIFTY 29 SEP 14450 PUT.jsonl",
+      "backend/journals/2026-09-18_MIDCPNIFTY 29 SEP 14475 PUT.jsonl",
+      "backend/journals/2026-09-18_MIDCPNIFTY 29 SEP 14500 PUT.jsonl",
+      "backend/journals/2026-09-18_MIDCPNIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-18_NATURALGAS 23 SEP 280 CALL.jsonl",
+      "backend/journals/2026-09-18_NATURALGAS 23 SEP 280 PUT.jsonl",
+      "backend/journals/2026-09-18_NATURALGAS SEP FUT.jsonl",
+      "backend/journals/2026-09-18_NIFTY 22 SEP 23300 CALL.jsonl",
+      "backend/journals/2026-09-18_NIFTY 22 SEP 23350 CALL.jsonl",
+      "backend/journals/2026-09-18_NIFTY 22 SEP 23350 PUT.jsonl",
+      "backend/journals/2026-09-18_NIFTY 22 SEP 23400 PUT.jsonl",
+      "backend/journals/2026-09-18_NIFTY 22 SEP 23450 PUT.jsonl",
+      "backend/journals/2026-09-18_NIFTY SEP FUT.jsonl",
+      "backend/journals/2026-09-18_SILVERM 24 SEP 236000 PUT.jsonl",
+      "backend/journals/2026-09-18_SILVERM 24 SEP 237000 PUT.jsonl",
+      "backend/journals/2026-09-18_SILVERM 24 SEP 238000 CALL.jsonl",
+      "backend/journals/2026-09-18_SILVERM 24 SEP 238000 PUT.jsonl",
+      "backend/journals/2026-09-18_SILVERM 24 SEP 239000 PUT.jsonl",
+      "backend/journals/2026-09-18_SILVERM NOV FUT.jsonl",
+      "backend/logs/backend.log",
+      "backend/startup.log",
+      "backend/tests/unit/api/test_gameloop_ws_auth.py",
+      "backend/tests/unit/infrastructure/test_telemetry_adapter.py",
+      "docs/PAPER_READINESS_RELEASE_VALIDATION.md",
+      "docs/architecture/2026-09-11-next-parallel-batch.md",
+      "docs/architecture/2026-09-11-v6-execution-graph.json",
+      "docs/architecture/2026-09-11-v6-findings-reconciliation-and-workplan.md",
+      "docs/architecture/2026-09-11-v6-parallel-execution-plan.md",
+      "docs/architecture/2026-09-24-dual-position-authority-consolidation.md",
+      "docs/archive/plans/2026-09-16-ws-a-gate-convergence-brief.md",
+      "docs/archive/plans/2026-09-16-ws-b-gate3-two-models-brief.md",
+      "docs/archive/plans/2026-09-16-ws-c-test-integrity-ledger-brief.md",
+      "docs/performance/submission_handler_performance_profile.md",
+      "docs/plans/2026-09-16-fabio-simplification-program.md",
+      "docs/reviews/2026-09-16-test-integrity-ledger.md",
+      "docs/reviews/2026-09-17-single-authority-convergence-report.md",
+      "docs/superpowers/plans/2026-08-18-hot-path-detox-and-spec-compliance.md",
+      "docs/superpowers/plans/2026-09-16-architecture-review-remediation.md",
+      "docs/superpowers/plans/2026-09-16-automated-code-review-system.md",
+      "docs/superpowers/plans/2026-09-17-amt-single-authority-convergence.md",
+      "docs/superpowers/plans/2026-09-17-complexity-refactoring.md",
+      "docs/superpowers/plans/2026-09-17-fabio-amt-alignment-code-quality.md",
+      "docs/superpowers/plans/2026-09-17-fabio-playbook-alignment-production-readiness.md",
+      "docs/superpowers/plans/2026-09-18-amt-live-safety-remediation.md",
+      "docs/superpowers/specs/2026-09-18-amt-live-safety-remediation-design.md",
+      "frontend/tests/components/ModelStateBanner.test.tsx",
+      "quant/amt/bias/__init__.py",
+      "quant/amt/bias/bias_resolver.py",
+      "quant/amt/profile/compression_box.py",
+      "quant/amt/profile/gap_profile.py",
+      "quant/amt/profile/range_bars.py",
+      "quant/config/__init__.py",
+      "quant/config/constants.py",
+      "quant/contracts/options_converter.py",
+      "quant/contracts/ports/telemetry.py",
+      "quant/decision/forecast_provider.py",
+      "quant/decision/gap_architecture.workflow.html",
+      "quant/decision/gap_architecture.workflow.json",
+      "quant/decision/gap_architecture.workflow.visual-check.1440x900.dark.png",
+      "quant/decision/gap_architecture.workflow.visual-check.1440x900.light.png",
+      "quant/decision/gap_architecture.workflow.visual-check.2048x1320.dark.png",
+      "quant/decision/gap_architecture.workflow.visual-check.2048x1320.light.png",
+      "quant/decision/gap_architecture.workflow.visual-check.html",
+      "quant/decision/gap_architecture.workflow.visual-check.json",
+      "quant/decision/gates/__init__.py",
+      "quant/decision/gates/gate_edge.py",
+      "quant/decision/gates/gate_position_cooldown.py",
+      "quant/decision/gates/gate_risk_reward.py",
+      "quant/decision/gates/gate_session_phase.py",
+      "quant/decision/model_router.py",
+      "quant/decision/result_factory.py",
+      "quant/engine/__init__.py",
+      "quant/engine/decision_loop.py",
+      "quant/engine/exit_manager.py",
+      "quant/engine/submission_handler.py",
+      "quant/engine/tick_handler.py",
+      "quant/sidecars/__init__.py",
+      "quant/sidecars/narrative/__init__.py",
+      "quant/sidecars/narrative/llm_advisor.py",
+      "quant/sidecars/volatility/__init__.py",
+      "quant/sidecars/volatility/regime_filter.py",
+      "quant/strategies/selection.py",
+      "scripts/inspect_gameloop.py",
+      "scripts/plan_waves.py",
+      "scripts/triage_parallel_work.py",
+      "tests/architecture/test_amt_dto_contract.py",
+      "tests/automation/__init__.py",
+      "tests/automation/test_architecture.py",
+      "tests/automation/test_cli.py",
+      "tests/automation/test_complexity.py",
+      "tests/automation/test_coverage.py",
+      "tests/automation/test_fixes.py",
+      "tests/automation/test_hooks.py",
+      "tests/automation/test_monitor.py",
+      "tests/automation/test_orchestrator.py",
+      "tests/automation/test_patterns.py",
+      "tests/automation/test_performance.py",
+      "tests/automation/test_runner.py",
+      "tests/automation/test_scanner.py",
+      "tests/chaos/test_contingent_stop_flatten.py",
+      "tests/determinism/test_golden_tape_replay.py",
+      "tests/e2e/golden/refactoring_baseline/complexity.txt",
+      "tests/integration/test_startup_three_way_reconciliation.py",
+      "tests/quant/amt/bias/__init__.py",
+      "tests/quant/amt/bias/test_bias_resolver.py",
+      "tests/quant/amt/market/test_state_engine_contextual.py",
+      "tests/quant/amt/orderflow/test_aggression_direction.py",
+      "tests/quant/amt/orderflow/test_analyzer_flow_propagation.py",
+      "tests/quant/amt/orderflow/test_directional_compute.py",
+      "tests/quant/amt/profile/test_compression_box.py",
+      "tests/quant/amt/profile/test_gap_profile.py",
+      "tests/quant/amt/profile/test_range_bars.py",
+      "tests/quant/amt/session/test_effective_market_state.py",
+      "tests/quant/contracts/test_fabio_constants.py",
+      "tests/quant/coordinator/test_coordinator_telemetry.py",
+      "tests/quant/decision/test_bias_direction_override.py",
+      "tests/quant/decision/test_bias_integration.py",
+      "tests/quant/decision/test_forecast_provider.py",
+      "tests/quant/decision/test_gap_fill_fade.py",
+      "tests/quant/decision/test_gate1_exchange_clock.py",
+      "tests/quant/decision/test_gate3_setup_keys.py",
+      "tests/quant/decision/test_gate_compression_box_breakout.py",
+      "tests/quant/decision/test_gate_edge_candle_acceptance.py",
+      "tests/quant/decision/test_gate_edge_directional_evidence.py",
+      "tests/quant/decision/test_gate_result_setup_key.py",
+      "tests/quant/decision/test_mean_reversion_poc_exit.py",
+      "tests/quant/decision/test_model_router.py",
+      "tests/quant/decision/test_model_router_enforcement.py",
+      "tests/quant/decision/test_result_factory.py",
+      "tests/quant/decision/test_structural_anchor_noise.py",
+      "tests/quant/decision/test_timesfm_license_quarantine.py",
+      "tests/quant/decision/test_tp_shield.py",
+      "tests/quant/decision/test_triple_a_lvn_proximity.py",
+      "tests/quant/decision/test_va_fade_reclaim_semantics.py",
+      "tests/quant/decision/test_va_fade_stop_extreme.py",
+      "tests/quant/execution/test_portfolio_hard_cap.py",
+      "tests/quant/execution/test_risk_sizing_derivatives.py",
+      "tests/quant/execution/test_sizing_invariants.py",
+      "tests/quant/runtime/test_bias_accumulation.py",
+      "tests/quant/runtime/test_bias_aggregator.py",
+      "tests/quant/runtime/test_engine_telemetry_injection.py",
+      "tests/quant/runtime/test_single_authority.py",
+      "tests/quant/strategies/test_selection.py",
+      "tests/quant/test_constants.py",
+      "tests/quant/test_decision_loop.py",
+      "tests/quant/test_dynamic_sizing_removed.py",
+      "tests/quant/test_exception_logging.py",
+      "tests/quant/test_exit_manager.py",
+      "tests/quant/test_journal_subscriber.py",
+      "tests/quant/test_submission_handler.py",
+      "tests/quant/test_submission_handler_integration.py",
+      "tests/quant/test_submission_handler_performance.py",
+      "tests/quant/test_tick_handler.py",
+      "tests/quant/test_transition_alias.py",
+      "tests/release/test_paper_readiness_release.py"
+    ],
+    "removed": [
+      "ARCHITECTURE_AND_FLOWS.md",
+      "backend/backend.log",
+      "old.freebuff/desktop-v2.db-shm",
+      "old.freebuff/desktop-v2.db-wal",
+      "quant/decision/gates_session_position.py",
+      "quant/strategies/timesfm_strategy.py",
+      "scripts/audit_e2e_entry_probe.py",
+      "tests/quant/decision/test_timesfm_strategy_cache.py",
+      "tests/quant/strategies/test_timesfm_provider_adoption.py",
+      "tests/quant/strategies/test_timesfm_strategy.py"
+    ],
     "modified": [
-      "backend/backend.log"
+      ".env",
+      ".env.example",
+      "Makefile",
+      "backend/.active_contracts.json",
+      "backend/.env",
+      "backend/.session_levels.json",
+      "backend/app/api/routers/health.py",
+      "backend/app/api/routers/observability.py",
+      "backend/app/api/routers/trading.py",
+      "backend/app/api/websocket/gameloop.py",
+      "backend/app/application/di/composition_root.py",
+      "backend/app/application/services/analysis_service.py",
+      "backend/app/config_models/__init__.py",
+      "backend/app/config_models/loader.py",
+      "backend/app/core/logging.py",
+      "backend/app/core/metrics.py",
+      "backend/app/domain/ops/startup_reconciliation.py",
+      "backend/app/infrastructure/adapters/dhan_broker_adapter.py",
+      "backend/app/infrastructure/serialization/schemas.py",
+      "backend/app/infrastructure/storage/database.py",
+      "backend/backend_e2e.log",
+      "backend/config/base.yaml",
+      "backend/config/environments/paper.yaml",
+      "backend/config/strategies/mcx_options.yaml",
+      "backend/config/strategies/nse_options.yaml",
+      "backend/config/strategy_resolve.py",
+      "backend/glassytrade.db",
+      "backend/glassytrade.db-shm",
+      "backend/glassytrade.db-wal",
+      "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9700 CALL.jsonl",
+      "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9700 PUT.jsonl",
+      "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9750 CALL.jsonl",
+      "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9750 PUT.jsonl",
+      "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9800 CALL.jsonl",
+      "backend/journals/2026-09-11_CRUDEOIL 17 SEP 9800 PUT.jsonl",
+      "backend/journals/2026-09-11_CRUDEOIL SEP FUT.jsonl",
+      "backend/journals/2026-09-11_GOLDM 25 SEP 152000 CALL.jsonl",
+      "backend/journals/2026-09-11_GOLDM OCT FUT.jsonl",
+      "backend/journals/2026-09-11_NATURALGAS 23 SEP 270 CALL.jsonl",
+      "backend/journals/2026-09-11_NATURALGAS 23 SEP 270 PUT.jsonl",
+      "backend/journals/2026-09-11_NATURALGAS SEP FUT.jsonl",
+      "backend/journals/2026-09-11_SILVERM 24 SEP 229000 CALL.jsonl",
+      "backend/journals/2026-09-11_SILVERM 24 SEP 230000 CALL.jsonl",
+      "backend/journals/2026-09-11_SILVERM 24 SEP 231000 CALL.jsonl",
+      "backend/journals/2026-09-11_SILVERM NOV FUT.jsonl",
+      "backend/requirements.txt",
+      "backend/scripts/check_startup_log_contract.py",
+      "backend/start_nse.sh",
+      "backend/tests/runtime_validation/test_phase1_leaf_components.py",
+      "backend/tests/unit/application/test_composition_root.py",
+      "backend/tests/unit/infrastructure/test_dhan_ledger_truthfulness.py",
+      "brokers/broker/dhan/__init__.py",
+      "brokers/broker/dhan/infrastructure/__init__.py",
+      "brokers/broker/dhan/infrastructure/auth_provider.py",
+      "brokers/broker/dhan/infrastructure/websocket_client.py",
+      "docs/PRE_RELEASE_READINESS_CHECKLIST.md",
+      "docs/amt/fabio_decision_pipeline.md",
+      "docs/architecture/ARCHITECTURE_AND_FLOWS.md",
+      "frontend/components/AIAnalysisPanel.tsx",
+      "frontend/components/ModelStateBanner.tsx",
+      "frontend/components/ai/AIAdvisorCard.tsx",
+      "frontend/components/ai/QuantDecisionCard.tsx",
+      "frontend/components/chart/ExecutionMarkersManager.ts",
+      "frontend/constants.ts",
+      "frontend/frontend.log",
+      "frontend/tests/components/chart/ExecutionMarkersManager.test.ts",
+      "frontend/types.ts",
+      "glassytrade.db",
+      "old.freebuff/desktop-v2.db",
+      "quant/aggregator.py",
+      "quant/amt/analyzer.py",
+      "quant/amt/compute.py",
+      "quant/amt/dto.py",
+      "quant/amt/market/acceptance_rejection.py",
+      "quant/amt/market/break_detector.py",
+      "quant/amt/market/displacement.py",
+      "quant/amt/market/half_trend.py",
+      "quant/amt/market/lvn_play.py",
+      "quant/amt/market/opening.py",
+      "quant/amt/market/regime.py",
+      "quant/amt/market/state_engine.py",
+      "quant/amt/market/structure.py",
+      "quant/amt/market/vars_detector.py",
+      "quant/amt/models/observation.py",
+      "quant/amt/orderflow/aggression.py",
+      "quant/amt/orderflow/aggressive_prints.py",
+      "quant/amt/orderflow/compute.py",
+      "quant/amt/orderflow/cvd.py",
+      "quant/amt/orderflow/detectors.py",
+      "quant/amt/orderflow/drive.py",
+      "quant/amt/orderflow/footprint.py",
+      "quant/amt/profile/classifier.py",
+      "quant/amt/profile/displacement.py",
+      "quant/amt/profile/gamma.py",
+      "quant/amt/profile/leg_lvn.py",
+      "quant/amt/profile/lvn.py",
+      "quant/amt/profile/migration.py",
+      "quant/amt/profile/volume_profile.py",
+      "quant/amt/profile/vwap.py",
+      "quant/amt/session/context.py",
+      "quant/amt/session/eia.py",
+      "quant/amt/session/futures_provider.py",
+      "quant/amt/session/ib_engine.py",
+      "quant/amt/session/ib_scalp.py",
+      "quant/amt/session/npoc.py",
+      "quant/amt/session/scanner.py",
+      "quant/amt/session/scanner_config.py",
+      "quant/amt/session/selector.py",
+      "quant/amt/session/structure.py",
+      "quant/amt/session/symbol_registry.py",
+      "quant/amt/triple_a.py",
+      "quant/amt_engine.py",
+      "quant/bars.py",
+      "quant/brokers/gateway.py",
+      "quant/brokers/live_gateway.py",
+      "quant/brokers/multiplexed_feed.py",
+      "quant/contracts/aggregates.py",
+      "quant/contracts/candle_metrics.py",
+      "quant/contracts/constants.py",
+      "quant/contracts/contracts.py",
+      "quant/contracts/decimal_utils.py",
+      "quant/contracts/entities.py",
+      "quant/contracts/enums.py",
+      "quant/contracts/exchange_config.py",
+      "quant/contracts/execution_vocabulary.py",
+      "quant/contracts/instrument_registry.py",
+      "quant/contracts/market_calendar.py",
+      "quant/contracts/market_data_utils.py",
+      "quant/contracts/numeric.py",
+      "quant/contracts/ports/__init__.py",
+      "quant/contracts/ports/broker.py",
+      "quant/contracts/ports/config_port.py",
+      "quant/contracts/ports/market_data.py",
+      "quant/contracts/ports/npoc.py",
+      "quant/contracts/ports/storage.py",
+      "quant/contracts/sync_boundary.py",
+      "quant/contracts/tick_utils.py",
+      "quant/contracts/timezones.py",
+      "quant/contracts/value_objects.py",
+      "quant/contracts/vocabulary.py",
+      "quant/coordinator_view.py",
+      "quant/decision/context.py",
+      "quant/decision/context_builder.py",
+      "quant/decision/decision_service.py",
+      "quant/decision/gates_edge.py",
+      "quant/decision/gates_rr.py",
+      "quant/decision/pipeline.py",
+      "quant/decision/result.py",
+      "quant/decision/setup_state.py",
+      "quant/decision/signal_builder.py",
+      "quant/decision/stops.py",
+      "quant/decision/timesfm_advisor.py",
+      "quant/decision/timesfm_agents.py",
+      "quant/decision/timesfm_client.py",
+      "quant/decision/timesfm_engine.py",
+      "quant/decision/timesfm_forecast_factory.py",
+      "quant/decision/timesfm_option_selector.py",
+      "quant/decision/timesfm_risk.py",
+      "quant/decision/timesfm_sizing.py",
+      "quant/decision/va_fade.py",
+      "quant/event_store.py",
+      "quant/events.py",
+      "quant/execution/broker_mapper.py",
+      "quant/execution/coordinator_metrics.py",
+      "quant/execution/execution_model.py",
+      "quant/execution/execution_state_machine.py",
+      "quant/execution/exit_checks.py",
+      "quant/execution/exit_rules.py",
+      "quant/execution/exit_signal.py",
+      "quant/execution/exits.py",
+      "quant/execution/exposure.py",
+      "quant/execution/fills.py",
+      "quant/execution/flow_provenance.py",
+      "quant/execution/ledger_reconstruction.py",
+      "quant/execution/live_oms.py",
+      "quant/execution/lots.py",
+      "quant/execution/oms.py",
+      "quant/execution/oms_factory.py",
+      "quant/execution/order.py",
+      "quant/execution/paper_contracts.py",
+      "quant/execution/paper_reconciliation.py",
+      "quant/execution/paper_simulator.py",
+      "quant/execution/paper_trading_contracts.py",
+      "quant/execution/portfolio_risk.py",
+      "quant/execution/ports.py",
+      "quant/execution/protective_stop.py",
+      "quant/execution/readiness.py",
+      "quant/execution/risk.py",
+      "quant/execution/seed_scheduler.py",
+      "quant/execution/trade_costs.py",
+      "quant/hotpath.py",
+      "quant/llm/advisor.py",
+      "quant/llm/bridge.py",
+      "quant/llm/dataset_generator.py",
+      "quant/llm/narrative.py",
+      "quant/modeling/forecast_provider.py",
+      "quant/modeling/observation.py",
+      "quant/multi_engine.py",
+      "quant/persistence.py",
+      "quant/persistence_boundary.py",
+      "quant/persistence_bridge.py",
+      "quant/position_manager.py",
+      "quant/probability/features.py",
+      "quant/reconciliation_service.py",
+      "quant/runtime.py",
+      "quant/session_gates.py",
+      "quant/session_levels.py",
+      "quant/state.py",
+      "quant/state_machine.py",
+      "quant/strategies/__init__.py",
+      "quant/strategies/amt_scalping.py",
+      "quant/strategy.py",
+      "quant/transitions.py",
+      "quant/wiring_advisor.py",
+      "quant/ws_adapter.py",
+      "quant/ws_contract.py",
+      "scripts/audit_engine_race_probe.py",
+      "scripts/pre_release_decision_check.py",
+      "start.sh",
+      "tests/architecture/test_no_dead_exports.py",
+      "tests/architecture/test_no_layer_bypass.py",
+      "tests/architecture/test_repo_hygiene.py",
+      "tests/integration/test_fabio_india_scenarios.py",
+      "tests/quant/amt/profile/test_leg_lvn.py",
+      "tests/quant/amt/session/test_scanner_timesfm.py",
+      "tests/quant/certification/test_signal_drop_reasons.py",
+      "tests/quant/certification/test_trace_compare.py",
+      "tests/quant/certification/trace_compare.py",
+      "tests/quant/contracts/test_order_domain.py",
+      "tests/quant/contracts/test_telemetry_standards.py",
+      "tests/quant/coordinator/test_dynamic_rotation.py",
+      "tests/quant/decision/test_context_builder_behavior.py",
+      "tests/quant/decision/test_decision_service.py",
+      "tests/quant/decision/test_gate1_phase_permissions.py",
+      "tests/quant/decision/test_gate_triple_a_edge.py",
+      "tests/quant/decision/test_gates_1_2.py",
+      "tests/quant/decision/test_gates_5_pipeline.py",
+      "tests/quant/decision/test_phase3_pipeline.py",
+      "tests/quant/decision/test_setup_approval_flow.py",
+      "tests/quant/decision/test_signal_builder.py",
+      "tests/quant/decision/test_signal_builder_guards.py",
+      "tests/quant/decision/test_squeeze_pullback.py",
+      "tests/quant/decision/test_strategy_behavior.py",
+      "tests/quant/decision/test_timesfm_agents.py",
+      "tests/quant/decision/test_timesfm_engine.py",
+      "tests/quant/decision/test_timesfm_sizing.py",
+      "tests/quant/decision/test_va_fade.py",
+      "tests/quant/decision/test_va_fade_risk.py",
+      "tests/quant/edge_cases/test_boundaries.py",
+      "tests/quant/execution/test_live_oms.py",
+      "tests/quant/execution/test_lot_aware_risk.py",
+      "tests/quant/execution/test_oms_conformance.py",
+      "tests/quant/execution/test_paper_restart_reconciliation.py",
+      "tests/quant/execution/test_pyramid_integration.py",
+      "tests/quant/execution/test_risk.py",
+      "tests/quant/llm/test_advisor_integration.py",
+      "tests/quant/llm/test_narrative_table_parity.py",
+      "tests/quant/modeling/test_observation_identity.py",
+      "tests/quant/runtime/test_amt_golden.py",
+      "tests/quant/runtime/test_opposing_signal_exit.py",
+      "tests/quant/runtime/test_positive_approval.py",
+      "tests/quant/runtime/test_runtime.py",
+      "tests/quant/runtime/test_signal_blocked_latch.py",
+      "tests/quant/runtime/test_tick_partial_adoption.py",
+      "tests/quant/test_certification.py",
+      "tests/quant/test_eod_square_off.py",
+      "tests/quant/test_event_appender_boundary.py",
+      "tests/quant/test_event_store_import_integrity.py",
+      "tests/quant/test_golden_replay.py",
+      "tests/quant/test_multiplexed_feed.py",
+      "tests/quant/test_npoc_gate_integration.py",
+      "tests/quant/test_phase1_safety_fixes.py",
+      "tests/quant/test_portfolio_risk_guard.py",
+      "tests/quant/test_production_correctness.py",
+      "tests/quant/test_pyramid_certification.py",
+      "tests/quant/test_stress_and_portfolio_risk.py",
+      "tests/system/test_fabio_behavior_trace.py",
+      "tests/system/test_paper_protocol.py",
+      "tests/system/test_quant_runtime_e2e.py",
+      "tests/test_fabio_alignment.py"
     ]
   },
   "git": {
     "available": true,
     "commits": [
-      "2d74fe94 refactor: isolate paper event persistence health",
-      "ad4c9cd7 Add versioned immutable snapshot envelope",
-      "d0fdfe17 feat: add canonical execution vocabulary and state machine",
-      "366c1a3a docs: capture approved refactoring baseline",
-      "8af8542a docs: add design-level refactoring specification",
-      "fe2f3065 feat: harden paper timeout and persistence recovery",
-      "e75fc98d Implement paper restart exposure reconciliation",
-      "7db4376c test: add Indian paper trading acceptance vectors"
+      "dba799d6 fix(amt): preserve directional flow and provenance",
+      "53e6e83e docs: define AMT live safety remediation",
+      "83be9548 refactor(risk): dedupe margin constant, unify expiry halving",
+      "5ad69618 Gap #6: second-drive grade boost + narrative labeling",
+      "0a7f335c docs(plans): commit the AMT single-authority convergence plan and align its superseded predecessors",
+      "dc2b27de docs(report): record follow-up fixes — 2525P/0F, anchor noise walk + trace volatility",
+      "b73ed705 fix(amt): structural anchor walks past noise-thin levels instead of dropping the breakout; stabilize StopMoved.position_id in trace compare",
+      "7a70d881 docs(report): pre-existing failure cleanup — 2516P/0F, 2 prod bugs fixed"
     ],
-    "uncommitted": 10
+    "uncommitted": 100
   },
   "tests": {
     "available": true,
-    "failing": 49,
+    "failing": 137,
     "tests": [
-      "backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_balance_updates_on_close",
-      "backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_closes_on_stop_loss",
-      "backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_closes_on_take_profit",
-      "backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_portfolio_does_not_move_breakeven",
-      "backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_updates_pnl",
-      "backend/tests/unit/domain/test_aggregates.py::TestStraddlePrevention::test_history_trim",
-      "backend/tests/unit/domain/test_audit_fixes.py::TestCommissionModel::test_commission_deducted_on_sl_close",
-      "backend/tests/unit/domain/test_audit_fixes.py::TestCommissionModel::test_commission_deducted_on_tp_close",
-      "backend/tests/unit/domain/test_audit_fixes.py::TestSlippageModel::test_long_exit_slippage_adverse",
-      "brokers/broker/dhan/tests/test_integration.py::TestLiveIntegration::test_live_get_funds",
-      "brokers/broker/dhan/tests/test_integration.py::TestLiveIntegration::test_live_get_positions",
-      "tests/quant/amt/market/test_break.py::TestCheckIbBreakTick::test_sticky_down",
-      "tests/quant/amt/market/test_break.py::TestCheckIbBreakTick::test_sticky_up",
-      "tests/quant/amt/session/test_scanner_timesfm.py::test_timesfm_strategy_model_momentum_entry",
-      "tests/quant/amt/session/test_symbol_registry.py::TestSymbolRegistry::test_unknown_defaults_to_mcx"
+      "backend/tests/integration/test_api_endpoints.py::TestAIJournalEndpoints",
+      "backend/tests/integration/test_api_endpoints.py::TestAnalysisEndpoints",
+      "backend/tests/integration/test_api_endpoints.py::TestClient",
+      "backend/tests/integration/test_api_endpoints.py::TestHealthEndpoint",
+      "backend/tests/integration/test_api_endpoints.py::TestTradingEndpoints",
+      "backend/tests/integration/test_lot_size_api.py",
+      "backend/tests/integration/test_raci_bindings.py",
+      "backend/tests/runtime_validation/test_phase1_leaf_components.py",
+      "backend/tests/unit/api/test_coordinator_endpoints.py::TestClient",
+      "backend/tests/unit/api/test_gameloop_ws_auth.py",
+      "backend/tests/unit/api/test_market_halftrend.py",
+      "backend/tests/unit/application/test_coordinator_contract_persistence.py",
+      "backend/tests/unit/application/test_trading_stats_journal.py",
+      "backend/tests/unit/core/test_alerts.py",
+      "backend/tests/unit/core/test_correlation.py"
     ],
-    "as_of": "2026-09-11T09:42:46Z",
-    "phantom_filtered": 34
+    "as_of": "2026-09-18T16:39:14Z",
+    "phantom_filtered": 39
   },
   "imports": {},
   "deps": {
@@ -54936,26 +57092,24 @@
   "components": {},
   "graphify": {
     "available": true,
-    "built": "2026-09-11T06:48:32Z",
-    "nodes": 15223,
-    "edges": 34414,
-    "communities": 560,
+    "built": "2026-09-18T16:11:51Z",
+    "nodes": 17900,
+    "edges": 39858,
+    "communities": 638,
     "hubs": [],
     "fresh": false,
     "stale": {
       "modified": [
-        "backend/app/api/routers/market.py",
-        "brokers/broker/dhan/application/broker.py",
-        "brokers/broker/dhan/application/services/streaming_service.py",
-        "quant/contracts/vocabulary.py",
-        "quant/decision/timesfm_agents.py",
-        "quant/execution/oms.py",
-        "quant/execution/paper_simulator.py",
-        "quant/runtime.py",
-        "quant/ws_contract.py",
-        "start.sh"
+        "frontend/components/AIAnalysisPanel.tsx",
+        "frontend/components/ai/QuantDecisionCard.tsx",
+        "quant/amt/analyzer.py",
+        "quant/amt/dto.py",
+        "quant/amt/orderflow/compute.py",
+        "quant/amt_engine.py",
+        "quant/contracts/value_objects.py",
+        "tests/architecture/test_amt_dto_contract.py"
       ],
-      "modified_total": 11,
+      "modified_total": 8,
       "deleted": [
         ".jcode-scratch/clone_detect.py",
         ".jcode-scratch/clone_detect2.py",
@@ -54968,8 +57122,6 @@
       ],
       "deleted_total": 8,
       "new": [
-        "ARCHITECTURE_AND_FLOWS.md",
-        "backend/app/application/services/market_analysis_service.py",
         "backend/venv/lib/python3.13/site-packages/PIL/AvifImagePlugin.py",
         "backend/venv/lib/python3.13/site-packages/PIL/BdfFontFile.py",
         "backend/venv/lib/python3.13/site-packages/PIL/BlpImagePlugin.py",
@@ -54977,9 +57129,11 @@
         "backend/venv/lib/python3.13/site-packages/PIL/BufrStubImagePlugin.py",
         "backend/venv/lib/python3.13/site-packages/PIL/ContainerIO.py",
         "backend/venv/lib/python3.13/site-packages/PIL/CurImagePlugin.py",
-        "backend/venv/lib/python3.13/site-packages/PIL/DcxImagePlugin.py"
+        "backend/venv/lib/python3.13/site-packages/PIL/DcxImagePlugin.py",
+        "backend/venv/lib/python3.13/site-packages/PIL/DdsImagePlugin.py",
+        "backend/venv/lib/python3.13/site-packages/PIL/EpsImagePlugin.py"
       ],
-      "new_total": 9804
+      "new_total": 9781
     }
   }
 }

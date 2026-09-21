@@ -345,7 +345,8 @@ def test_structural_target_priority():
     # Target should be a structural level (prior POC or NPOC), not fixed 2R
     assert d.signal.tp > d.signal.entry, "Target must be above entry for LONG"
     # The structural target should be one of the configured levels
-    assert d.signal.tp in (130.0, 120.0), f"Target should be structural, got {d.signal.tp}"
+    # TP is shielded 2 ticks inside the structural level (toward entry)
+    assert d.signal.tp in (129.9, 119.9), f"Target should be structural + shielded, got {d.signal.tp}"
 
 
 def test_three_loss_halt():

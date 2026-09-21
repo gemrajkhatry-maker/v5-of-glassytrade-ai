@@ -66,3 +66,19 @@ def test_advisor_enabled_is_used_by_coordinator_config(monkeypatch):
 
     src = inspect.getsource(composition_root._create_quant_coordinator)
     assert '"advisor_enabled": _advisor_enabled_from_env(),' in src
+
+
+def test_coordinator_gets_the_host_telemetry_adapter():
+    """The brain counts through its port; the host picks the sink.
+
+    quant owns the interface and must not reach for a counter itself (the
+    quant->host import direction is gated in tests/architecture), so the
+    composition root is the one place that decides where the counts land.
+    """
+    import inspect
+
+    from app.application.di import composition_root
+
+    src = inspect.getsource(composition_root._create_quant_coordinator)
+    assert "telemetry=PrometheusTelemetry()," in src
+    assert "from app.infrastructure.telemetry import PrometheusTelemetry" in src

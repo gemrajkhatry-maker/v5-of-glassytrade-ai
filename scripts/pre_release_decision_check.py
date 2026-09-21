@@ -129,18 +129,20 @@ def check_single_sizing_authority():
 # B. Information flow (contract coverage + shared-buffer integrity)
 # ---------------------------------------------------------------------------
 
-# Keys context_builder reads that the AMT DTO never emits. Each is a documented
-# legacy fallback alias, not a live contract gap.
-_KNOWN_FALLBACK_ALIASES = {"acceptance", "rejection", "legLvn", "data_quality", "optionGreekDelta"}
-
-
 def check_dto_key_coverage():
+    """Every key context_builder reads must be one the DTO producer emits.
+
+    No fallback allowlist: the reads that used to need one (``acceptance``,
+    ``rejection``, ``legLvn``, ``data_quality``, ``optionGreekDelta``) are gone.
+    tests/architecture/test_amt_dto_contract.py enforces the same contract for
+    every consumer — including attribute and typed-getter reads — at CI time.
+    """
     cb = _read("quant/decision/context_builder.py")
     consumed = set(re.findall(r'amt_dto\.get\(\s*"([^"]+)"', cb))
     consumed |= set(re.findall(r'amt_dto\[\s*"([^"]+)"\s*\]', cb))
     dto = _read("quant/amt/dto.py")
     produced = set(re.findall(r'^\s*"([A-Za-z_][A-Za-z0-9_]*)":', dto, re.M))
-    missing = sorted(consumed - produced - _KNOWN_FALLBACK_ALIASES)
+    missing = sorted(consumed - produced)
     _add(
         "B. Information flow", "every DecisionContext field has an AMT DTO producer",
         not missing,

@@ -76,7 +76,7 @@ def test_crit_01_check_pyramid_catches_value_error_under_live_oms():
     pm._exits.evaluate(pos, bar_close=101.0, bar_index=3, bar_high=101.0, bar_low=100.9)
     assert pm._exits.is_risk_free(pos)
 
-    dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+    dto = {"legLvns": [100.0], "absorptionSide": "SELL_ABSORBED"}
     bar = _bar(close=100.05, open_=100.0)
 
     # Should not raise exception (broker rejection returns None, not raise)
@@ -95,7 +95,7 @@ def test_crit_01_check_pyramid_catches_not_implemented_and_generic_exceptions():
     pm._exits.evaluate(pos, bar_close=101.0, bar_index=3, bar_high=101.0, bar_low=100.9)
     assert pm._exits.is_risk_free(pos)
 
-    dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
+    dto = {"legLvns": [100.0], "absorptionSide": "SELL_ABSORBED"}
     bar = _bar(close=100.05, open_=100.0)
 
     # Should catch NotImplementedError

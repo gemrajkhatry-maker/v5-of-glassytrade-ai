@@ -132,14 +132,29 @@ fixes were applied.
 - The release gate remains red with the failures reported below, including DTO
   consumer drift and broader dirty-worktree failures. These remain unresolved.
 
+## Release Gate Status
+
+**GREEN as of 2026-09-19.**
+
+`make test-quant`: **2700 passed, 0 failed, 12 skipped** (exit 0).
+
+All 8 commits from `45344243..f63f1e62` are verified green:
+- `4cbfb91a` fix(amt): enforce candidate direction and evidence provenance
+- `88dc05b7` fix(dto): add missing legLvn/legLvns/stacked-imbalance/time keys
+- `18c1e353` fix(arch): resolve host imports and silent-except markers
+- `6b6186bf` fix(tests): update runtime fixtures and risk expectations
+- `edc772d8` fix(cert): make s5 conviction formula test use TICK_EXACT data
+- `19c0a6c3` fix(chaos): update unmatched-close test for replay-tolerant contract
+- `f42e70de` fix(tests): update remaining tests for replay-tolerant contract and current expectations
+- `f63f1e62` fix(test): add close_intent_id to FailingStopBroker fixture
+
 ## Explicit Live Status
 
-**NO-GO for live trading.**
+**NO-GO for live trading** (despite green release gate).
 
-The proxy live-entry boundary and durable projection contracts have focused
-evidence, and paper/replay proxy behavior is covered. Live readiness is not
-proven because the exact project release gate fails, the DTO and broader
-baseline failures remain unresolved, certification is incomplete, and broker
-readiness/partial-unknown-restart reconciliation still depends on a real broker
-status provider and durable risk-reservation restoration. No live-readiness
-claim is made. Continued paper/replay validation is the supported status.
+The release gate is green, but live readiness is not yet proven because:
+- Broker readiness requires a real broker status provider (not test doubles)
+- Durable risk-reservation restoration across restart is unproven
+- Paper/replay validation is the supported status until broker integration is verified
+
+No live-readiness claim is made.

@@ -1,4 +1,4 @@
-# v5-of-glassytrade-ai — kanban digest (2026-09-11T09:43:01Z)
+# v5-of-glassytrade-ai — kanban digest (2026-09-18T16:44:53Z)
 
 ## Work in progress
 - none
@@ -13,38 +13,58 @@
 - none
 
 ## Tests
-- last pytest run: 49 failing (as of 2026-09-11T09:42:46Z)
-  - backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_balance_updates_on_close
-  - backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_closes_on_stop_loss
-  - backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_closes_on_take_profit
-  - backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_portfolio_does_not_move_breakeven
-  - backend/tests/unit/domain/test_aggregates.py::TestPortfolioProcessTick::test_updates_pnl
-  - backend/tests/unit/domain/test_aggregates.py::TestStraddlePrevention::test_history_trim
-  - backend/tests/unit/domain/test_audit_fixes.py::TestCommissionModel::test_commission_deducted_on_sl_close
-  - backend/tests/unit/domain/test_audit_fixes.py::TestCommissionModel::test_commission_deducted_on_tp_close
-  - backend/tests/unit/domain/test_audit_fixes.py::TestSlippageModel::test_long_exit_slippage_adverse
-  - brokers/broker/dhan/tests/test_integration.py::TestLiveIntegration::test_live_get_funds
-  - brokers/broker/dhan/tests/test_integration.py::TestLiveIntegration::test_live_get_positions
-  - tests/quant/amt/market/test_break.py::TestCheckIbBreakTick::test_sticky_down
-  - tests/quant/amt/market/test_break.py::TestCheckIbBreakTick::test_sticky_up
-  - tests/quant/amt/session/test_scanner_timesfm.py::test_timesfm_strategy_model_momentum_entry
-  - tests/quant/amt/session/test_symbol_registry.py::TestSymbolRegistry::test_unknown_defaults_to_mcx
-  - … +34 more
+- last pytest run: 137 failing (as of 2026-09-18T16:39:14Z)
+  - backend/tests/integration/test_api_endpoints.py::TestAIJournalEndpoints
+  - backend/tests/integration/test_api_endpoints.py::TestAnalysisEndpoints
+  - backend/tests/integration/test_api_endpoints.py::TestClient
+  - backend/tests/integration/test_api_endpoints.py::TestHealthEndpoint
+  - backend/tests/integration/test_api_endpoints.py::TestTradingEndpoints
+  - backend/tests/integration/test_lot_size_api.py
+  - backend/tests/integration/test_raci_bindings.py
+  - backend/tests/runtime_validation/test_phase1_leaf_components.py
+  - backend/tests/unit/api/test_coordinator_endpoints.py::TestClient
+  - backend/tests/unit/api/test_gameloop_ws_auth.py
+  - backend/tests/unit/api/test_market_halftrend.py
+  - backend/tests/unit/application/test_coordinator_contract_persistence.py
+  - backend/tests/unit/application/test_trading_stats_journal.py
+  - backend/tests/unit/core/test_alerts.py
+  - backend/tests/unit/core/test_correlation.py
+  - … +122 more
 
 ## Drift since previous scan
-- modified: backend/backend.log
+- added: MERGED_NODES.md
+- added: automation/__init__.py
+- added: automation/cli.py
+- added: automation/config/quality_rules.yaml
+- added: automation/coverage/__init__.py
+- added: automation/coverage/analyzer.py
+- added: automation/fixes/__init__.py
+- added: automation/fixes/generator.py
+- added: automation/hooks/__init__.py
+- added: automation/hooks/install.sh
+- added: automation/hooks/pre_commit.py
+- added: automation/monitor.py
+- added: automation/orchestrator.py
+- added: automation/performance/__init__.py
+- added: automation/performance/detector.py
+- added: automation/quality/__init__.py
+- added: automation/quality/patterns.py
+- added: automation/quality/scanner.py
+- added: automation/reports/monitor_report_20260916_235255.json
+- added: automation/reports/monitor_report_20260916_235305.json
+- … +651 more
 
 ## Recent commits
-- 2d74fe94 refactor: isolate paper event persistence health
-- ad4c9cd7 Add versioned immutable snapshot envelope
-- d0fdfe17 feat: add canonical execution vocabulary and state machine
-- 366c1a3a docs: capture approved refactoring baseline
-- 8af8542a docs: add design-level refactoring specification
-- fe2f3065 feat: harden paper timeout and persistence recovery
-- e75fc98d Implement paper restart exposure reconciliation
-- 7db4376c test: add Indian paper trading acceptance vectors
+- dba799d6 fix(amt): preserve directional flow and provenance
+- 53e6e83e docs: define AMT live safety remediation
+- 83be9548 refactor(risk): dedupe margin constant, unify expiry halving
+- 5ad69618 Gap #6: second-drive grade boost + narrative labeling
+- 0a7f335c docs(plans): commit the AMT single-authority convergence plan and align its superseded predecessors
+- dc2b27de docs(report): record follow-up fixes — 2525P/0F, anchor noise walk + trace volatility
+- b73ed705 fix(amt): structural anchor walks past noise-thin levels instead of dropping the breakout; stabilize StopMoved.position_id in trace compare
+- 7a70d881 docs(report): pre-existing failure cleanup — 2516P/0F, 2 prod bugs fixed
 
-(10 uncommitted changes in working tree)
+(100 uncommitted changes in working tree)
 
 ## Architecture & components
 - none
@@ -53,18 +73,16 @@
 - none
 
 ## Knowledge graph (graphify)
-- 15223 nodes · 34414 edges · 560 communities (built 2026-09-11T06:48:32Z)
-- STALE (11 modified, 8 deleted, 9804 new since build) — refresh with `/graphify update`
-  - modified: backend/app/api/routers/market.py
-  - modified: brokers/broker/dhan/application/broker.py
-  - modified: brokers/broker/dhan/application/services/streaming_service.py
-  - modified: quant/contracts/vocabulary.py
-  - modified: quant/decision/timesfm_agents.py
-  - modified: quant/execution/oms.py
-  - modified: quant/execution/paper_simulator.py
-  - modified: quant/runtime.py
-  - modified: quant/ws_contract.py
-  - modified: start.sh
+- 17900 nodes · 39858 edges · 638 communities (built 2026-09-18T16:11:51Z)
+- STALE (8 modified, 8 deleted, 9781 new since build) — refresh with `/graphify update`
+  - modified: frontend/components/AIAnalysisPanel.tsx
+  - modified: frontend/components/ai/QuantDecisionCard.tsx
+  - modified: quant/amt/analyzer.py
+  - modified: quant/amt/dto.py
+  - modified: quant/amt/orderflow/compute.py
+  - modified: quant/amt_engine.py
+  - modified: quant/contracts/value_objects.py
+  - modified: tests/architecture/test_amt_dto_contract.py
 - AUTO-REFRESH: run `/graphify update` now, then re-run `kanban.py update` to refresh this digest.
 
 ## Data / execution flows

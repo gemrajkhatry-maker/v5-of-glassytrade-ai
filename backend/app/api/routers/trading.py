@@ -97,3 +97,13 @@ async def unhalt_trading(coordinator=Depends(get_coordinator)):
     count = unhalt()
     return {"status": "ok", "unhalted_engines": count, "message": f"Cleared risk halts across {count} engines"}
 
+
+@router.post("/risk/reset")
+async def reset_trading_risk(coordinator=Depends(get_coordinator)):
+    """Operator endpoint to reset session risk (P&L, streaks, trade counts, halts) across all engines."""
+    reset_fn = getattr(coordinator, "reset_all_risk", None)
+    if reset_fn is None:
+        return {"status": "error", "message": "Coordinator not active"}
+    count = reset_fn()
+    return {"status": "ok", "reset_engines": count, "message": f"Reset session risk across {count} engines"}
+
