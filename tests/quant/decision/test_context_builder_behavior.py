@@ -170,7 +170,7 @@ def test_context_builder_populates_bid_ask_from_order_book():
 
 def test_gate1_rejects_wide_spread():
     from quant.contracts.value_objects import OrderBook, OrderBookLevel
-    from quant.decision.gates import gate_session_phase
+    from quant.decision.gate_session_phase import gate_session_phase
 
     # Spread must exceed 4% of close (4% of 100.5 = 4.02) to be rejected
     ob = OrderBook(bids=(OrderBookLevel(100.0, 10.0),), asks=(OrderBookLevel(105.0, 10.0),))

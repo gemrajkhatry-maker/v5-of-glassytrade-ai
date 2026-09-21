@@ -1,6 +1,6 @@
 """Gate 1 exchange-clock blackout (production semantics).
 
-The production gate (``quant/decision/gates/gate_session_phase.py``) enforces
+The production gate (``quant/decision/gate_session_phase.py``) enforces
 NSE 09:30–15:15 and MCX 09:15–23:15 IST wall-clock windows. These tests pin
 that behaviour, including the ISO-8601 timestamp format the context builder
 actually feeds via ``ctx.time_str`` — regression guard: the original parser
@@ -9,7 +9,7 @@ skipped the blackout on every live bar.
 """
 
 from quant.decision.context import DecisionContext
-from quant.decision.gates import gate_session_phase
+from quant.decision.gate_session_phase import gate_session_phase
 
 
 def _ctx(time_str: str, market: str = "NSE") -> DecisionContext:

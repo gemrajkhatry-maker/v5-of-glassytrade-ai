@@ -8,12 +8,10 @@ The LLM advisory never gates an entry — it feeds the journal and overseer.
 """
 
 from quant.decision.context import DecisionContext
-from quant.decision.gates import (
-    gate_position_cooldown,
-    gate_risk_reward,
-    gate_session_phase,
-    gate_triple_a_edge,
-)
+from quant.decision.gate_position_cooldown import gate_position_cooldown
+from quant.decision.gate_session_phase import gate_session_phase
+from quant.decision.gates_edge import gate_triple_a_edge
+from quant.decision.gates_rr import gate_risk_reward
 from quant.decision.result import GateResult
 
 
