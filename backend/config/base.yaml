@@ -24,7 +24,7 @@ globals:
   # Volume Profile
   lvn_threshold: 0.15
   hvn_threshold: 2.00
-  value_area_pct: 0.70
+  value_area_pct: 0.682  # Fabio AMT spec §5.1 rule 3: VA = 68.2% of total volume
   lvn_smoothing: 3
   lvn_min_persistence_bars: 3
   lvn_removal_threshold: 0.30
@@ -43,8 +43,8 @@ globals:
   cvd_block_threshold_mcx: 50
   footprint_imbalance_ratio: 3.0
   footprint_imbalance_pct: 0.40
-  absorption_range_atr: 0.30
-  absorption_vol_mult: 2.0
+  absorption_range_ratio_max: 0.50
+  absorption_vol_mult: 1.50
   big_trade_multiplier: 5.0
   big_trade_cluster_count: 3
   big_trade_cluster_ticks: 2
@@ -136,7 +136,7 @@ exchanges:
         tick_size: 0.05
         vp_bucket_size: 10.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.682  # Fabio AMT spec §5.1 rule 3: VA = 68.2% of total volume
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -185,7 +185,7 @@ exchanges:
         tick_size: 0.05
         vp_bucket_size: 25.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.682  # Fabio AMT spec §5.1 rule 3: VA = 68.2% of total volume
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -234,7 +234,7 @@ exchanges:
         tick_size: 0.05
         vp_bucket_size: 10.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.682  # Fabio AMT spec §5.1 rule 3: VA = 68.2% of total volume
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -282,7 +282,7 @@ exchanges:
         tick_size: 0.05
         vp_bucket_size: 10.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.682  # Fabio AMT spec §5.1 rule 3: VA = 68.2% of total volume
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -339,7 +339,7 @@ exchanges:
         tick_size: 1.0
         vp_bucket_size: 10.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.682  # Fabio AMT spec §5.1 rule 3: VA = 68.2% of total volume
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -387,7 +387,7 @@ exchanges:
         tick_size: 0.1
         vp_bucket_size: 1.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.682  # Fabio AMT spec §5.1 rule 3: VA = 68.2% of total volume
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -435,7 +435,7 @@ exchanges:
         tick_size: 1.0
         vp_bucket_size: 10.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.682  # Fabio AMT spec §5.1 rule 3: VA = 68.2% of total volume
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -483,7 +483,7 @@ exchanges:
         tick_size: 1.0
         vp_bucket_size: 25.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.682  # Fabio AMT spec §5.1 rule 3: VA = 68.2% of total volume
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3

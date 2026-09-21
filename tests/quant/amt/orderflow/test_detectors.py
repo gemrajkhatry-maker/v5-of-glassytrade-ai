@@ -168,44 +168,55 @@ class TestAbsorptionDetector:
     def test_detects_absorption(self):
         """Small range + high volume + displacement → absorption detected."""
         detector = AbsorptionDetector()
-        # First candle: absorption signature (range=0.28 < ATR*0.30, vol=500 > avg*2.0, delta=-100 = sellers absorbed by passive buyers)
+        # First candle: the SPEC §7.2 signature, against the spec's own
+        # statistics — H_range = 1.00 (the 20-bar average RANGE) so a 0.28
+        # range is 0.28x H_range <= 0.50; volume 500 vs the 20-bar mean 200
+        # is 2.50x >= 1.50. delta=-100: sellers absorbed by passive buyers.
+        # NB: pending until the next bar displaces (spec §7.2 displacement).
         candle1 = _candle(close=100, high=100.14, low=99.86, volume=500, delta=-100)
-        result1 = detector.detect(candle1, atr=1.0, avg_vol=200)
+        result1 = detector.detect(candle1, h_range=1.0, avg_vol=200)
         assert result1.detected is False  # pending displacement
 
         # Second candle: displacement (close beyond absorption high)
         candle2 = _candle(close=100.2, high=100.3, low=100.0, volume=300, delta=50)
-        result2 = detector.detect(candle2, atr=1.0, avg_vol=200)
+        result2 = detector.detect(candle2, h_range=1.0, avg_vol=200)
         assert result2.detected is True
 
     def test_no_absorption_wide_range(self):
-        """Wide range → no absorption."""
+        """Range beyond 0.50 x H_range → no absorption (effort WITH result)."""
         detector = AbsorptionDetector()
+        # range = 2.00 = 2.00 x H_range, far above the 0.50 ceiling. Note the
+        # polarity: at the old 0.30 x ATR this bar also failed, but for the
+        # wrong reason and against the wrong denominator.
         candle = _candle(close=100, high=101.0, low=99.0, volume=500, delta=-100)
-        result = detector.detect(candle, atr=1.0, avg_vol=200)
+        result = detector.detect(candle, h_range=1.0, avg_vol=200)
         assert result.detected is False
 
     def test_no_absorption_low_volume(self):
-        """Low volume → no absorption."""
+        """Volume below 1.50 x the 20-bar mean → no absorption."""
         detector = AbsorptionDetector()
+        # range = 0.30 = 0.30 x H_range (compressed, passes rule 2), but volume
+        # 200 == avg_vol 200 is 1.00x, below the 1.50 floor. The old test used
+        # volume 200 vs avg 200 at a 2.0x threshold; the same bar now has to be
+        # judged against 1.50x, so this stays a clean rule-1 rejection.
         candle = _candle(close=100, high=100.15, low=99.85, volume=200, delta=-100)
-        result = detector.detect(candle, atr=1.0, avg_vol=200)
+        result = detector.detect(candle, h_range=1.0, avg_vol=200)
         assert result.detected is False
 
     def test_classifies_sell_absorbed(self):
         """Negative delta (sellers absorbed) + upward displacement → SELL_ABSORBED (bullish)."""
         detector = AbsorptionDetector()
         candle1 = _candle(close=100, high=100.14, low=99.86, volume=500, delta=-100)
-        detector.detect(candle1, atr=1.0, avg_vol=200)
+        detector.detect(candle1, h_range=1.0, avg_vol=200)
         candle2 = _candle(close=100.2, high=100.3, low=100.0, volume=300, delta=50)
-        result = detector.detect(candle2, atr=1.0, avg_vol=200)
+        result = detector.detect(candle2, h_range=1.0, avg_vol=200)
         assert result.side == "SELL_ABSORBED"
 
     def test_classifies_buy_absorbed(self):
         """Positive delta (buyers absorbed) + downward displacement → BUY_ABSORBED (bearish)."""
         detector = AbsorptionDetector()
         candle1 = _candle(close=100, high=100.14, low=99.86, volume=500, delta=100)
-        detector.detect(candle1, atr=1.0, avg_vol=200)
+        detector.detect(candle1, h_range=1.0, avg_vol=200)
         candle2 = _candle(close=99.8, high=100.0, low=99.7, volume=300, delta=-50)
-        result = detector.detect(candle2, atr=1.0, avg_vol=200)
+        result = detector.detect(candle2, h_range=1.0, avg_vol=200)
         assert result.side == "BUY_ABSORBED"

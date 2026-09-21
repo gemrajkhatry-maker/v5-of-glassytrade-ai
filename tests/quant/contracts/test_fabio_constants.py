@@ -6,7 +6,9 @@ from quant.contracts.constants import (
     FABIO_OFI_THRESHOLD,
     FABIO_ABSORPTION_VOL_MULT,
     FABIO_ABSORPTION_RANGE_ATR,
-    FABIO_VALUE_AREA_PCT,
+    ABSORPTION_VOL_MULT,
+    ABSORPTION_RANGE_RATIO_MAX,
+    VALUE_AREA_PCT,
 )
 
 
@@ -24,11 +26,28 @@ def test_ofi_threshold():
 
 
 def test_absorption_parameters_match_fabio():
-    """Fabio: Vol > 2x Avg, Range < 0.3 ATR."""
-    assert FABIO_ABSORPTION_VOL_MULT == 2.0
-    assert FABIO_ABSORPTION_RANGE_ATR == 0.30
+    """Fabio AMT spec §7.2: V_b >= 1.50 x V_bar_20 and (H_b - L_b) <= 0.50 x H_range.
+
+    The old values were 2.0x volume and 0.30 x ATR, neither of which the spec
+    contains. The review's C7 finding fixed three things at once:
+      * the volume multiple (2.0 -> 1.50);
+      * the range threshold (0.30 -> 0.50);
+      * the range DENOMINATOR — ATR(14) replaced by H_range, the 20-bar average
+        RANGE (ATR also counts overnight gaps, so it is a different statistic,
+        not just a different number).
+    Both tests are load-bearing: `absorption_detected` drives the Triple-A
+    WAITING->ABSORBING transition and the pyramid authorisation floor."""
+    assert FABIO_ABSORPTION_VOL_MULT == 1.50
+    assert FABIO_ABSORPTION_RANGE_ATR == 0.50
+    # The FABIO_* aliases must never drift from the canonical constants.
+    assert FABIO_ABSORPTION_VOL_MULT == ABSORPTION_VOL_MULT
+    assert FABIO_ABSORPTION_RANGE_ATR == ABSORPTION_RANGE_RATIO_MAX
 
 
 def test_value_area_percentage():
-    """CME standard: 70% value area."""
-    assert FABIO_VALUE_AREA_PCT == 0.70
+    """Fabio AMT spec §5.1 rule 3: the value area is 68.2% of total volume.
+
+    The old constant was 0.70, and this test asserted 0.70 as correct, which
+    certified the drift the review flagged (C5). A wider VA is the boundary
+    that classifies the whole market, so this number is load-bearing."""
+    assert VALUE_AREA_PCT == 0.682

@@ -130,7 +130,7 @@ class TestComputeValueArea:
         assert val == 89.5
 
     def test_default_pct_from_config(self):
-        # value_area_pct omitted -> falls back to constants.VALUE_AREA_PCT (0.70)
+        # value_area_pct omitted -> falls back to constants.VALUE_AREA_PCT (0.682, spec §5.1)
         profile = [VolumeProfileLevel(price=float(i), volume=100) for i in range(10)]
         vah, val = compute_value_area(profile, poc_index=5)
         assert vah > val

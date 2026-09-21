@@ -5,7 +5,9 @@ opposite-side activity) survive the deletion of the test-only parallel impl
 
 Semantic mapping from the deleted fixtures:
 - one-sided aggression  -> signed delta (delta < 0 = aggressive SELL, delta > 0 = aggressive BUY)
-- price didn't move     -> narrow candle range vs ATR (range_ratio < 0.30)
+- price didn't move     -> narrow candle range vs H_range (range_ratio <= 0.50,
+                        the spec §7.2 ceiling; the denominator is the 20-bar
+                        average RANGE, not ATR)
 - absorption direction  -> opposite side absorbs: SELL aggression ⇒ SELL_ABSORBED
   (bullish, absorbed by hidden BUY); BUY aggression ⇒ BUY_ABSORBED
   (bearish, absorbed by hidden SELL)
@@ -48,13 +50,13 @@ class TestAbsorptionSemanticsPreserved:
         # SELL_ABSORBED (aggressive SELL absorbed by hidden BUY).
         detector = AbsorptionDetector()
         candle1 = _candle(close=100, high=100.14, low=99.86, volume=500, delta=-400)
-        result1 = detector.detect(candle1, atr=1.0, avg_vol=200)
+        result1 = detector.detect(candle1, h_range=1.0, avg_vol=200)
         assert result1.detected is False  # pending displacement validation
         assert result1.side == ""
 
         # Displacement: close beyond the absorption candle's high
         candle2 = _candle(close=100.2, high=100.3, low=100.0, volume=300, delta=50)
-        result2 = detector.detect(candle2, atr=1.0, avg_vol=200)
+        result2 = detector.detect(candle2, h_range=1.0, avg_vol=200)
         assert result2.detected is True
         assert result2.side == "SELL_ABSORBED"
 
@@ -62,14 +64,14 @@ class TestAbsorptionSemanticsPreserved:
         # Price moved (wide range vs ATR) → no absorption despite aggression.
         detector = AbsorptionDetector()
         candle = _candle(close=100, high=101.0, low=99.0, volume=500, delta=-400)
-        result = detector.detect(candle, atr=1.0, avg_vol=200)
+        result = detector.detect(candle, h_range=1.0, avg_vol=200)
         assert result.detected is False
 
     def test_no_absorption_balanced_volume(self):
         # Balanced two-sided flow (delta == 0) → no absorption.
         detector = AbsorptionDetector()
         candle = _candle(close=100, high=100.14, low=99.86, volume=500, delta=0)
-        result = detector.detect(candle, atr=1.0, avg_vol=200)
+        result = detector.detect(candle, h_range=1.0, avg_vol=200)
         assert result.detected is False
         assert result.side == ""
 
@@ -79,13 +81,13 @@ class TestAbsorptionSemanticsPreserved:
         # (aggressive BUY absorbed by hidden SELL).
         detector = AbsorptionDetector()
         candle1 = _candle(close=100, high=100.14, low=99.86, volume=500, delta=400)
-        result1 = detector.detect(candle1, atr=1.0, avg_vol=200)
+        result1 = detector.detect(candle1, h_range=1.0, avg_vol=200)
         assert result1.detected is False  # pending displacement validation
         assert result1.side == ""
 
         # Displacement: close below the absorption candle's low
         candle2 = _candle(close=99.8, high=100.0, low=99.7, volume=300, delta=-50)
-        result2 = detector.detect(candle2, atr=1.0, avg_vol=200)
+        result2 = detector.detect(candle2, h_range=1.0, avg_vol=200)
         assert result2.detected is True
         assert result2.side == "BUY_ABSORBED"
 

@@ -86,14 +86,17 @@ def test_absorption_delta_direction():
     """Verify absorption delta direction: delta < 0 is SELL_ABSORBED (bullish support floor)."""
     detector = AbsorptionDetector()
 
-    # Candle with flat range (0.1), high volume (500), and negative delta (-300) = passive buyers absorbing sellers
+    # Candle with flat range (0.1 = 0.10 x H_range <= 0.50), volume 500 vs the
+    # 20-bar mean 100 (5.00x >= 1.50), negative delta (-300) = passive buyers
+    # absorbing sellers. The detector's second parameter is H_range (spec §7.2
+    # denominator), formerly passed as ATR.
     c_bullish = FloatOHLC(time="t1", open=100.0, high=100.1, low=99.9, close=100.0, volume=500.0, delta=-300.0)
-    res_pending = detector.detect(c_bullish, atr=1.0, avg_vol=100.0)
+    res_pending = detector.detect(c_bullish, h_range=1.0, avg_vol=100.0)
     assert detector._pending_side == "SELL_ABSORBED"  # Bullish support
 
     # Displacement bar closing above the absorption high confirms bullish absorption
     c_disp = FloatOHLC(time="t2", open=100.0, high=101.0, low=99.9, close=100.5, volume=200.0, delta=100.0)
-    res_confirmed = detector.detect(c_disp, atr=1.0, avg_vol=100.0)
+    res_confirmed = detector.detect(c_disp, h_range=1.0, avg_vol=100.0)
     assert res_confirmed.detected is True
     assert res_confirmed.side == "SELL_ABSORBED"
 

@@ -21,7 +21,7 @@ from quant.contracts.constants import (
     BIG_TRADE_CLUSTER_TICKS,
     VOLUME_BUBBLE_SIGMA,
     OFI_WINDOW,
-    ABSORPTION_RANGE_ATR,
+    ABSORPTION_RANGE_RATIO_MAX,
     ABSORPTION_VOL_MULT,
 )
 
@@ -276,9 +276,12 @@ class AbsorptionResult:
 class AbsorptionDetector:
     """Detects absorption candles with required displacement (FR-03-09/10).
 
-    Dual condition:
-    - (high - low) < ATR × ABSORPTION_RANGE_ATR (0.30)
-    - volume > avg_volume × ABSORPTION_VOL_MULT (2.0)
+    Spec §7.2 dual condition (remediated to the spec's numbers — review C7):
+    - (high - low) <= 0.50 x H_range, where H_range is the 20-bar average RANGE
+      (not 0.30 x ATR; ATR also accounts for overnight gaps, so it is a
+      different statistic as well as a different number)
+    - V_b >= 1.50 x the 20-BAR rolling average volume (not 2.0x the full-window
+      mean; the caller now supplies the 20-bar mean as `avg_vol`)
 
     Displacement Requirement (Quant Update):
     - Once absorption is flagged, the NEXT 1-2 candles MUST close beyond 
@@ -295,7 +298,7 @@ class AbsorptionDetector:
     def detect(
         self,
         candle: OHLC,
-        atr: float,
+        h_range: float,
         avg_vol: float,
     ) -> AbsorptionResult:
         """Detect absorption on current candle, requiring displacement."""
@@ -346,14 +349,16 @@ class AbsorptionDetector:
         candle_range = float(candle.high - candle.low)
         candle_vol = float(candle.volume)
 
-        if atr <= 0 or avg_vol <= 0:
+        if h_range <= 0 or avg_vol <= 0:
             return AbsorptionResult(False, "", 0.0, 0.0, cluster_high=ch, cluster_low=cl, active=self._pending_candle is not None)
 
-        range_ratio = candle_range / atr
+        range_ratio = candle_range / h_range
         vol_ratio = candle_vol / avg_vol
 
-        # Dual condition check
-        if range_ratio < ABSORPTION_RANGE_ATR and vol_ratio >= ABSORPTION_VOL_MULT:
+        # Spec §7.2: the volume test uses 1.50x the 20-bar mean, the range test
+        # 0.50x the 20-bar average RANGE. The caller supplies both statistics
+        # (avg_vol is the 20-bar mean, h_range is the 20-bar average RANGE).
+        if range_ratio <= ABSORPTION_RANGE_RATIO_MAX and vol_ratio >= ABSORPTION_VOL_MULT:
             # Spec §7.2: Classify absorption direction using the 60% volume
             # concentration rule + close-position confirmation. This replaces
             # raw delta sign, which is a noisy proxy for aggression direction.

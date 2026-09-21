@@ -39,6 +39,8 @@ def compute_order_flow_metrics(
     persistent_agg_scorer=None,
     atr_period: int = 14,
     session_bars: list | None = None,
+    avg_vol_20: float | None = None,
+    avg_range_20: float | None = None,
 ) -> dict:
     """Compute order flow detectors and RAW aggression components (no direction gating).
 
@@ -51,12 +53,40 @@ def compute_order_flow_metrics(
     """
     result: dict = {}
 
-    # Average volume
+    # Average volume. The full-window mean is kept for the big-trade detector
+    # and for downstream consumers that expect it, but the ABSORPTION baseline
+    # is the spec §7.2 20-BAR rolling mean V_bar_20 — see below.
     result["avg_candle_vol"] = (
         sum(float(d.volume) for d in recent_data) / len(recent_data)
         if recent_data
         else 0.0
     )
+
+    # Fabio AMT spec §7.2 rule 1: V_b >= 1.50 x V_bar_20, the rolling 20-BAR
+    # mean volume (NOT the full RECENT_DATA_WINDOW mean). The rolling mean
+    # reacts to local volatility regimes, which is the point of the test.
+    # Callers that already compute it (analyzer.py `baseline_vol`) may pass it
+    # in via `avg_vol_20`; otherwise we derive it from recent_data here.
+    if avg_vol_20 is not None:
+        result["avg_vol_20"] = float(avg_vol_20)
+    else:
+        tail = list(recent_data[-20:]) if recent_data else []
+        result["avg_vol_20"] = sum(float(d.volume) for d in tail) / len(tail) if tail else 0.0
+
+    # Fabio AMT spec §7.2 rule 2: (H_b - L_b) <= 0.50 x H_range, where H_range
+    # is the RANGE-BAR height of spec §4:
+    #     H_range = Quantize(ATR(14) x kappa_scale, ladder), floored at
+    #               min_ticks x tick_size
+    # On the 1m path the ATR-derived value is used (the quantize/floor steps
+    # belong to the range-bar aggregator). Two properties matter here:
+    #   * ATR counts overnight GAPS, so it exceeds the plain average range —
+    #     a 20-bar mean range of zero on a flat-but-jumpy synthetic tape must
+    #     not collapse the denominator to 0 and silently kill all absorption;
+    #   * the spec's floor guarantees H_range > 0, which is what the §4
+    #     ladder exists to guarantee. Reproduce that floor here so the
+    #     denominator can never be zero even when ATR is 0.
+    # NOTE: result["avg_range_20"] is resolved below, at the absorption call,
+    # where the spec's H_range (ATR-derived, floored) is computed once.
 
     # OBI from order book
     result["obi"] = 0.0
@@ -105,8 +135,20 @@ def compute_order_flow_metrics(
     result["big_trade_confirmed"] = big_trade is not None
 
     # FR-06-04: Absorption
-    atr = _compute_atr(session_bars or recent_data, period=atr_period)
-    absorption = absorption_detector.detect(current, atr, result["avg_candle_vol"]) if absorption_detector else None
+    # Fabio AMT spec §7.2 + §4: the detector receives the 20-BAR rolling mean
+    # volume V_bar_20 and H_range, the range-bar height §4 derives from
+    # ATR(14) (Quantize(ATR14 x kappa) floored at min_ticks x tick_size).
+    # The quantize/floor ladder belongs to the range-bar aggregator; here the
+    # ATR(14) estimate is used and floored locally so the denominator can
+    # never be 0 — §4's floor exists precisely to guarantee that, and a zero
+    # H_range would make range_ratio 0 and classify every bar as "compressed".
+    h_range = max(_compute_atr(session_bars or recent_data, period=atr_period),
+                  _MIN_H_RANGE_FALLBACK)
+    result["avg_range_20"] = h_range
+    absorption = (
+        absorption_detector.detect(current, h_range, result["avg_vol_20"])
+        if absorption_detector else None
+    )
     result["absorption_detected"] = absorption.detected if absorption else False
     result["absorption_side"] = absorption.side if absorption and absorption.detected else ""
     result["absorption_range_ratio"] = absorption.range_ratio if absorption else 0.0
@@ -168,6 +210,14 @@ def compute_order_flow_metrics(
     result["has_aggression"] = agg_result.confirmed if agg_result else False
 
     return result
+
+
+# Fabio AMT spec §4 floors the range-bar height at min_ticks x tick_size so
+# H_range can never be 0. This is the local equivalent for the 1m path, used
+# only when every upstream estimate is 0 (a flat synthetic tape). A zero
+# denominator would silently classify every bar as "compressed" and fire
+# spurious absorption, so the floor is load-bearing, not cosmetic.
+_MIN_H_RANGE_FALLBACK: float = 1e-9
 
 
 def _compute_atr(bars: list, period: int = 14) -> float:

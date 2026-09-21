@@ -311,11 +311,20 @@ class TestAMTAnalyzer:
         assert r2.poc != r1.poc or r2.value_area_high != r1.value_area_high
 
     def test_vah_val_use_bin_edges(self):
-        """VAH should be upper edge of top VA bin, VAL lower edge of bottom."""
+        """VAH should be upper edge of top VA bin, VAL lower edge of bottom.
+
+        Note on the half-step tolerance: the analyzer clamps the session VA to
+        the leg-profile VA when the leg is tighter (Task 2.3, so a stale
+        overnight tail cannot dominate the current auction). At the spec's
+        0.682 value area (review C5) the session VAL sits above the leg VAL on
+        this fixture, so VAL is sourced from the coarser leg profile and its
+        half-step is correspondingly larger. Both profiles still place the edge
+        half a step from a bin midpoint; only the step size differs."""
         analyzer = AMTAnalyzer()
         data = generate_market_data(50, 100, "sideways")
         result = analyzer.analyze(data)
         profile = list(result.profile)
+        leg_profile = list(result.leg_profile)
         if len(profile) > 1:
             step = profile[1].price - profile[0].price
             half = step / 2
@@ -325,9 +334,18 @@ class TestAMTAnalyzer:
             assert round(result.value_area_low, 8) not in midpoints
             # They should be offset by exactly half_step from a midpoint
             vah_offset = min(abs(result.value_area_high - p.price) for p in profile)
-            val_offset = min(abs(result.value_area_low - p.price) for p in profile)
             assert abs(vah_offset - half) < 0.001
-            assert abs(val_offset - half) < 0.001
+            # VAL may have been clamped to the leg profile (a coarser grid);
+            # assert the same half-step property against that grid instead of
+            # assuming the session grid is the provenance.
+            val_offset_session = min(abs(result.value_area_low - p.price) for p in profile)
+            if leg_profile and len(leg_profile) > 1 and abs(val_offset_session - half) >= 0.001:
+                leg_step = leg_profile[1].price - leg_profile[0].price
+                leg_half = leg_step / 2
+                val_offset_leg = min(abs(result.value_area_low - p.price) for p in leg_profile)
+                assert abs(val_offset_leg - leg_half) < 0.001
+            else:
+                assert abs(val_offset_session - half) < 0.001
 
     def test_poc_tiebreak_closest_to_vwap(self):
         """When multiple bins share max volume, POC should be closest to VWAP."""

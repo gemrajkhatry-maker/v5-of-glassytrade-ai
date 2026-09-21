@@ -49,7 +49,12 @@ def _get(key: str, default) -> float | int | str:
 # ============================================================================
 LVN_THRESHOLD = _get("lvn_threshold", 0.15)
 HVN_THRESHOLD = _get("hvn_threshold", 2.00)
-VALUE_AREA_PCT = _get("value_area_pct", 0.70)
+# Fabio AMT spec §5.1 rule 3: "Value Area (VA = 68.2% of Total Volume)".
+# This is the boundary that classifies the whole market (BALANCED vs IMBALANCED),
+# so a wider VA silently reclassifies imbalanced conditions as balanced. Do not
+# "round" it to 0.70: the spec states 0.682, and the resulting VA edges feed
+# every acceptance/rejection/target level in Playbooks A and B.
+VALUE_AREA_PCT = _get("value_area_pct", 0.682)
 LVN_SMOOTHING = _get("lvn_smoothing", 3)
 LVN_MIN_PERSISTENCE_BARS = _get("lvn_min_persistence_bars", 1)
 LVN_REMOVAL_THRESHOLD = _get("lvn_removal_threshold", 0.50)
@@ -77,8 +82,20 @@ D2_CVD_SLOPE_MAX: float = 80.0
 
 FOOTPRINT_IMBALANCE_RATIO = _get("footprint_imbalance_ratio", 3.0)
 FOOTPRINT_IMBALANCE_PCT = _get("footprint_imbalance_pct", 0.40)
-ABSORPTION_RANGE_ATR = _get("absorption_range_atr", 0.30)
-ABSORPTION_VOL_MULT = _get("absorption_vol_mult", 2.0)
+# Fabio AMT spec §7.2 rule 1-2. Two corrections vs the pre-remediation values
+# (2.0 / 0.30-ATR), which the spec does not contain:
+#   * volume: 1.50x the 20-BAR rolling mean, not 2.0x the full-window mean;
+#   * range:  <= 0.50 x H_range (the 20-bar average RANGE), not 0.30 x ATR.
+# ATR and average range differ (ATR accounts for gaps), so the old denominator
+# was both the wrong number and the wrong statistic. Both are load-bearing:
+# this predicate feeds Triple-A ACCUMULATION and the pyramid authorisation floor.
+ABSORPTION_RANGE_RATIO_MAX = _get("absorption_range_ratio_max", 0.50)
+ABSORPTION_VOL_MULT = _get("absorption_vol_mult", 1.50)
+# Legacy aliases kept for the few readers that still import the old names;
+# they now resolve to the spec values so no caller silently keeps 0.30/2.0.
+ABSORPTION_RANGE_ATR = ABSORPTION_RANGE_RATIO_MAX
+FABIO_ABSORPTION_RANGE_ATR: float = ABSORPTION_RANGE_RATIO_MAX
+FABIO_ABSORPTION_VOL_MULT: float = ABSORPTION_VOL_MULT
 BIG_TRADE_MULTIPLIER = _get("big_trade_multiplier", 5.0)
 BIG_TRADE_CLUSTER_COUNT = _get("big_trade_cluster_count", 3)
 BIG_TRADE_CLUSTER_TICKS = _get("big_trade_cluster_ticks", 2)
@@ -234,9 +251,10 @@ FABIO_CVD_THRESHOLD_MCX: float = 0.3     # CVD slope threshold for MCX
 FABIO_OBI_THRESHOLD: float = 0.20        # Order Book Imbalance threshold
 FABIO_OFI_THRESHOLD: float = 0.10        # Order Flow Imbalance threshold
 
-# Absorption detection (detectors.py)
-FABIO_ABSORPTION_VOL_MULT: float = 2.0   # Volume must exceed 2x average
-FABIO_ABSORPTION_RANGE_ATR: float = 0.30 # Range must be < 0.3 ATR
+# Absorption detection: the FABIO_ABSORPTION_* aliases are defined
+# alongside ABSORPTION_* above and now carry the spec §7.2 values.
 
 # Volume Profile
-FABIO_VALUE_AREA_PCT: float = 0.70       # CME standard value area (70%)
+# FABIO_VALUE_AREA_PCT was removed (review C5): it duplicated VALUE_AREA_PCT
+# with a different value (0.70 vs the spec's 0.682) and was consumed only by a
+# test. There is now one VA constant, and it is the spec's number.

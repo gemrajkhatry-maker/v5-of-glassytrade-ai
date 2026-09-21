@@ -63,8 +63,10 @@ class TestTradingInvariants:
         sys.path.insert(0, str(ROOT / 'backend'))
         sys.path.insert(0, str(ROOT))
         from quant.contracts.constants import VALUE_AREA_PCT
-        assert VALUE_AREA_PCT == pytest.approx(0.70), (
-            f'VALUE_AREA_PCT={VALUE_AREA_PCT} — configured for 0.70 (70% value area).'
+        assert VALUE_AREA_PCT == pytest.approx(0.682), (
+            f'VALUE_AREA_PCT={VALUE_AREA_PCT} — must match Fabio AMT spec §5.1 rule 3 '
+            '(VA = 68.2% of total volume). A wider VA reclassifies imbalanced conditions '
+            'as balanced, which changes trade selection.'
         )
 
     def test_min_rr_is_fabio_minimum(self):

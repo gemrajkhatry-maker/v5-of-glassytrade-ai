@@ -686,6 +686,11 @@ class AMTAnalyzer:
             bubble_detector=self._bubble_detector,
             persistent_agg_scorer=self._persistent_agg_scorer,
             session_bars=self._vwap.session_bars,
+            # Fabio AMT spec §7.2: the absorption volume test is against the
+            # 20-BAR rolling mean V_bar_20. baseline_vol above is exactly that
+            # mean, so the absorption and acceptance/rejection paths share one
+            # baseline instead of two divergent ones.
+            avg_vol_20=baseline_vol,
         )
         avg_candle_vol = flow["avg_candle_vol"]
         obi = flow["obi"]
