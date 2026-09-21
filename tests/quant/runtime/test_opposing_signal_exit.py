@@ -67,22 +67,33 @@ def _positioned_engine(ticks, symbol, side="LONG", entry=100.0):
 
 
 def _short_approval_ticks():
-    """Exact mirror of the load-bearing organic approval recipe in
-    tests/quant/runtime/test_positive_approval.py, flipped bearish:
-      - ~150 quiet alternating bars (100.05/99.75) with sell-dominant volume
-        (negative CVD drift) and a thin 100.0 leg gap between them,
-      - one zero-range 50x-volume BUY_ABSORBED spike at 100.0 (buyers absorbed
-        -> bearish pending),
-      - a displacement-down close below the absorb candle's low AND on the leg
-        LVN (100.0) within gate 3's 5-tick proximity window -> validated
-        BUY_ABSORBED pulse -> AGGRESSION SHORT and absorption+LVN evidence ->
-        full SHORT approval (LVN_Sniper).
+    """Exact bearish mirror of ``_organic_approval_ticks`` in
+    test_positive_approval.py — see that fixture for the full constraint
+    derivation. The three load-bearing properties are inverted here:
+
+    1.  an interior low-volume void in a DOWN leg (the detector's candidate
+        window excludes both profile edges, so the void must be strictly
+        inside a leg of >= 3 price buckets),
+    2.  the void placed before and untouched by the 50x absorption spike
+        (a spike inside the leg swamps the void's bucket),
+    3.  AGGRESSION and the leg LVN alive on the same bar, inside the
+        Triple-A machine's _STALE_BARS window.
+
+    As with the long fixture, the pre-C6 form's "LVN" was a smoothing artifact
+    — the spike's own bucket smoothed into a local minimum — which spec
+    §5.1 rule 4's absolute floor V(p) < 0.35 x V_bar_profile correctly rejects.
     """
     out = [Tick(f"t{i}", 100.05 if i % 2 == 0 else 99.75, 10, 1, 9)
            for i in range(300)]
-    out.append(Tick("t300", 100.0, 500, 320, 180))   # BUY_ABSORBED spike
-    out.append(Tick("t301", 100.0, 10, 4, 6))        # close the spike bar
-    out.append(Tick("t302", 99.75, 30, 10, 20))      # displacement down @ leg LVN 100.0
+    # Down leg first, with a genuine interior void at 99.90.
+    out.append(Tick("t300", 99.95, 40, 5, 35))    # down 1
+    out.append(Tick("t301", 99.90, 2, 1, 1))      # interior void (leg LVN)
+    out.append(Tick("t302", 99.85, 40, 5, 35))    # down 2
+    # Absorption spike: 50x volume, buy-dominant (64% buyers), zero-range,
+    # at a price the leg never trades so the void is not contaminated.
+    out.append(Tick("t303", 99.85, 500, 320, 180))  # BUY_ABSORBED pending
+    out.append(Tick("t304", 99.80, 40, 5, 35))    # displacement down -> AGGRESSION
+    out.append(Tick("t305", 99.80, 10, 4, 6))      # bar after AGGRESSION
     return out
 
 

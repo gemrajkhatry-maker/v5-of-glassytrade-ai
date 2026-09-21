@@ -29,7 +29,10 @@ import pytest
 
 from quant.runtime import QuantEngine
 from tests.helpers.synthetic import SyntheticGateway
-from tests.quant.runtime.test_positive_approval import _organic_approval_ticks
+from tests.quant.runtime.test_positive_approval import (
+    _SYMBOL,
+    _organic_approval_ticks,
+)
 from tests.quant.runtime.test_tick_partial_adoption import (
     _intraday_ticks,
     _make_signal,
@@ -76,9 +79,9 @@ def test_organic_decision_trace_is_identical_across_runs():
     """An organic approval run (ticks -> analyzer -> gates -> signal ->
     position open) produces the identical event trace on a second engine."""
     ticks = list(_organic_approval_ticks())
-    eng1 = QuantEngine(SyntheticGateway(ticks), "DET", interval_seconds=1)
+    eng1 = QuantEngine(SyntheticGateway(ticks), _SYMBOL, interval_seconds=1)
     trace1 = eng1.run()
-    eng2 = QuantEngine(SyntheticGateway(list(ticks)), "DET", interval_seconds=1)
+    eng2 = QuantEngine(SyntheticGateway(list(ticks)), _SYMBOL, interval_seconds=1)
     trace2 = eng2.run()
 
     assert len(trace1) == len(trace2)

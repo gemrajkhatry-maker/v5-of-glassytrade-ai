@@ -22,8 +22,13 @@ system:
 # ── Global Constants (migrated from constants.py) ──
 globals:
   # Volume Profile
-  lvn_threshold: 0.15
-  hvn_threshold: 2.00
+  # Fabio AMT spec §5.1 rule 4: LVN = { p | V(p) < 0.35 x V_bar_profile AND
+  # d^2V(p)/dp^2 > 0 }. The absolute floor gates LVN detection alongside the
+  # percentile rank (the stricter binds) — see constants.LVN_VOL_FRACTION.
+  lvn_vol_fraction: 0.35
+  lvn_percentile: 20.0  # percentile gate (complements the absolute floor)
+  lvn_threshold: 0.15  # dead alias (unused); kept for API compatibility
+  hvn_threshold: 2.00  # dead alias (unused); kept for API compatibility
   value_area_pct: 0.682  # Fabio AMT spec §5.1 rule 3: VA = 68.2% of total volume
   lvn_smoothing: 3
   lvn_min_persistence_bars: 3

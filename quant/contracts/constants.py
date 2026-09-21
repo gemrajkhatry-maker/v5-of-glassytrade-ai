@@ -47,6 +47,16 @@ def _get(key: str, default) -> float | int | str:
 # ============================================================================
 # Volume Profile (FR-02)
 # ============================================================================
+# Fabio AMT spec §5.1 rule 4: LVN = { p | V(p) < 0.35 x V_bar_profile AND
+# d^2V(p)/dp^2 > 0 }. The review's C6 finding measured that the operative gate
+# was a 20th-PERCENTILE rank with no absolute floor: a percentile shifts with
+# the distribution's shape, and on the right-skewed profiles order flow
+# actually produces, the 20th percentile exceeded 0.35 x mean in 3,000/3,000
+# generated cases — so the code admitted troughs the spec rejects. The
+# absolute floor now gates alongside the percentile (the stricter binds), and
+# the dead LVN_THRESHOLD/HVN_THRESHOLD (documented "kept for API compatibility
+# (unused)") are retained only as aliases so nothing imports a vanished name.
+LVN_VOL_FRACTION = _get("lvn_vol_fraction", 0.35)
 LVN_THRESHOLD = _get("lvn_threshold", 0.15)
 HVN_THRESHOLD = _get("hvn_threshold", 2.00)
 # Fabio AMT spec §5.1 rule 3: "Value Area (VA = 68.2% of Total Volume)".

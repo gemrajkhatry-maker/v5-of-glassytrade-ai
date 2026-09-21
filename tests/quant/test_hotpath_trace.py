@@ -32,10 +32,17 @@ from quant.hotpath import (
 )
 from quant.runtime import QuantEngine
 from tests.helpers.synthetic import SyntheticGateway
-from tests.quant.runtime.test_positive_approval import _organic_approval_ticks
+from tests.quant.runtime.test_positive_approval import (
+    _SYMBOL,
+    _organic_approval_ticks,
+)
 
 TRACER = get_hotpath_tracer()
-SYMBOL = "SYM"
+# The engine derives CVD source (and therefore the data-quality provenance the
+# decision gate reads) from the symbol: a name it does not recognize yields
+# CANDLE_GAUSSIAN, the gate blocks every decision, and the fixture never
+# opens. Reuse the fixture's own instrument so the trace is meaningful.
+SYMBOL = _SYMBOL
 
 
 @pytest.fixture(autouse=True)

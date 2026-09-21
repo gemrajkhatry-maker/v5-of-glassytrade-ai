@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import ast
 from collections import defaultdict
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
@@ -184,7 +185,9 @@ def test_unknown_provenance_remains_unavailable_for_cvd_sources():
             value_area_low=0.0,
             cvd_source=source,
         )
-        result = SimpleNamespace(**vars(base), data_quality="future-unknown-quality")
+        # ``data_quality`` is now a real AMTResult field, so override it on the
+        # dataclass rather than re-passing it through the SimpleNamespace kwargs.
+        result = replace(base, data_quality="future-unknown-quality")
 
         assert amt_result_to_dto(result)["dataQuality"] == "UNAVAILABLE"
 

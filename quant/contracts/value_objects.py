@@ -267,6 +267,7 @@ class AMTResult:
     delta_normalized_option: float = 0.0  # Normalized delta from option tick (per-symbol isolation)
     # CVD data source indicator — "underlying" when computed from futures, "option" when from option premium
     cvd_source: str = ""
+    data_quality: str = ""
     evidence_provenance: dict[str, object] = field(default_factory=dict)
     # New: Extreme deviation escalation (> 3.0 sigma)
     is_extreme_deviation: bool = False

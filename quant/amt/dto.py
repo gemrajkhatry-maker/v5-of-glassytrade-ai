@@ -124,6 +124,13 @@ def amt_result_to_dto(r) -> dict:
     """Convert a domain AMTResult to the camelCase WS DTO dict."""
     quality = normalize_data_quality(getattr(r, "data_quality", ""))
     if quality is DataQuality.UNAVAILABLE and not getattr(r, "data_quality", ""):
+        # Fabio live-safety spec: ``CANDLE_DISTRIBUTED`` "is not upgraded to
+        # TICK_EXACT merely because a footprint object exists" (2026-09-18
+        # live-safety remediation, step 7). The accumulator gate that earns
+        # TICK_EXACT lives in AMTAnalyzer._build_result, which sees the live
+        # ``TickFootprintAccumulator``; this fallback only binds when the
+        # analyzer declined to classify, so a bare footprint object must not
+        # promote the quality here.
         quality = (
             DataQuality.CANDLE_DISTRIBUTED
             if getattr(r, "cvd_source", "") in ("underlying", "option")

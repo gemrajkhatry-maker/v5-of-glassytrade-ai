@@ -197,6 +197,18 @@ class AMTEngine:
     def _underlying(self) -> str:
         return self._underlying_fn()
 
+    @property
+    def _cvd_source(self) -> str:
+        from quant.contracts.instrument_registry import is_option_contract, is_futures_contract
+        if is_option_contract(self.symbol):
+            return "option"
+        if is_futures_contract(self.symbol) or self.symbol in (
+            "CRUDEOIL", "NATURALGAS", "GOLDM", "SILVERM",
+            "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"
+        ):
+            return "underlying"
+        return ""
+
     def on_tick(self, tick, forming_bar=None) -> None:
         """Feed live tick to the footprint accumulator."""
         price = getattr(tick, "price", 0.0)
@@ -380,6 +392,7 @@ class AMTEngine:
                         option_tick=last_ohlc,
                         footprint_accumulator=self._footprint,
                         gex=self._gex,
+                        cvd_source=self._cvd_source,
                     )
                     self._last_amt_dto = amt_result_to_dto(result)
                     self._last_underlying_close = float(last_ohlc.close)
@@ -478,6 +491,7 @@ class AMTEngine:
                 option_tick=ohlc,
                 footprint_accumulator=self._footprint,
                 gex=self._gex,
+                cvd_source=self._cvd_source,
             )
         except Exception:
             if not self._amt_fail_logged:

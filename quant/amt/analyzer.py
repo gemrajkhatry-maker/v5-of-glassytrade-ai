@@ -67,6 +67,7 @@ from quant.contracts.constants import (
     LVN_THRESHOLD,
     HVN_THRESHOLD,
     LVN_PERCENTILE,
+    LVN_VOL_FRACTION,
     LVN_MIN_SEPARATION,
     HVN_PERCENTILE,
     HVN_MIN_SEPARATION,
@@ -217,6 +218,7 @@ def find_lvns(
         lvn_threshold=cfg.LVN_THRESHOLD,
         smoothing_window=cfg.LVN_SMOOTHING,
         lvn_percentile=LVN_PERCENTILE,
+        lvn_vol_fraction=LVN_VOL_FRACTION,
         min_separation=LVN_MIN_SEPARATION,
     )
     return [lvn.price for lvn in levels]
@@ -961,6 +963,7 @@ absorption_side=absorption_side,
              gap_profile_val=_gap_profile.gap_val,
              session_extreme_low=session_extreme_low,
              session_extreme_high=session_extreme_high,
+             footprint_accumulator=footprint_accumulator,
          )
 
         # Squeeze detection (Fabio Playbook #4): runs on the assembled result
@@ -1055,17 +1058,27 @@ absorption_side=absorption_side,
                       compression_box_val=0.0, compression_box_bars=0,
                       gap_profile_poc=0.0, gap_profile_vah=0.0,
                       gap_profile_val=0.0,
-                      session_extreme_low=0.0, session_extreme_high=0.0) -> AMTResult:
+                      session_extreme_low=0.0, session_extreme_high=0.0,
+                      footprint_accumulator=None) -> AMTResult:
         """Assemble AMTResult from computed pipeline outputs.
 
         Pure data mapping — extracted from analyze() for readability.
         """
         # Compute per-evidence-family provenance for live safety gating
         evidence_provenance = self._compute_evidence_provenance(
-            getattr(self, '_footprint_accumulator', None), cvd_state, order_book,
+            footprint_accumulator, cvd_state, order_book,
             self._absorption_detector, absorption_detected,
             _footprints=_footprints, _contested_zone=_contested_zone, _triple=_triple, cvd_source=cvd_source
         )
+        from quant.decision.data_quality import DataQuality
+        if cvd_source in ("underlying", "option"):
+            data_quality = (
+                DataQuality.TICK_EXACT.value
+                if (footprint_accumulator and _footprints)
+                else DataQuality.CANDLE_DISTRIBUTED.value
+            )
+        else:
+            data_quality = DataQuality.CANDLE_GAUSSIAN.value
         return AMTResult(
             market_state=_effective_market_state,
             poc=poc,
@@ -1195,6 +1208,7 @@ absorption_side=absorption_side,
             ofi_result=ofi_result,
             norm_delta=norm_delta,
             evidence_provenance=evidence_provenance,
+            data_quality=data_quality,
             session_extreme_low=session_extreme_low,
             session_extreme_high=session_extreme_high,
         )
