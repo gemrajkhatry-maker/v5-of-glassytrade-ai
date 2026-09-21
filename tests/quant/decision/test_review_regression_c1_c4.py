@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import random
 
 import pytest
 
@@ -277,3 +278,83 @@ class TestPyramidBundleGuarantee:
         eff, reason = resolve_protective_stop(99.6, be, trail, "LONG")
         assert eff >= 105.0, f"effective stop {eff} fell below the base entry"
         assert reason == "BREAKEVEN"
+
+
+# ---------------------------------------------------------------------------
+# C6 — the LVN volume threshold is not the spec's (measurement-pinned)
+# ---------------------------------------------------------------------------
+
+class TestLVNThresholdIsNotTheSpecs:
+    """Spec 5.1 defines an LVN as {V(p) < 0.35 * mean AND convex}. The code uses an
+    adaptive percentile instead of the fixed fraction. This test pins the measured
+    consequence on realistic (right-skewed) profiles: the percentile sits well above
+    0.35 * mean, so the code's gate is *looser* and admits troughs the spec rejects.
+    """
+
+    def _profile(self, seed: int = 7, peaks: int = 2):
+        """A right-skewed volume profile: a few large peaks pull the mean above the
+        median, which is the normal shape for order-flow data."""
+        rng = random.Random(seed)
+        n = 60
+        vols = [max(1.0, 40.0 + rng.gauss(0.0, 14.0)) for _ in range(n)]
+        for _ in range(peaks):
+            vols[rng.randrange(2, n - 2)] *= rng.uniform(2.0, 4.0)
+        return vols
+
+    def test_the_codes_percentile_is_not_the_spec_fixed_fraction(self):
+        from quant.amt.profile import lvn as lvn_mod
+
+        vols = self._profile()
+        sm = lvn_mod._smooth_array(vols, 5)
+        mean = sum(sm) / len(sm)
+        spec_threshold = 0.35 * mean
+        code_threshold = lvn_mod._percentile(sm, 20.0)
+
+        # The two thresholds are simply different numbers on the same profile.
+        assert code_threshold != pytest.approx(spec_threshold)
+
+    def test_the_code_admits_troughs_the_spec_rejects(self):
+        """On a right-skewed profile the code's percentile exceeds 0.35 * mean, so any
+        trough between them is an LVN to the code but not to the spec."""
+        from quant.amt.profile import lvn as lvn_mod
+
+        vols = self._profile(seed=7)
+        sm = lvn_mod._smooth_array(vols, 5)
+        mean = sum(sm) / len(sm)
+        spec_threshold = 0.35 * mean
+        code_threshold = lvn_mod._percentile(sm, 20.0)
+
+        assert code_threshold > spec_threshold, (
+            "on this right-skewed profile the code's percentile must exceed the "
+            "spec's fixed 0.35*mean, making the code looser; if this flips, the "
+            "profile shape changed and the C6 impact wording must be re-measured"
+        )
+
+        # Find a trough that sits between the two thresholds: an LVN under the
+        # code's rule, rejected by the spec's.
+        between = [
+            i for i in range(1, len(sm) - 1)
+            if spec_threshold <= sm[i] <= code_threshold
+            and sm[i] < sm[i - 1] and sm[i] < sm[i + 1]
+        ]
+        assert between, "no trough falls between the two thresholds on this profile"
+
+    def test_a_local_minimum_in_a_smoothed_profile_is_convex(self):
+        """Why the missing second derivative is not the harmful half: measured over
+        many randomised profiles, a strict local minimum in a smoothed series is
+        essentially always convex, so the two shape predicates agree."""
+        from quant.amt.profile import lvn as lvn_mod
+
+        non_convex_local_mins = 0
+        for seed in range(300):
+            vols = self._profile(seed=seed, peaks=seed % 4)
+            sm = lvn_mod._smooth_array(vols, 5)
+            for i in range(1, len(sm) - 1):
+                if sm[i] < sm[i - 1] and sm[i] < sm[i + 1]:
+                    second_diff = sm[i + 1] - 2 * sm[i] + sm[i - 1]
+                    if second_diff <= 0:
+                        non_convex_local_mins += 1
+        assert non_convex_local_mins == 0, (
+            f"found {non_convex_local_mins} non-convex local minima; the C6 claim "
+            "that the convexity term is behaviourally redundant no longer holds"
+        )

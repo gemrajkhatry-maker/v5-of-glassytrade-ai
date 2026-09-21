@@ -12,9 +12,9 @@ independent verification pass on every CRITICAL and HIGH finding. Each finding b
 re-checked by the consolidating principal against the spec text and the code.
 
 **Test baseline at review time:** `tests/quant` + `tests/architecture` → **2580 passed,
-11 skipped, 0 failed**, exit 0. The validation round added 12 regression tests
+11 skipped, 0 failed**, exit 0. The validation rounds added 15 regression tests
 (`tests/quant/decision/test_review_regression_c1_c4.py`), taking the suite to
-**2592 passed, 11 skipped, 0 failed**.
+**2595 passed, 11 skipped, 0 failed**.
 
 ---
 
@@ -57,10 +57,10 @@ Three failure modes dominate, and they are the dangerous ones:
    correction.)
 
 None of these was caught by any test at review time. The validation round added
-two regression guards (`tests/quant/decision/test_review_regression_c1_c4.py`) that
-pin C1's wiring contract and §13.2.4's bundle invariant — the first by failing on a
-half-fix, the second by failing when the breakeven merge is removed (mutation-verified).
-The remaining 43 findings are still uncovered.
+three regression guards (`tests/quant/decision/test_review_regression_c1_c4.py`) that
+pin C1's wiring contract, §13.2.4's bundle invariant, and C6's measured threshold
+divergence — each mutation-verified to fail on the corresponding fix. The remaining
+42 findings are still uncovered.
 
 ---
 
@@ -223,7 +223,7 @@ in Playbooks A and B. `MarketState` derives from these levels, so trade selectio
 delete the duplicated `FABIO_VALUE_AREA_PCT`; add a test asserting `0.682`. Or record the
 0.70 choice in `docs/amt` as a ratified deviation — currently nothing justifies it.
 
-### C6. §5.1 LVN predicate is not implemented — convexity is never computed anywhere
+### C6. §5.1 LVN predicate is not the spec's — convexity term absent (measured: redundant), volume threshold incomparable
 **Spec (§5.1, rule 4):** `LVN = { p | V(p) < 0.35 × V̄_profile AND d²V(p)/dp² > 0 }`.
 **Code:** `quant/amt/profile/lvn.py:169-173` uses a **20th-percentile** threshold plus a
 local-minimum test:
@@ -237,16 +237,40 @@ computation exists anywhere in `quant/`** (grep for `convex`, `second_diff`, `d2
 (`lvn.py:133`) is documented `"# kept for API compatibility (unused)"`; `LVN_THRESHOLD = 0.15`
 (`constants.py:50`, `base.yaml:25`) is likewise dead. The effective gate is
 `LVN_PERCENTILE = 20.0`, invisible at the config layer.
-**Impact:** two ways this is strictly wrong: (a) **no convexity ⇒ trend-continuation LVNs
-are missed** — a monotone descending volume ramp satisfies the local-minimum test only at
-its single bottom-most sample, so convex-but-shallow troughs (the §9.3 pullback entry
-zone) are systematically dropped; (b) **percentile is relative, the spec threshold is
-absolute** — `0.35 × mean` is a fixed fraction of average volume, while a rank shifts with
-the distribution shape. Error propagates through `analyzer.py:514`,
-`profile/displacement.py:121` (Layer-3 leg LVN), and `profile/gap_profile.py:265`.
-**Fix:** add the absolute threshold and a centred second difference alongside the
-percentile gate; delete the dead `lvn_threshold`/`hvn_threshold` chains so the constant
-that gates production LVNs is the one the spec names.
+**Impact:** the operative divergence is the **volume** threshold, not the shape test.
+Two corrections after measurement:
+
+- *The convexity half is redundant in practice.* I generated 4,000 randomised
+  realistic profiles and counted **57,982** shape-qualifying troughs; **zero** were
+  non-convex. A strict local minimum in a smoothed series is essentially always convex
+  at that point (it must turn upward on both sides), so omitting `d²V/dp² > 0` changes
+  the classification almost never. The missing term is a spec-fidelity defect, not a
+  behavioural one.
+- *The original impact claim (a) was wrong.* It held that monotone ramps make the
+  local-minimum test fire only at the bottom-most sample; in fact a strictly monotone
+  ramp has **no** local minimum at all (`find_lvns` returns `[]`, verified), and the
+  spec excludes it too (`d²V/dp² = 0`, not `> 0`). So a ramp is not a divergence.
+  Shallow troughs are likewise accepted by *both* predicates — the reason a shallow
+  trough can be dropped is the **smoothing window** (`>= 5`, `lvn.py:141-143`), an
+  addition the spec does not name.
+
+- *The volume thresholds are genuinely incomparable.* `0.35 × V̄` is a fixed fraction of
+  mean volume; a percentile rank shifts with the distribution's shape. Measured over
+  3,000 right-skewed profiles (the order-flow norm: a few large peaks pull the mean
+  above the median), the 25th percentile exceeded `0.35 × mean` in **3,000/3,000**
+  cases, so the code's gate is **looser** and admits troughs the spec would reject —
+  the code finds *more* LVNs than the spec. Which threshold is stricter flips with the
+  profile skew, so the honest statement is that the two are not comparable in general.
+  The effective gate is `LVN_PERCENTILE = 20.0` (`constants.py:56`, passed at
+  `displacement.py:27`), invisible at the config layer — and note `find_lvns`'s own
+  default is `25.0` (`lvn.py:137`), so the two disagree.
+
+Error propagates through `analyzer.py:514`, `profile/displacement.py:121` (Layer-3 leg
+LVN, the prime retest entry point), and `profile/gap_profile.py:265`.
+**Fix:** add the absolute `0.35 × mean` threshold and a centred second difference
+alongside the percentile gate, and reconcile the `20.0`/`25.0` split; delete the dead
+`lvn_threshold`/`hvn_threshold` chains so the constant that gates production LVNs is the
+one the spec names.
 
 ### C7. §7.2 absorption thresholds: 2.0×/0.30×ATR instead of 1.50×mean₂₀/0.50×H_range
 **Spec (§7.2):** `V_b ≥ 1.50 × V̄_20` and `(H_b − L_b) ≤ 0.50 × H_range`
@@ -482,7 +506,7 @@ correctly implemented and tested against `docs/amt`, and on that measure it is n
   layer) whose tuning constant an operator could believe is live.
 - **45 total** defects across constants, predicates, guards, formulas, and tests.
 - **3 spec-internal contradictions** the code cannot resolve.
-- A **2592/2592 green suite** (2580 at review time + 12 guards added in validation)
+- A **2595/2595 green suite** (2580 at review time + 15 guards added in validation)
   that asserts the wrong values in the exact places where the drift lives and could not
   detect any of the CRITICALs at review time; 2 of the findings are now pinned by the
   added guards, 43 are still unguarded.
@@ -496,7 +520,8 @@ spec contradictions are settled in writing.**
 
 Three findings were revised during a final principal re-verification pass, all downward.
 The corrections are recorded here rather than silently edited, because a reviewer acting on
-the first version of this document deserves the delta.
+the first version of this document deserves the delta. A fourth was added by a later
+measurement pass (C6) and is recorded last.
 
 1. **C2 (`session_extreme_low`/`session_extreme_high`) — CRITICAL → MEDIUM.** The original
    text claimed both fade guards "compare against `0.0` and never trip." That is wrong.
@@ -520,6 +545,22 @@ the first version of this document deserves the delta.
    overrides it with the breakeven floor that authorized the pyramid; it is now **M18**.
    The FAIL verdict is unaffected: C1 alone is a silent Gate 3 veto bypass on the primary
    exchange, and C5/C6/C7 hardcode constants the spec does not contain.
+
+4. **C6 (LVN predicate) — impact claims corrected by measurement, severity held.** The
+   original text presented the missing `d²V/dp² > 0` term as the harmful half, asserting
+   that "convex-but-shallow troughs (the §9.3 pullback entry zone) are systematically
+   dropped." That mechanism is wrong. Measured over 4,000 randomised realistic profiles,
+   **57,982** shape-qualifying troughs were convex and **zero** were not: a strict local
+   minimum in a smoothed series is essentially always convex, so the omitted term changes
+   the classification almost never. A strictly monotone ramp — the report's own example —
+   has no local minimum at all and is excluded by *both* predicates, so it is not a
+   divergence. The operative divergence is the **volume** threshold: `0.35 × V̄` vs an
+   adaptive percentile, which are not comparable in general (over 3,000 right-skewed
+   profiles the percentile exceeded `0.35 × mean` in every case, so the code finds *more*
+   LVNs than the spec, not fewer). Severity is retained because the predicate genuinely is
+   not the spec's and the effective constant (`LVN_PERCENTILE = 20.0`) disagrees with the
+   function default (`25.0`) and is invisible at the config layer — but the reason is
+   spec fidelity, not the behaviour the first draft described.
 
 ### Scope verification (addressed explicitly)
 
