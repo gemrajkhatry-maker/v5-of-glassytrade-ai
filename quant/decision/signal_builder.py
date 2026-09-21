@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 
-from quant.config.constants import TICK_SIZE_NSE_OPTIONS
+from quant.contracts.constants import TICK_SIZE_NSE_OPTIONS
 from quant.contracts.instrument_registry import is_option_contract
 from quant.contracts.entities import derive_signal_id
 from quant.decision.context import DecisionContext
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 MIN_STOP_DISTANCE_PCT = 0.1
 MAX_POSITION_QUANTITY = 1000
-# TICK_SIZE_NSE_OPTIONS is imported from quant.config.constants.
+# TICK_SIZE_NSE_OPTIONS is imported from quant.contracts.constants.
 
 
 def is_stop_too_thin(

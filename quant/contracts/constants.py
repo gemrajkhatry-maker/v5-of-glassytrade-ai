@@ -101,8 +101,9 @@ FOOTPRINT_IMBALANCE_PCT = _get("footprint_imbalance_pct", 0.40)
 # this predicate feeds Triple-A ACCUMULATION and the pyramid authorisation floor.
 ABSORPTION_RANGE_RATIO_MAX = _get("absorption_range_ratio_max", 0.50)
 ABSORPTION_VOL_MULT = _get("absorption_vol_mult", 1.50)
-# Legacy aliases kept for the few readers that still import the old names;
-# they now resolve to the spec values so no caller silently keeps 0.30/2.0.
+# Legacy aliases kept for the test pins that still import the old names;
+# they resolve to the spec values so no caller silently keeps 0.30/2.0.
+# (v7 N6 reference check: no production reader remains for any of the three.)
 ABSORPTION_RANGE_ATR = ABSORPTION_RANGE_RATIO_MAX
 FABIO_ABSORPTION_RANGE_ATR: float = ABSORPTION_RANGE_RATIO_MAX
 FABIO_ABSORPTION_VOL_MULT: float = ABSORPTION_VOL_MULT
@@ -148,6 +149,7 @@ STRUCTURE_BYPASS_CONFIDENCE = 70
 # Trade Setup (FR-07)
 # ============================================================================
 MIN_RR_RATIO = 1.5
+MAX_STOP_DISTANCE_TICKS = 200.0
 MAX_CUSHION_TICKS = 10
 # 60s scalar-session default; runtime override via SIGNAL_STALE_SECONDS setting
 SIGNAL_TTL_SECONDS = 60
@@ -195,6 +197,20 @@ GRADE_EXTREME_THRESHOLD = -5
 MAX_CANDLES = 1000
 TICK_BATCH_SIZE = 50
 TICK_FLUSH_INTERVAL_SECS = 5.0
+
+# ============================================================================
+# Engine / Runtime (v7 N6: folded in from the deleted quant/config/constants.py
+# so the repo has exactly ONE constants module)
+# ============================================================================
+WARMUP_BARS = 15
+CVD_KILL_THRESHOLD = 2.0
+JSONL_FLUSH_BATCH = 128
+DEFAULT_RING_SIZE = 8_192
+TICK_SIZE_NSE_OPTIONS = 0.05
+SEED_CACHE_TTL_SECONDS = 300
+DEFAULT_TIME_STOP_BARS = 60
+ABSORPTION_MAX_AGE_BARS = 5
+OBI_AGGRESSION_THRESHOLD = 0.20
 
 # ============================================================================
 # Engine Throttling (extracted magic numbers)

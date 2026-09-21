@@ -67,11 +67,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 
 from quant.aggregator import BarAggregator
-from quant.config.constants import (
-    CVD_KILL_THRESHOLD,
-    DETERMINISTIC_CONVICTION as _DETERMINISTIC_CONVICTION,
-    WARMUP_BARS as _WARMUP_BARS,
-)
+from quant.contracts.constants import CVD_KILL_THRESHOLD
 from quant.amt_engine import AMTEngine
 from quant.engine.tick_handler import TickHandler
 from quant.engine.decision_loop import DecisionLoop
@@ -185,9 +181,6 @@ class _LateBound:
     def __repr__(self):
         return f"_LateBound({self._resolver()!r})"
 
-
-# _DETERMINISTIC_CONVICTION and _WARMUP_BARS are imported from
-# quant.config.constants (see top-of-file import).
 
 
 def _as_counter(value) -> int:

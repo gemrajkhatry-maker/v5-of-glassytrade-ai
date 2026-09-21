@@ -22,7 +22,7 @@ from quant.amt.profile.volume_profile import IncrementalVolumeProfile
 from quant.amt.orderflow.footprint import TickFootprintAccumulator
 from quant.amt.session.npoc import NPOCTracker
 from quant.bars import Bar
-from quant.config.constants import SEED_CACHE_TTL_SECONDS
+from quant.contracts.constants import SEED_CACHE_TTL_SECONDS
 from quant.contracts.value_objects import FloatOHLC
 from quant.session_levels import SessionLevelStore
 from quant.state import _epoch_to_iso, session_date_key

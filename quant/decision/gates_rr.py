@@ -1,6 +1,6 @@
 """Gate 4 — structural stop cap on the Triple-A edge (SignalBuilder owns R:R)."""
 
-from quant.config.constants import MAX_STOP_DISTANCE_TICKS, MIN_RR_RATIO as MIN_RR
+from quant.contracts.constants import MAX_STOP_DISTANCE_TICKS, MIN_RR_RATIO as MIN_RR
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import TICK_SIZE_NSE_OPTIONS
