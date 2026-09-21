@@ -308,6 +308,13 @@ class AMTResult:
     cvd_state: object = None  # CVD tracker state (for slope in re-scoring)
     ofi_result: object = None  # OFI calculator result (for OFI value in re-scoring)
     norm_delta: float = 0.0  # Normalized delta (for footprint re-scoring)
+    # Session probe extremes (Fabio failed-breakout rule, spec VA-Fade cond. 2):
+    # the lowest low and highest high seen across all bars of the trading
+    # session so far. VA_Fade uses these so the stop sits beyond the FULL
+    # session probe, not just the current bar's wick. Zero until the first
+    # bar resolves; mapped to "sessionExtremeLow"/"sessionExtremeHigh" in dto.py.
+    session_extreme_low: float = 0.0
+    session_extreme_high: float = 0.0
 
 
 

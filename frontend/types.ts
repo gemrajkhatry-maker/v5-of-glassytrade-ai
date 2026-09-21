@@ -390,6 +390,15 @@ export interface AMTAnalysis {
   vars?: VARSState;
   // HalfTrend indicator (backend-computed, display-only)
   halfTrend?: HalfTrendState;
+  // Institutional Volume Bubble (Stacked Imbalance)
+  stackedImbalanceDirection?: string;
+  stackedImbalanceMagnitude?: number;
+  stackedImbalancePriceLow?: number;
+  stackedImbalancePriceHigh?: number;
+  contestedZone?: boolean;
+  // Squeeze detection
+  squeezeDirection?: string;
+  squeezeTrappedLevel?: number;
 }
 
 export interface HalfTrendState {

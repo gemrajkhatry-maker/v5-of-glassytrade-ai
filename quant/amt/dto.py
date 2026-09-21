@@ -17,33 +17,37 @@ from quant.state import _epoch_to_iso
 from quant.decision.data_quality import DataQuality, normalize_data_quality, normalize_evidence_provenance
 
 
-def _derive_stacked_imbalance(footprints: dict) -> tuple[str, int]:
+def _derive_stacked_imbalance(footprints: dict) -> tuple[str, int, float, float]:
     """Derive the strongest stacked-imbalance run from the latest footprint.
 
     Mirrors ``_latest_stacked_imbalance`` in context_builder.py but reads the
     raw AMTResult footprints (FootprintLevel objects) instead of the DTO dict.
-    Returns (direction, magnitude); ("", 0) when no qualifying run exists.
+    Returns (direction, magnitude, price_low, price_high); ("", 0, 0.0, 0.0) when no qualifying run exists.
     """
     if not footprints:
-        return "", 0
+        return "", 0, 0.0, 0.0
     latest_key = max(footprints.keys())
     levels = footprints[latest_key].levels
     best_dir, best_n = "", 0
-    run_dir, run_n = "", 0
+    best_prices: list[float] = []
+    run_dir, run_n, run_prices = "", 0, []
     for lvl in levels:
         if not lvl.stacked:
-            run_dir, run_n = "", 0
+            run_dir, run_n, run_prices = "", 0, []
             continue
         d = "BUY" if lvl.ask > lvl.bid else "SELL"
+        px = float(getattr(lvl, "price", 0.0))
         if d != run_dir:
-            run_dir, run_n = d, 1
+            run_dir, run_n, run_prices = d, 1, [px]
         else:
             run_n += 1
+            run_prices.append(px)
         if run_n > best_n:
             best_dir, best_n = run_dir, run_n
-    if best_n < 3:
-        return "", 0
-    return best_dir, best_n
+            best_prices = list(run_prices)
+    if best_n < 3 or not best_prices:
+        return "", 0, 0.0, 0.0
+    return best_dir, best_n, min(best_prices), max(best_prices)
 
 
 class CVDStateDict(dict):
@@ -125,7 +129,7 @@ def amt_result_to_dto(r) -> dict:
             if getattr(r, "cvd_source", "") in ("underlying", "option")
             else DataQuality.CANDLE_GAUSSIAN
         )
-    si_dir, si_mag = _derive_stacked_imbalance(getattr(r, "footprints", {}) or {})
+    si_dir, si_mag, si_low, si_high = _derive_stacked_imbalance(getattr(r, "footprints", {}) or {})
     leg_lvns = getattr(r, "leg_lvns", ()) or ()
     return {
         "marketState": r.market_state,
@@ -168,6 +172,10 @@ def amt_result_to_dto(r) -> dict:
             ).items()
         },
         "cvdDivergence": r.cvd_divergence,
+        # Session probe extremes (Fabio failed-breakout rule; review finding C2):
+        # consumed by va_fade so the stop sits beyond the FULL session probe.
+        "sessionExtremeLow": r.session_extreme_low,
+        "sessionExtremeHigh": r.session_extreme_high,
         "profileShape": r.profile_shape,
         "profileType": r.profile_type,
         "sessionVwap": r.session_vwap,
@@ -346,8 +354,12 @@ def amt_result_to_dto(r) -> dict:
         "legLvn": float(leg_lvns[0]) if leg_lvns else 0.0,
         "stackedImbalanceDirection": si_dir,
         "stackedImbalanceMagnitude": si_mag,
+        "stackedImbalancePriceLow": si_low,
+        "stackedImbalancePriceHigh": si_high,
         "stacked_imbalance_direction": si_dir,
         "stacked_imbalance_magnitude": si_mag,
+        "stacked_imbalance_price_low": si_low,
+        "stacked_imbalance_price_high": si_high,
     }
 
 

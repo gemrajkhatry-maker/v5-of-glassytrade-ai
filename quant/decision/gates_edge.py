@@ -255,6 +255,13 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
                     f"Triple-A SHORT blocked: close {price:.2f} did not break "
                     f"compression box VAL {cb_val:.2f} (bars={cb_bars})",
                 )
+        # Fabio VWAP Bias: Trend continuation requires price on the correct side of session VWAP
+        vwap = getattr(ctx, "session_vwap", 0.0) or (float(ctx.bar.vwap) if ctx.bar and getattr(ctx.bar, "vwap", 0.0) else 0.0)
+        if vwap > 0:
+            if ctx.agent_direction == "LONG" and price < vwap - 1.0 * tick:
+                return GateResult(3, False, f"Triple-A LONG below session VWAP ({price:.2f} < {vwap:.2f}) violates auction bias")
+            if ctx.agent_direction == "SHORT" and price > vwap + 1.0 * tick:
+                return GateResult(3, False, f"Triple-A SHORT above session VWAP ({price:.2f} > {vwap:.2f}) violates auction bias")
         return _pass(f"Triple-A AGGRESSION {tsignal} @ LVN {leg_lvn:.2f}", "TRIPLE_A")
     if ctx.drive_entry_valid:
         return _pass("Second Drive reclaim confirmed", "SECOND_DRIVE")
@@ -277,13 +284,20 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
     break_dir = getattr(ctx, "break_direction", "") or ""
     break_type = getattr(ctx, "break_type", "") or ""
     if break_type == "INITIATIVE":
+        vwap = getattr(ctx, "session_vwap", 0.0) or (float(ctx.bar.vwap) if ctx.bar and getattr(ctx.bar, "vwap", 0.0) else 0.0)
+        price = float(ctx.bar.close) if ctx.bar else 0.0
+        tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
         if break_dir == "UP" and ctx.agent_direction == "LONG" and cvd_slope > -0.2:
             if not getattr(ctx, "allow_trend", True):
                 return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
+            if vwap > 0 and price < vwap - 1.0 * tick:
+                return GateResult(3, False, f"Initiative upside breakout below session VWAP ({price:.2f} < {vwap:.2f})")
             return _pass("Initiative upside breakout confirmed", "INITIATIVE")
         if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
             if not getattr(ctx, "allow_trend", True):
                 return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
+            if vwap > 0 and price > vwap + 1.0 * tick:
+                return GateResult(3, False, f"Initiative downside breakdown above session VWAP ({price:.2f} > {vwap:.2f})")
             return _pass("Initiative downside breakdown confirmed", "INITIATIVE")
     # Fabio Playbook #4: trapped-volume squeeze -> enter on first retest of trapped level
     sq_dir = getattr(ctx, "squeeze_direction", "") or ""

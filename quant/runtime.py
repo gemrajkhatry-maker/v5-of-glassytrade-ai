@@ -506,7 +506,12 @@ class QuantEngine:
         if time_stop_bars is None:
             time_stop_bars = max(1, int(time_stop_minutes) * 60 // _interval_sec)
         # ponytail: mirror BE constant; tune from journal replay later
-        self._exits = ExitEngine(time_stop_bars=time_stop_bars, cvd_kill_threshold=CVD_KILL_THRESHOLD)
+        _cvd_be = 1.0 if str(self._market).upper() == "MCX" else 2.0
+        self._exits = ExitEngine(
+            time_stop_bars=time_stop_bars,
+            cvd_kill_threshold=CVD_KILL_THRESHOLD,
+            cvd_be_threshold=_cvd_be,
+        )
         # Strategy — single entry authority (decision 2026-09-17): the
         # deterministic Fabio AMT gate pipeline. An explicitly injected strategy
         # (tests/replay) still wins; nothing else may swap the entry authority.

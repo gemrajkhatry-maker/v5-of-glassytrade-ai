@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-from quant.amt.bias.bias_resolver import BiasDirection
 from quant.bars import Bar
 from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.enums import MarketState
@@ -84,6 +83,7 @@ class DecisionContext:
     equity: float = float(INITIAL_CAPITAL)
     risk_per_trade_pct: float = 0.01
     tick_size: float = 0.05
+    session_vwap: float = 0.0
     vwap_std: float = 0.0
     vwap_upper_2: float = 0.0
     vwap_lower_2: float = 0.0
@@ -157,13 +157,17 @@ class DecisionContext:
     vars_result: Any | None = None
     # Rolling history of recent decisions and rationales (last 3-5 bars)
     recent_decisions: Tuple[Dict[str, Any], ...] = ()
-    # 15-min bias direction and confidence from BiasResolver (Fabio top-down layer 1).
-    # Defaults to NEUTRAL / 0.0 so existing callers that don't supply bias continue to work.
-    bias_direction: BiasDirection = BiasDirection.NEUTRAL
-    bias_confidence: float = 0.0
     # Session extreme prices for VA_Fade stop placement (Fabio failed-breakout rule):
     # the full probe beyond the value area across all session bars. When non-zero,
     # VA_Fade references these instead of just the current bar's wick so the stop
     # sits beyond the true probe extreme. Zero means unavailable → fall back to bar.
     session_extreme_low: float = 0.0
     session_extreme_high: float = 0.0
+    # CVD divergence flag from the analyzer's CVD tracker (Gate 3 alignment veto).
+    # "BULLISH_DIV" | "BEARISH_DIV" | "" ("" = no divergence detected). Produced by
+    # quant.amt.orderflow.cvd, carried on AMTResult.cvd_divergence, and mapped from
+    # the DTO's "cvdDivergence" key by DecisionContextBuilder.build(). Gate 3
+    # (gates_edge._check_guards) vetoes a trade whose direction opposes the
+    # divergence; an empty value means "no conflict", so this field MUST be wired
+    # or the veto silently fails open on every bar of every session.
+    cvd_divergence: str = ""

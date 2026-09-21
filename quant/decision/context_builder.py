@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from quant.amt.bias.bias_resolver import BiasDirection, BiasResult
 from quant.contracts.constants import (
-    FABIO_BIAS_OVERRIDE_THRESHOLD,
     FABIO_CVD_THRESHOLD_MCX,
     FABIO_CVD_THRESHOLD_NSE,
     FABIO_OBI_THRESHOLD,
@@ -42,30 +40,10 @@ DEFAULT_OPTION_DELTA = 0.50
 # model inference is involved, so _decide never waits on external calls.
 _DETERMINISTIC_CONVICTION = 0.7
 
-# ponytail: Fabio's 15m bias overrides direction only when confidence >= threshold
-_BIAS_OVERRIDE_THRESHOLD = FABIO_BIAS_OVERRIDE_THRESHOLD
 
-
-def _apply_bias_override(current_direction: str, bias: BiasResult) -> str:
-    """Apply 15-min bias as direction override.
-
-    Bias overrides only when:
-    1. Bias confidence >= threshold
-    2. Current direction is neutral/flat, OR bias agrees with current direction
-    """
-    if bias.direction == BiasDirection.NEUTRAL:
-        return current_direction
-    if bias.confidence < _BIAS_OVERRIDE_THRESHOLD:
-        return current_direction
-
-    bias_side = "LONG" if bias.direction == BiasDirection.LONG_BIAS else "SHORT"
-
-    if current_direction in ("FLAT", "NEUTRAL", ""):
-        return bias_side
-    if current_direction == bias_side:
-        return current_direction
-    # Bias opposes current AMT direction — AMT wins (more specific)
-    return current_direction
+# ---------------------------------------------------------------------------
+# Direction resolution (Fabio Triple-A edge)
+# ---------------------------------------------------------------------------
 
 
 def _print_levels_from_dto(amt_dto: dict, bar) -> tuple[float, float]:
@@ -584,10 +562,16 @@ class DecisionContextBuilder:
             npoc_above=df(amt_dto, "npocAbove"),
             npoc_below=df(amt_dto, "npocBelow"),
             tick_size=tick_size,
+            session_vwap=df(amt_dto, "sessionVwap") or (float(bar.vwap) if bar and getattr(bar, "vwap", None) else 0.0),
             vwap_std=df(amt_dto, "vwapDeviationSigmas"),
             vwap_upper_2=df(amt_dto, "vwapUpper2"),
             vwap_lower_2=df(amt_dto, "vwapLower2"),
             cvd_slope=df(amt_dto, "cvdSlope"),
+            # Gate 3 alignment veto (C1): AMTResult.cvd_divergence is produced by
+            # quant.amt.orderflow.cvd and emitted as "cvdDivergence" by dto.py.
+            # An empty string means "no divergence", which passes the veto by
+            # design; mapping it here is what keeps that meaning honest.
+            cvd_divergence=ds(amt_dto, "cvdDivergence"),
             absorption_side=ds(amt_dto, "absorptionSide"),
             aggression_components=amt_dto.get("aggressionComponents"),
             cvd_state=amt_dto.get("cvdState"),
@@ -633,6 +617,11 @@ class DecisionContextBuilder:
             gap_profile_poc=df(amt_dto, "gapProfilePoc"),
             gap_profile_vah=df(amt_dto, "gapProfileVah"),
             gap_profile_val=df(amt_dto, "gapProfileVal"),
+            # VA_Fade stop placement (C2): the analyzer tracks the full session
+            # probe extremes; mapping them lets va_fade put the stop beyond the
+            # true probe instead of falling back to the last bar's wick.
+            session_extreme_low=df(amt_dto, "sessionExtremeLow"),
+            session_extreme_high=df(amt_dto, "sessionExtremeHigh"),
             vars_result=amt_dto.get("vars"),
             recent_decisions=tuple(recent_decisions or ()),
         )

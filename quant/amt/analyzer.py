@@ -338,6 +338,12 @@ class AMTAnalyzer:
         self._half_trend_detector = HalfTrendDetector()
         self._session_market = "NSE"
         self._last_resolve_key = ""
+        # Session probe extremes (Fabio failed-breakout rule; review finding C2).
+        # VA_Fade's stop must sit beyond the FULL session probe, not just the
+        # current bar's wick. Rolled over with the other session trackers below.
+        self._session_extreme_low: float = 0.0
+        self._session_extreme_high: float = 0.0
+        self._session_extreme_date: str = ""
 
     @staticmethod
     def _detect_option_type(symbol: str) -> str:
@@ -384,6 +390,47 @@ class AMTAnalyzer:
         self._vwap_cum_vol = self._vwap._cum_vol
         self._vwap_cum_quote_vol = self._vwap._cum_quote_vol
         return result
+
+    def _update_session_extremes(self, current: OHLC, window: list[OHLC] | None = None
+                                 ) -> tuple[float, float]:
+        """Rolling session probe extremes (Fabio failed-breakout rule; C2).
+
+        Tracks the lowest low and highest high across all bars of the current
+        trading session, resetting on day rollover. ``AMTResult`` carries them
+        out to the DTO and ``DecisionContext`` maps them for ``va_fade``, so the
+        protective stop sits beyond the FULL session probe rather than the last
+        bar's wick. Returns ``(low, high)``; both 0.0 until the first bar lands.
+
+        ``window`` is the analysed bar slice when the caller has it: ``analyze``
+        is stateless over the slice it is handed and only looks at ``data[-1]``,
+        so without it the tracker would see one bar per call and lose the probe.
+        Bars in the window whose session date differs from the current bar's are
+        ignored, which keeps the extremes scoped to the current session.
+        """
+        from quant.state import session_date_key
+
+        date_key = session_date_key(current.time) or ""
+        if date_key and date_key != self._session_extreme_date:
+            # Day rollover: re-seed from scratch. Seed with the current bar only
+            # and then let the same-day window bars below fold in, so a caller
+            # that hands a multi-day slice still gets the current session's probe.
+            self._session_extreme_date = date_key
+            self._session_extreme_low = float(current.low)
+            self._session_extreme_high = float(current.high)
+
+        same_day = [current]
+        if window:
+            for b in window:
+                k = session_date_key(b.time) or ""
+                if k and k == date_key:
+                    same_day.append(b)
+        lo = min(float(b.low) for b in same_day)
+        hi = max(float(b.high) for b in same_day)
+        # Only widen the running extremes: a caller replaying a slice that
+        # started before the current session must never narrow them.
+        self._session_extreme_low = min(self._session_extreme_low, lo)
+        self._session_extreme_high = max(self._session_extreme_high, hi)
+        return self._session_extreme_low, self._session_extreme_high
 
     # ponytail: dead methods below deleted — all callers migrated to
     # quant.amt.orderflow.compute, quant.amt.session.structure,
@@ -601,6 +648,9 @@ class AMTAnalyzer:
         typical_price = (current.high + current.low + current.close) / 3.0
         session_vwap = self._update_session_vwap(current, typical_price)
         _, _, _, _, _, vwap_deviation_sigmas = self._vwap.bands(session_vwap, current)
+        session_extreme_low, session_extreme_high = self._update_session_extremes(
+            current, recent_data
+        )
 
         state_result = detect_market_state(
             price=float(current.close),
@@ -904,6 +954,8 @@ absorption_side=absorption_side,
              gap_profile_poc=_gap_profile.gap_poc,
              gap_profile_vah=_gap_profile.gap_vah,
              gap_profile_val=_gap_profile.gap_val,
+             session_extreme_low=session_extreme_low,
+             session_extreme_high=session_extreme_high,
          )
 
         # Squeeze detection (Fabio Playbook #4): runs on the assembled result
@@ -997,7 +1049,8 @@ absorption_side=absorption_side,
                       compression_box_poc=0.0, compression_box_vah=0.0,
                       compression_box_val=0.0, compression_box_bars=0,
                       gap_profile_poc=0.0, gap_profile_vah=0.0,
-                      gap_profile_val=0.0) -> AMTResult:
+                      gap_profile_val=0.0,
+                      session_extreme_low=0.0, session_extreme_high=0.0) -> AMTResult:
         """Assemble AMTResult from computed pipeline outputs.
 
         Pure data mapping — extracted from analyze() for readability.
@@ -1137,6 +1190,8 @@ absorption_side=absorption_side,
             ofi_result=ofi_result,
             norm_delta=norm_delta,
             evidence_provenance=evidence_provenance,
+            session_extreme_low=session_extreme_low,
+            session_extreme_high=session_extreme_high,
         )
 
     # -------------------------------------------------------------------

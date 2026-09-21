@@ -233,7 +233,6 @@ FABIO_CVD_THRESHOLD_NSE: float = 0.5     # CVD slope threshold for NSE
 FABIO_CVD_THRESHOLD_MCX: float = 0.3     # CVD slope threshold for MCX
 FABIO_OBI_THRESHOLD: float = 0.20        # Order Book Imbalance threshold
 FABIO_OFI_THRESHOLD: float = 0.10        # Order Flow Imbalance threshold
-FABIO_BIAS_OVERRIDE_THRESHOLD: float = 0.60  # 15m bias confidence minimum
 
 # Absorption detection (detectors.py)
 FABIO_ABSORPTION_VOL_MULT: float = 2.0   # Volume must exceed 2x average

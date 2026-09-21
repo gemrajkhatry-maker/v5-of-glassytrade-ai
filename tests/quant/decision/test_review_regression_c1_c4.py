@@ -1,16 +1,16 @@
 """Regression guards for two defects found by the principal review and its
 validation round. They exist so the two failure modes cannot silently return.
 
-1. ``cvd_divergence`` fail-open (review finding C1).
-   ``analyzer.py:1025`` produces ``AMTResult.cvd_divergence`` and
-   ``dto.py:170`` emits it as ``cvdDivergence``, but the context builder never
-   copies it into ``DecisionContext`` — the field does not even exist on the
-   dataclass. ``gates_edge.py:200`` reads it with ``getattr(..., "")``, so the
-   divergence veto at ``gates_edge.py:201-205`` is unreachable in production: a
-   bearish divergence never blocks a long. This test asserts (a) the veto logic
-   itself is correct when the field is populated, and (b) the wiring actually
-   populates it, so a future rename or a dropped line fails loudly here rather
-   than silently disabling a safety guard.
+1. ``cvd_divergence`` fail-open (review finding C1) — RESOLVED.
+   ``analyzer.py`` produces ``AMTResult.cvd_divergence`` and
+   ``dto.py`` emits it as ``cvdDivergence``, but the context builder never
+   copied it into ``DecisionContext`` — the field did not even exist on the
+   dataclass. ``gates_edge.py`` read it with ``getattr(..., "")``, so the
+   divergence veto was unreachable in production: a bearish divergence never
+   blocked a long. The fix added the field and wired the DTO key; these tests
+   assert (a) the veto logic behaves per spec and (b) the wiring stays live, so
+   a future rename or a dropped line fails loudly here rather than silently
+   disabling a safety guard.
 
 2. Spec 13.2.4 bundle guarantee (review finding C4, downgraded to M18).
    The guarantee currently holds only because the breakeven floor that
@@ -75,14 +75,14 @@ def _ctx(open_, high, low, close, **kw):
 
 
 class TestCVDDivergenceVeto:
-    """The veto logic is correct; the wiring is missing. Both are asserted.
+    """The veto logic and its wiring, both asserted.
 
-    ``DecisionContext`` is frozen and declares **no** ``cvd_divergence`` field,
-    so ``gates_edge.py:200``'s ``getattr(ctx, "cvd_divergence", "")`` always
-    yields "" and the branch at ``:201-205`` never runs. The tests below use a
-    duck-typed stand-in for the context *only* to prove the veto code itself
-    behaves per spec when the field is supplied; the remaining tests pin the
-    wiring so that a half-fix (field added, builder not updated) fails here.
+    C1 is RESOLVED: ``DecisionContext`` now declares ``cvd_divergence``, and
+    ``context_builder`` maps the DTO's ``cvdDivergence`` key into it. The veto
+    therefore fires on the real dataclass through the real builder. The tests
+    below (1) prove the veto logic behaves per spec, and (2) pin the wiring so
+    a future rename, a dropped mapping line, or a removed field fails loudly
+    here rather than silently disabling a Gate 3 safety guard.
     """
 
     def _ctx_namespace(self, direction="LONG", cvd_divergence=None, bearish=False):
@@ -131,17 +131,31 @@ class TestCVDDivergenceVeto:
         r = _check_guards(ctx)
         assert r is None
 
-    def test_the_divergence_field_is_absent_from_decision_context(self):
-        """Records the defect precisely: the gate reads a field the dataclass
-        does not declare, so ``getattr`` silently returns the "" default and the
-        veto is unreachable from any production-legal context object."""
+    def test_the_divergence_field_is_present_in_decision_context(self):
+        """Asserts that C1 is resolved: DecisionContext declares cvd_divergence."""
         names = {f.name for f in dataclasses.fields(DecisionContext)}
-        assert "cvd_divergence" not in names
+        assert "cvd_divergence" in names
 
-    def test_a_real_decision_context_never_populates_the_veto(self):
-        """The fail-open, demonstrated with the real dataclass: no constructor
-        argument can reach the divergence branch, because the field does not
-        exist."""
+    def test_the_veto_fires_through_a_real_decision_context(self):
+        """The fail-open is closed, demonstrated with the real dataclass: a
+        bearish divergence reaching Gate 3 now blocks a LONG. Before the C1 fix
+        no constructor argument could reach the divergence branch at all."""
+        bar = Bar(time="t", open=100.0, high=103.0, low=99.9, close=102.9,
+                  volume=100.0)
+        ctx = DecisionContext(
+            state=None, bar=bar, symbol="SYM", time_str="t", market="NSE",
+            agent_direction="LONG", agent_probability=0.7,
+            market_state="IMBALANCED",
+            cvd_divergence="BEARISH_DIV",
+        )
+        r = _check_guards(ctx)
+        assert r is not None and not r.passed
+        assert "divergence" in r.reason.lower()
+
+    def test_a_real_decision_context_without_divergence_does_not_veto(self):
+        """The default ("" = no divergence detected) still passes the branch,
+        which is the spec's meaning of "no conflict". This is what keeps the
+        fixed guard from spuriously blocking every clean bar."""
         bar = Bar(time="t", open=100.0, high=103.0, low=99.9, close=102.9,
                   volume=100.0)
         ctx = DecisionContext(
@@ -149,23 +163,38 @@ class TestCVDDivergenceVeto:
             agent_direction="LONG", agent_probability=0.7,
             market_state="IMBALANCED",
         )
-        # The gate's read resolves to the default; the branch is skipped.
-        assert getattr(ctx, "cvd_divergence", "") == ""
+        assert ctx.cvd_divergence == ""
         r = _check_guards(ctx)
-        # No divergence veto can have fired: the field is empty by construction.
         assert not (r is not None and "divergence" in str(r.reason).lower())
 
-    def test_context_builder_does_not_propagate_the_dto_divergence_key(self):
-        """``dto.py:170`` emits ``cvdDivergence``; the builder never reads it.
-        Asserting the absence keeps the finding machine-checkable: once the
-        field is wired up, this test should be converted into a positive
-        assertion (and that is the correct fix for C1)."""
+    def test_context_builder_propagates_the_dto_divergence_key(self):
+        """Asserts that C1 is resolved: context_builder maps cvdDivergence."""
         from quant.decision import context_builder as cb
-        assert "cvdDivergence" not in inspect.getsource(cb)
+        assert "cvdDivergence" in inspect.getsource(cb)
+
+    def test_the_builder_maps_the_dto_divergence_value(self):
+        """End-to-end half of the contract: an AMT analysis DTO carrying a
+        BEARISH_DIV reaches the context as cvd_divergence, so the veto is live
+        on the production path rather than only in a hand-built context."""
+        from quant.amt.dto import amt_result_to_dto
+        from quant.contracts.value_objects import AMTResult
+
+        r = AMTResult(
+            market_state="BALANCED", poc=100.0,
+            value_area_high=101.0, value_area_low=99.0,
+            cvd_divergence="BEARISH_DIV",
+        )
+        dto = amt_result_to_dto(r)
+        assert dto["cvdDivergence"] == "BEARISH_DIV"
+        # The builder maps the key through _ds; exercise that exact code path.
+        from quant.decision.context_builder import DecisionContextBuilder
+        builder = DecisionContextBuilder()
+        mapped = builder._ds(dto, "cvdDivergence")
+        assert mapped == "BEARISH_DIV"
 
     def test_the_producer_does_emit_divergence(self):
-        """The other half of the broken contract: the value IS produced, so this
-        is a wiring gap, not an unimplemented feature."""
+        """The other half of the contract: the value IS produced, so the fix
+        was a wiring gap, not an unimplemented feature."""
         from quant.amt import dto as dto_mod
         assert "cvdDivergence" in inspect.getsource(dto_mod)
 

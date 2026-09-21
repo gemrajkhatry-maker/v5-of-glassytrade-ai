@@ -94,7 +94,28 @@ class SessionLevelStore:
     def load_levels(self, symbol: str) -> dict:
         """Return ``{date, poc, vah, val, close}`` for ``symbol`` (zeros when absent)."""
         with self._lock:
-            rec = self._levels.get(symbol) or {}
+            rec = self._levels.get(symbol)
+            if not rec or float(rec.get("poc") or 0.0) <= 0:
+                # If exact symbol absent or empty, match by prefix / underlying root
+                # (e.g. "CRUDEOIL" or an option contract matching "CRUDEOIL SEP FUT")
+                sym_clean = str(symbol).strip()
+                root = sym_clean.split()[0] if " " in sym_clean else sym_clean
+                matching = [
+                    (k, v) for k, v in self._levels.items()
+                    if (k == sym_clean or k.startswith(f"{root} ") or k.startswith(f"{sym_clean} "))
+                    and float(v.get("poc") or 0.0) > 0
+                ]
+                if matching:
+                    # Prioritize futures contracts (the benchmark underlying), then latest date
+                    matching.sort(
+                        key=lambda item: (
+                            1 if ("FUT" in item[0] or "FUTURE" in item[0]) else 0,
+                            str(item[1].get("date", "")),
+                        ),
+                        reverse=True,
+                    )
+                    rec = matching[0][1]
+            rec = rec or {}
         return {
             "date": rec.get("date", ""),
             "poc": float(rec.get("poc") or 0.0),
