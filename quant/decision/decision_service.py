@@ -10,7 +10,6 @@ QuantDecision is consumed by the backend wiring (quant signal → domain Signal
 from __future__ import annotations
 import logging
 
-from quant.contracts.constants import CONFIDENCE_HIGH_THRESHOLD
 from quant.contracts.enums import MarketState
 
 from dataclasses import dataclass, field
@@ -23,7 +22,6 @@ from quant.decision.pipeline import GatePipeline
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import Signal, SignalBuilder, is_min_stop_met
 from quant.decision.va_fade import detect_va_fade
-from quant.decision.data_quality import conviction_allowed
 
 _log = logging.getLogger(__name__)
 
@@ -68,23 +66,13 @@ class DecisionService:
         if ctx.bar is None:
             return QuantDecision(False, None, "NO_EDGE", "", ())
 
-        # Hard safety: if risk is halted, emit an explicit HALTED decision so
-        # the WS snapshot clears any stale approved state from scanner rows.
-        # (Defect 2 fix: previously runtime._decide() returned early without
-        # emitting any DecisionProduced, leaving stale ENTER signals visible.)
-        # allow_positioned=True (thesis-flip exit check) bypasses this — a
-        # halt gates ENTRIES, never the opposing-signal EXIT.
-        if (
-            not allow_positioned
-            and ctx.data_quality is not None
-            and ctx.agent_probability >= CONFIDENCE_HIGH_THRESHOLD
-            and not conviction_allowed(ctx.data_quality)
-        ):
-            return QuantDecision(
-                approved=False, signal=None, reason="DATA_QUALITY_BLOCKED", phase="",
-                gate_results=(), block_reasons=("Data quality is unavailable or inferred",),
-                model_label="",
-            )
+        # Data-quality provenance is enforced by exactly ONE authority:
+        # DecisionLoop._build_decision (capability-aware — live OMS requires
+        # TICK_EXACT, paper marks PROXY_MODE). This service previously ran a
+        # second, stricter provenance pre-gate here whose conviction-threshold
+        # condition was constant-true; it force-blocked paper/replay and
+        # masked the real gate (v7 prune N3). Gates 1-4 and the fallbacks
+        # below are quality-agnostic by design.
 
         if ctx.risk_halted and not allow_positioned:
             return QuantDecision(

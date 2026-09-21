@@ -90,35 +90,28 @@ def test_engine_organic_trace_is_deterministic():
     assert [type(e).__name__ for e in t1] == [type(e).__name__ for e in t2]
 
 
-def test_engine_organic_data_quality_blocks():
-    """The data-quality gate must bind whenever evidence provenance is not exact.
+def test_engine_organic_data_quality_lifecycle():
+    """Provenance is decided by exactly one authority: DecisionLoop.
 
-    ``DATA_QUALITY_BLOCKED`` is a *provenance* decision, not a synthetic-vs-live
-    one: it fires when ``agent_probability >= 0.65`` (the deterministic engine
-    pins 0.7) and ``dataQuality`` is not in ``{TICK_EXACT, CANDLE_DISTRIBUTED}``.
+    The service path (gates 1-4) is quality-agnostic since N3; the decision
+    loop blocks live/proxy flows on non-exact evidence and marks paper runs
+    PROXY_MODE. The organic fixture runs paper (default OMS), so:
 
-    The fixture runs under a real instrument symbol so the engine classifies
-    its CVD source. Before the footprint accumulator's first completed candle
-    there is no tick provenance to report, so the gate must block. Once a
-    footprint has published, provenance becomes ``TICK_EXACT`` and the gate
-    must let the evaluation through to the real gates. Asserting both
-    directions pins the gate's two boundaries at once — drop the gate and the
-    first assertion fails; admit non-exact evidence and the second fails.
+    * no decision may carry the retired service-level provenance reason;
+    * pre-footprint bars evaluate through the real gates (not short-circuited);
+    * once the footprint accumulator publishes, the fixture's organic Triple-A
+      path must produce an approval — the lifecycle end-to-end.
     """
     trace = _run_organic()
     decisions = [e for e in trace if isinstance(e, DecisionProduced)]
     assert decisions, "engine must evaluate every bar"
-    blocked = [d for d in decisions if d.decision.reason == "DATA_QUALITY_BLOCKED"]
-    assert blocked, "pre-footprint bars must be blocked on data quality"
     assert all(
-        d.decision.approved is False and d.decision.signal is None
-        for d in blocked
-    ), "a data-quality block must never carry a signal"
+        d.decision.reason != "DATA_QUALITY_BLOCKED" for d in decisions
+    ), "service-level provenance short-circuit is retired (N3)"
     evaluated = [
         d for d in decisions
-        if d.decision.reason not in ("DATA_QUALITY_BLOCKED", "NO_EDGE", "HALTED")
+        if d.decision.reason not in ("NO_EDGE", "HALTED", "COOLDOWN")
     ]
-    assert evaluated, "post-footprint bars must reach the real gates"
-    # And the fixture's whole point: at least one reaches approval.
+    assert evaluated, "bars must reach the real gates"
     approved = [d for d in decisions if d.decision.approved]
     assert approved, "fixture sanity: the organic path must produce an approval"

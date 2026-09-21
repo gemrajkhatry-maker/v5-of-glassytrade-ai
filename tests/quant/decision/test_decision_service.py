@@ -141,20 +141,29 @@ def test_approved_signal_carries_model_label():
     assert d.signal.model_label == d.model_label, "Signal and decision model_label must match"
 
 
-def test_data_quality_blocked_at_deterministic_conviction():
+def test_provenance_is_not_a_service_concern():
+    """N3: data quality is gated solely by DecisionLoop (capability-aware).
+
+    The service must evaluate its gates regardless of aggregate provenance;
+    PRICE_DIRECTION_PROXY with synthetic bars fails through the normal gate
+    results, never a provenance short-circuit.
+    """
     ctx = replace(
         _ctx(agent_probability=0.7),
         data_quality=DataQuality.PRICE_DIRECTION_PROXY,
     )
     d = DecisionService().evaluate(ctx)
     assert not d.approved and d.signal is None
-    assert d.reason == "DATA_QUALITY_BLOCKED"
+    assert d.gate_results, "rejection must come from the gate pipeline"
 
 
-def test_data_quality_gate_passes_for_allowlisted_quality():
-    ctx = replace(
-        _ctx(agent_probability=0.7),
-        data_quality=DataQuality.TICK_EXACT,
+def test_service_evaluation_is_quality_agnostic():
+    """TICK_EXACT vs CANDLE_GAUSSIAN must not change the service verdict."""
+    base = _ctx(agent_probability=0.7)
+    d_exact = DecisionService().evaluate(
+        replace(base, data_quality=DataQuality.TICK_EXACT)
     )
-    d = DecisionService().evaluate(ctx)
-    assert d.reason != "DATA_QUALITY_BLOCKED"
+    d_gauss = DecisionService().evaluate(
+        replace(base, data_quality=DataQuality.CANDLE_GAUSSIAN)
+    )
+    assert (d_exact.approved, d_exact.reason) == (d_gauss.approved, d_gauss.reason)

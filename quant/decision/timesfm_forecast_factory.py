@@ -83,3 +83,28 @@ def build_forecast(
         curr_price=curr_price,
         lat_ms=float(lat_ms),
     )
+
+
+def fresh_forecast(
+    advisor: Any, strategy: Any, *, symbol: str, bar_index: int
+) -> Any | None:
+    """Return the latest TimesFM forecast for ``symbol``, or None.
+
+    Folded from quant/decision/forecast_provider.py (v7 prune N2) so this
+    module is the single forecast access point: construction (build_forecast)
+    and retrieval (fresh_forecast) live together. Order: the advisor's native
+    engine cache (single inference per bar, shared with the UI), then the
+    strategy's cache (transitional). The caller applies the staleness rule
+    (bar_index - asof_bar <= 1).
+    """
+    engine = getattr(advisor, "_native_engine", None) if advisor is not None else None
+    if engine is not None:
+        getter = getattr(engine, "last_forecast_for", None)
+        if callable(getter):
+            fc = getter(symbol)
+            if fc is not None:
+                return fc
+    getter = getattr(strategy, "get_latest_forecast", None) if strategy is not None else None
+    if callable(getter):
+        return getter(symbol)
+    return None

@@ -121,6 +121,13 @@ skills-lock.json
 backend/.active_contracts.json
 .worktrees/
 
+# Agent-tool local state (v7 prune N9)
+.mimocode/
+.kanban/
+.complexipy_cache/
+.workbuddy-ai/
+.jcode-scratch/
+
 # local junk
 .env.bak-*
 

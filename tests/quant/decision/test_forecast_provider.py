@@ -1,5 +1,5 @@
 from unittest.mock import MagicMock
-from quant.decision.forecast_provider import fresh_forecast
+from quant.decision.timesfm_forecast_factory import fresh_forecast
 
 
 def test_prefers_advisor_native_engine():

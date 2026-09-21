@@ -34,10 +34,10 @@ logger = logging.getLogger(__name__)
 # ponytail: wire a real chain delta here when the chain feed lands.
 DEFAULT_OPTION_DELTA = 0.50
 
-# Deterministic conviction used for gate 4's probability check when the engine
-# decides from the auction state alone (at the 0.65 data-quality conviction
-# threshold). The decision-critical path is 100% deterministic by design — no
-# model inference is involved, so _decide never waits on external calls.
+# Deterministic conviction the engine reports for its auction-state decisions.
+# Construction metadata on the context only — no decision branch may read it
+# (the old gate-4 probability check consumed it against a 0.65 threshold and
+# was constant-true; removed in v7 prune N3).
 _DETERMINISTIC_CONVICTION = 0.7
 
 
@@ -544,6 +544,8 @@ class DecisionContextBuilder:
             consecutive_wins=getattr(risk_state, "consecutive_wins", 0),
             setup_grade="A+" if getattr(risk_state, "consecutive_wins", 0) >= 2 else ("A" if getattr(risk_state, "consecutive_wins", 0) == 1 else ""),
             agent_direction=agent_direction,
+            # Metadata only: the deterministic engine has no model conviction.
+            # Provenance gating lives in DecisionLoop (data_quality below).
             agent_probability=_DETERMINISTIC_CONVICTION,
             data_quality=self._resolve_data_quality(amt_dto),
             evidence_provenance=self._resolve_evidence_provenance(amt_dto),

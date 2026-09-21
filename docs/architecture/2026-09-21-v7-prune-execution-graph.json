@@ -1,0 +1,197 @@
+{
+  "version": 1,
+  "generated": "2026-09-21",
+  "source_plan": "docs/architecture/2026-09-21-v7-prune-execution-plan.md",
+  "conventions": {
+    "worktree_root": ".worktrees",
+    "branch_pattern": "agent/{id_lower}",
+    "test_baseline": "473 passed (tests/quant/decision + tests/architecture + focused runtime/contract suites) at commit 9c078c20",
+    "merge_gate": [
+      "focused tests for the node",
+      "tests/architecture/",
+      "tests/quant/decision/",
+      "tests/quant/execution/"
+    ],
+    "rules": [
+      "one node per worktree/branch, never two nodes in one worktree",
+      "a node may not edit a file owned by another node in the same wave",
+      "RED test precedes implementation for every behaviour change (N3, N4)",
+      "deletions are proven by import scan (zero production importers) before git rm",
+      "if a node touches a file not listed in its footprint, stop and extend the footprint first",
+      "AI/LLM integration is preserved: quant/llm, quant/decision/timesfm_* stay. Only provably-dead AI paths (quant/sidecars, quant/modeling, timesfm_sizing) are removed"
+    ]
+  },
+  "edges": [
+    {"from": "N3", "to": "N4", "kind": "dependency", "note": "N3 changes decision_service/pipeline imports; N4 flattens the gates home on the settled tree"},
+    {"from": "N2", "to": "N6", "kind": "dependency", "note": "N2 owns the runtime.py forecast import swap; N6 owns the later runtime.py constants import swap"},
+    {"from": "N1", "to": "N6", "kind": "dependency", "note": "N6 verifies no residual references into deleted packages before removing quant/config"},
+    {"from": "N4", "to": "N6", "kind": "dependency", "note": "N4 moves gate modules that import quant.config.constants; N6 rewrites those imports last"}
+  ],
+  "nodes": [
+    {
+      "id": "N1",
+      "squad": "prune",
+      "title": "Delete unused AI packages: quant/sidecars + quant/modeling",
+      "type": "delete",
+      "phase": 1,
+      "effort": 1,
+      "risk": "structural",
+      "readiness": "neither",
+      "files": [
+        "quant/sidecars/ (delete package)",
+        "quant/modeling/ (delete package)",
+        "tests/quant/modeling/ (delete package)",
+        "tests/quant/decision/test_observation_identity.py (inspect: keep timesfm_agents coverage, drop quant.modeling imports)"
+      ],
+      "blocked_by": [],
+      "evidence": "grep scan: quant.sidecars has zero importers anywhere; quant.modeling imported only by 4 test files; sidecars/narrative/llm_advisor.py duplicates quant/llm/advisor.py"
+    },
+    {
+      "id": "N2",
+      "squad": "prune",
+      "title": "Delete dead modules + fold forecast access into one provider",
+      "type": "delete",
+      "phase": 1,
+      "effort": 2,
+      "risk": "structural",
+      "readiness": "neither",
+      "files": [
+        "quant/decision/timesfm_sizing.py (delete; only its own test imports it, dynamic sizing already removed)",
+        "tests/quant/decision/test_timesfm_sizing.py (delete)",
+        "quant/execution/paper_trading_contracts.py (delete; duplicate of paper_contracts.py)",
+        "tests/quant/execution/test_paper_trading_acceptance_vectors.py (inspect: port valuable vectors to test_paper_contract_resolver.py)",
+        "quant/execution/exit_signal.py (delete; zero references)",
+        "quant/execution/test_flow_provenance.py (git mv to tests/quant/execution/)",
+        "quant/coordinator_view.py (delete; ICoordinatorView Protocol never imported)",
+        "quant/ws_contract.py (inspect: tests import it; if tests verify ws_adapter shape, repoint tests then delete)",
+        "quant/llm/dataset_generator.py (delete; offline training tool)",
+        "tests/quant/llm/test_llm_bridge.py (drop dataset_generator cases)",
+        "quant/decision/forecast_provider.py (delete after fold)",
+        "quant/decision/timesfm_forecast_factory.py (receive fresh_forecast)",
+        "quant/runtime.py (one import swap)",
+        "quant/strategies/selection.py (comment swap)",
+        "tests/quant/decision/test_forecast_provider.py (repoint)"
+      ],
+      "blocked_by": [],
+      "evidence": "import scan: timesfm_sizing/paper_trading_contracts/exit_signal/coordinator_view/ws_contract/dataset_generator have no production importers; two forecast_provider.py files exist (decision 27L used, modeling 78L dead)"
+    },
+    {
+      "id": "N3",
+      "squad": "prune",
+      "title": "Collapse dual data-quality gates into one authority",
+      "type": "fix",
+      "phase": 1,
+      "effort": 2,
+      "risk": "money-path",
+      "readiness": "paper",
+      "files": [
+        "quant/decision/decision_service.py (remove DATA_QUALITY_BLOCKED pre-gate + constant-true agent_probability condition)",
+        "quant/engine/decision_loop.py (keep as the single authority: live OMS requires TICK_EXACT, paper marks PROXY_MODE)",
+        "quant/decision/context_builder.py (stop passing agent_probability=_DETERMINISTIC_CONVICTION)",
+        "quant/decision/context.py (drop agent_probability field if nothing else reads it)",
+        "quant/decision/data_quality.py (drop conviction_allowed if now unused; keep normalize_* used by dto)",
+        "tests/quant/decision/test_block_reasons.py (update)",
+        "tests/quant/runtime/test_proxy_live_entry_block.py (update)",
+        "tests/quant/decision/test_decision_service.py (update)",
+        "tests/quant/decision/test_single_data_quality_authority.py (NEW RED-first)"
+      ],
+      "blocked_by": [],
+      "evidence": "two gates disagree: decision_service blocks on not in {TICK_EXACT, CANDLE_DISTRIBUTED} whenever agent_probability>=0.65 (always true: context_builder hardcodes 0.7 vs threshold 0.65) — this caused 1,968 DATA_QUALITY_BLOCKED cycles; decision_loop separately requires TICK_EXACT for live (PROXY_FLOW_BLOCKED). One decision, two authorities, different thresholds."
+    },
+    {
+      "id": "N4",
+      "squad": "prune",
+      "title": "Flatten decision gates home (kill re-export wrappers)",
+      "type": "refactor",
+      "phase": 2,
+      "effort": 2,
+      "risk": "structural",
+      "readiness": "neither",
+      "files": [
+        "quant/decision/gates/gate_edge.py (delete: pure re-export of gate_triple_a_edge)",
+        "quant/decision/gates/gate_risk_reward.py (delete: pure delegate to gates_rr.gate_risk_reward)",
+        "quant/decision/gates/gate_session_phase.py (move real content to quant/decision/gate_session_phase.py)",
+        "quant/decision/gates/gate_position_cooldown.py (move real content to quant/decision/gate_position_cooldown.py)",
+        "quant/decision/gates/ (delete package)",
+        "quant/decision/pipeline.py (import flattened modules)",
+        "tests/quant/decision/test_gates_*.py (repoint imports)"
+      ],
+      "blocked_by": ["N3"],
+      "evidence": "gates/gate_edge.py is literally gate_edge = gate_triple_a_edge (17L); gate_risk_reward.py wraps gates_rr 1:1 (52L); pipeline.py already imports real logic from gates_edge/gates_rr via the wrappers"
+    },
+    {
+      "id": "N5",
+      "squad": "prune",
+      "title": "Verify Dhan adapter split; dedupe shared helpers into _dhan_common",
+      "type": "verify",
+      "phase": 2,
+      "effort": 1,
+      "risk": "money-path",
+      "readiness": "neither",
+      "files": [
+        "backend/app/infrastructure/adapters/dhan_adapter.py (market-data port)",
+        "backend/app/infrastructure/adapters/dhan_broker_adapter.py (broker port)",
+        "backend/app/infrastructure/adapters/_dhan_common.py (shared helpers land here)"
+      ],
+      "blocked_by": [],
+      "evidence": "CORRECTED finding: dhan_adapter (IMarketData) and dhan_broker_adapter (IBroker) are hexagonal ports over one SDK — legitimate, not duplication. Only genuine dedupe (mapping/status helpers) moves to _dhan_common."
+    },
+    {
+      "id": "N6",
+      "squad": "prune",
+      "title": "One constants module; delete quant/config package and dead aliases",
+      "type": "refactor",
+      "phase": 3,
+      "effort": 2,
+      "risk": "structural",
+      "readiness": "neither",
+      "files": [
+        "quant/config/ (delete package; move WARMUP_BARS, CVD_KILL_THRESHOLD, SEED_CACHE_TTL_SECONDS, TICK_SIZE_NSE_OPTIONS, MAX_STOP_DISTANCE_TICKS, MIN_RR_RATIO into quant/contracts/constants.py)",
+        "quant/contracts/constants.py (delete dead aliases LVN_THRESHOLD/HVN_THRESHOLD/ABSORPTION_RANGE_ATR/FABIO_* after reference check)",
+        "quant/runtime.py (import swap)",
+        "quant/amt_engine.py (import swap)",
+        "quant/decision/gates_edge.py, gates_rr.py, signal_builder.py (import swaps)",
+        "quant/hotpath.py (comment swap)",
+        "tests/quant/contracts/test_fabio_constants.py (update pins)"
+      ],
+      "blocked_by": ["N1", "N2", "N4"],
+      "evidence": "DETERMINISTIC_CONVICTION=0.7 lives in quant/config/constants.py AND context_builder.py:41, while CONFIDENCE_HIGH_THRESHOLD=0.65 lives in contracts/constants.py:209 — three spellings of one idea hid the constant-true gate; constants.py self-documents LVN_THRESHOLD/HVN_THRESHOLD as unused"
+    },
+    {
+      "id": "N8",
+      "squad": "prune",
+      "title": "Persistence layer audit: map 4 quant layers + 2 backend writers, delete only import-free code",
+      "type": "verify",
+      "phase": 2,
+      "effort": 1,
+      "risk": "money-path",
+      "readiness": "neither",
+      "files": [
+        "docs/architecture/2026-09-21-persistence-layer-audit.md (new: which of event_store/persistence/persistence_boundary/persistence_bridge/backend database.py/trade_journal.py is authoritative per concern)",
+        "quant/persistence_bridge.py (delete ONLY if runtime import is removed or shim provably unused — runtime.py edits belong to N6/N2, so default is: document, do not delete)"
+      ],
+      "blocked_by": [],
+      "evidence": "3,000+ LOC across two processes persisting trade state: quant/event_store.py 892L, persistence.py, persistence_boundary.py, persistence_bridge.py, backend storage/database.py 1121L, trade_journal.py 1031L"
+    },
+    {
+      "id": "N9",
+      "squad": "prune",
+      "title": "Repo hygiene: gitignore tool cruft, untrack artifacts, fix AGENTS.md dead references",
+      "type": "chore",
+      "phase": 1,
+      "effort": 1,
+      "risk": "docs",
+      "readiness": "neither",
+      "files": [
+        ".gitignore (add .mimocode/, .kanban/, .complexipy_cache/, backend/venv/, .qoder/, .workbuddy-ai/, .jcode-scratch/)",
+        ".kanban/* (git rm --cached)",
+        ".superpowers/sdd/task-*.md (git rm --cached historical reports; v7 briefs stay tracked)",
+        "AGENTS.md (fix: docs/agents/* does not exist)",
+        "docs/agents/issue-tracker.md, triage-labels.md, domain.md (create: real content for the three referenced docs)",
+        "backend/venv/ (verify no start.sh dependency, then delete from disk and ignore)"
+      ],
+      "blocked_by": [],
+      "evidence": "~125MB of agent-tool state on disk (7 files tracked); AGENTS.md references three docs that do not exist; backend/venv is a second virtualenv shadowing root .venv"
+    }
+  ]
+}

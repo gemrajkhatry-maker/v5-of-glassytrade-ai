@@ -155,7 +155,6 @@ _NEW_CODE_HYGIENE_FILES = frozenset({
     "quant/execution/fills.py",
     "quant/execution/lots.py",
     "quant/amt/session/scanner_config.py",
-    "quant/coordinator_view.py",
     "tests/quant/contracts/test_money_parity.py",
     "tests/quant/contracts/test_services_boundaries.py",
     "tests/quant/contracts/test_telemetry_standards.py",

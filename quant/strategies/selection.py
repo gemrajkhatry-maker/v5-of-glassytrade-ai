@@ -2,7 +2,7 @@
 
 Decision 2026-09-17: the gate pipeline is the only thing allowed to approve an
 entry. TimesFM no longer selects an entry strategy; it provides forecasts to
-exits/UI (see quant/decision/forecast_provider.py).
+exits/UI (see quant/decision/timesfm_forecast_factory.py).
 """
 from __future__ import annotations
 

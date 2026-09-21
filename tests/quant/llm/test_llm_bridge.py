@@ -1,4 +1,4 @@
-"""Tests for LLM Decision & Narrative Bridge and Dataset Integrity."""
+"""Tests for the LLM Decision & Narrative Bridge."""
 
 import json
 import pytest
@@ -6,7 +6,6 @@ from quant.decision.context import DecisionContext
 from quant.bars import Bar
 from quant.contracts.enums import MarketState
 from quant.llm.bridge import context_to_prompt, extract_llm_json
-from quant.llm.dataset_generator import generate_scenario, generate_dataset
 
 
 def test_context_to_prompt_schema():
@@ -53,21 +52,6 @@ def test_extract_llm_json_variants():
     raw3 = '{"action": "FLAT", "direction": "FLAT", "setup": "NO_EDGE", "rationale": "Midday chop",}'
     res3 = extract_llm_json(raw3, prime="")
     assert res3.get("direction") == "FLAT"
-
-
-def test_dataset_generator_balance():
-    data = generate_dataset(300)
-    assert len(data) == 300
-    counts = {"LONG": 0, "SHORT": 0, "FLAT": 0}
-    for item in data:
-        resp = json.loads(item["messages"][2]["content"])
-        d = resp.get("direction")
-        counts[d] += 1
-
-    # Exact 1:1:1 balance
-    assert counts["LONG"] == 100
-    assert counts["SHORT"] == 100
-    assert counts["FLAT"] == 100
 
 
 def test_context_to_prompt_recent_decisions():

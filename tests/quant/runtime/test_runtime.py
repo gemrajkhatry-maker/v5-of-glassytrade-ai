@@ -170,15 +170,21 @@ def test_engine_blocks_entries_during_opening_noise():
 
 def test_engine_allows_entries_in_primary_window():
     """Control: 10:00 IST is Phase 2 — the session window is open. Synthetic
-    bars carry CANDLE_GAUSSIAN data quality, so the data-quality gate blocks
-    every decision before gate 1 runs. Assert the block reason is stable."""
+    bars carry CANDLE_GAUSSIAN provenance; since N3 the decision service is
+    quality-agnostic (DecisionLoop owns provenance), so decisions reach gate 1
+    and are rejected there during warmup. Assert evaluation is not short-
+    circuited and nothing trades without a Triple-A approval."""
     base = _ist_epoch(10, 0)
     eng = QuantEngine(SyntheticGateway(_epoch_ticks(_long_price_volume(), base)),
                       "SYM", interval_seconds=1)
     trace = eng.run()
     decisions = [e for e in trace if isinstance(e, DecisionProduced)]
     assert decisions, "engine must still evaluate every bar"
-    assert all(d.decision.reason == "DATA_QUALITY_BLOCKED" for d in decisions)
+    assert not any(
+        d.decision.reason == "DATA_QUALITY_BLOCKED" for d in decisions
+    ), "provenance must not short-circuit the service (single authority: DecisionLoop)"
+    assert not any(d.decision.approved for d in decisions), \
+        "quiet range bars must not produce an approval"
 
 
 def test_engine_gate1_blocks_until_warmup_complete():
@@ -187,11 +193,15 @@ def test_engine_gate1_blocks_until_warmup_complete():
                       "SYM", interval_seconds=1)
     trace = eng.run()
     decisions = [e for e in trace if isinstance(e, DecisionProduced)]
-    # Synthetic bars carry CANDLE_GAUSSIAN data quality, so the data-quality
-    # gate blocks every decision before gate 1 runs. Assert the block is
-    # stable across the entire run (warmup and post-warmup alike).
+    # Synthetic bars carry CANDLE_GAUSSIAN provenance; since N3 decisions run
+    # the gate pipeline, where warmup (gate-level) blocks every decision.
     assert decisions, "engine must still evaluate every bar"
-    assert all(d.decision.reason == "DATA_QUALITY_BLOCKED" for d in decisions)
+    assert all(
+        d.decision.gate_results
+        for d in decisions
+        if d.decision.reason not in ("HALTED",)
+    ), "each non-halted decision must carry gate results (no provenance short-circuit)"
+    assert not any(d.decision.approved for d in decisions)
 
 
 def test_engine_squares_off_position_on_session_close(monkeypatch):

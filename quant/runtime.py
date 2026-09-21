@@ -1190,7 +1190,7 @@ class QuantEngine:
         and pass through unchanged. Stale forecasts never reach exits or
         sizing — callers get None and fall back to deterministic behavior.
         """
-        from quant.decision.forecast_provider import fresh_forecast
+        from quant.decision.timesfm_forecast_factory import fresh_forecast
         tfm_fc = fresh_forecast(
             getattr(self, "_advisor", None),
             getattr(self, "_strategy", None),
