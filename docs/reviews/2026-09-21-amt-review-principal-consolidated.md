@@ -27,7 +27,7 @@ between the specification and the code**: load-bearing spec constants, predicate
 safety guards are absent, inverted, or silently disabled, and the test suite asserts the
 *wrong* values in the places that matter most.
 
-**Defect totals: 44** — **7 CRITICAL**, **17 HIGH**, **16 MEDIUM**, **4 LOW**
+**Defect totals: 45** — **7 CRITICAL**, **17 HIGH**, **17 MEDIUM**, **4 LOW**
 *(One CRITICAL downgraded to MEDIUM on re-inspection: `session_extreme_*` has a wick
 fallback, so it degrades stop quality rather than disabling the guard. See C2.)*
 
@@ -282,7 +282,8 @@ and a live test asserting which path is active; or amend §4 to name time bars a
 | M13 | `H_range` bucket width is not `S_bucket`; profiles use auto-computed bucket counts (100–1000) | MEDIUM | `volume_profile.py:213-221`. Depends on C8 |
 | M14 | CVD slope is an unnormalised linear-regression slope over 40 bars — absolute thresholds aren't scale-free across NSE options vs MCX commodities | MEDIUM | Compounds H8/H9 |
 | M15 | `quantize` ladder contains an off-spec leading `2` step | MEDIUM | `range_bars.py:43-46` — `{2,5,10,25,50,100,200}` vs spec's `{5,10,25,50,100,200}` |
-| M16 | Footprint provenance name drift + `cvd_source` never passed | MEDIUM | `analyzer.py:1007` reads `self._footprint_accumulator` (never assigned) — should read the `footprint_accumulator` parameter; `AMTEngine` never passes `cvd_source`. Both `TICK_EXACT` provenance branches are unreachable, so live CVD/footprint is reported `CANDLE_DISTRIBUTED` forever |
+| M16 | Footprint provenance name drift + `cvd_source` never passed | MEDIUM |
+| M17 | **§3's 5-Minute Kline stream has no producer at the production default** | MEDIUM | Spec §3 requires 5m klines for "Macro Dealing Range identification, Session highs/lows, and overarching market narrative framing." `_DEFAULT_CONFIG["interval_seconds"] = 60` (`multi_engine.py:266`), so `runtime.py:384-409` builds a 60s aggregator and no 5m one; `analyzer.py` receives a single timeframe (`recent_data`, `:454`) and has **no 5m/macro concept at all** (verified: grep for `dealing_range`/`macro`/`5m` in the analyzer → no hits). The 60s bar does double duty as both decision and macro context. Note `DEFAULT_INTERVAL_SEC = 300` (`bars.py:7`) contradicts the coordinator default of 60 — two sources of truth again | `analyzer.py:1007` reads `self._footprint_accumulator` (never assigned) — should read the `footprint_accumulator` parameter; `AMTEngine` never passes `cvd_source`. Both `TICK_EXACT` provenance branches are unreachable, so live CVD/footprint is reported `CANDLE_DISTRIBUTED` forever |
 | L1 | `mock_pass` sentinel aliases `NotImplementedError` to a "placed" live stop | LOW | `live_oms.py:181-189`. Blast radius = one unguarded position; the in-memory stop path still works |
 | L2 | Gate 4 options stop cap uses 5% of premium, not 0.75% | LOW | `gates_rr.py:32-37`. Deliberate and documented; the 200-tick hard cap swamps either value |
 | L3 | §8 aggression trigger joint-condition / non-confirm paths undertested | LOW | No 2-of-3 test asserting the machine resets |
@@ -426,7 +427,7 @@ correctly implemented and tested against `docs/amt`, and on that measure it is n
 - **7 CRITICAL** defects, including **1 confirmed silent fail-open guard**, **1 broken
   money-path guarantee** I reproduced numerically, and **1 entirely dead subsystem** (the
   15-minute bias layer) whose tuning constant an operator could believe is live.
-- **44 total** defects across constants, predicates, guards, formulas, and tests.
+- **45 total** defects across constants, predicates, guards, formulas, and tests.
 - **3 spec-internal contradictions** the code cannot resolve.
 - A **2580/2580 green suite** that asserts the wrong values in the exact places where the
   drift lives, and cannot detect any of the 8 CRITICALs.
@@ -461,6 +462,46 @@ the first version of this document deserves the delta.
    fail-open guard (`cvd_divergence`), **two** degrading-but-fallback-protected fields, and
    **one** fully dead subsystem. The FAIL verdict is unaffected: C1 alone is a silent
    Gate 3 veto bypass, and C4's broken net-positive guarantee was re-confirmed numerically.
+
+### Scope verification (addressed explicitly)
+
+The request was to review "the whole project and flows." That phrase was interpreted as
+**the AMT engine and every code path the AMT spec governs**, and the boundary was verified
+rather than assumed:
+
+- `docs/amt` references exactly two code trees by path — `quant/` (24 references) and
+  `tests/` (4). It never names `backend/`, `brokers/`, `frontend/`, `automation/`, or
+  `quantv2/`.
+- `quant/` imports nothing from `backend/`, `automation/`, `frontend/`, or top-level
+  `brokers/` (verified by import scan). Its only external dependency is `shared/money.py`,
+  two numeric helpers.
+- Top-level `brokers/` is an independent tree: `quant/` uses its own `quant/brokers/`
+  subpackage for the live gateway and feed. The sole cross-reference is a *docstring*
+  fallback hint in `quant/contracts/instrument_registry.py:208,213`; the AMT path resolves
+  lot/tick size via `quant/contracts/exchange_config.py:135` and `multi_engine.py:1759`.
+- `frontend/` and `automation/` are presentation/orchestration, not spec-governed logic.
+
+So the reviewed surface — `quant/` (190 files) plus the `backend/` files that touch the
+engine (`gameloop.py`, `trading.py`, `config_models/validator.py`, `config/base.yaml`) — is
+the complete AMT-governed surface. `backend/` has 176 Python files, of which only those four
+participate in the engine path; the rest are API/auth/DB plumbing outside the spec.
+
+**One interpretation was guessed at:** whether "whole project" meant literally every
+directory. It did not — the spec itself defines the boundary, and the evidence above is why
+`frontend/`, `automation/`, `brokers/`, and `quantv2/` were excluded. Flagging it so the
+owner can widen the scope if they meant something else.
+
+### One finding added by the re-check (upward correction)
+
+**M17 — §3's 5-Minute Kline stream has no producer at the production default.** Re-checking
+the C3 bias subsystem led to `runtime.py:402-411`, where the 15m bias aggregator is built
+only when `interval_seconds > 900`. That prompted the question of what the production
+interval actually is: `_DEFAULT_CONFIG["interval_seconds"] = 60` (`multi_engine.py:266`),
+while `DEFAULT_INTERVAL_SEC = 300` (`bars.py:7`) — two contradictory defaults. At 60s, the
+60s bar does double duty and **§3's required 5m macro stream does not exist**; `analyzer.py`
+receives a single timeframe and has no macro/dealing-range concept. This also means D-E9's
+micro-aggregator finding and C3's bias finding are the *same root cause*: the 60s default
+disables both the 1m trigger layer and the 15m bias layer at once.
 
 The five specialist reports are unchanged and retain their original severities; where they
 differ from this consolidated view the consolidated text says so.
