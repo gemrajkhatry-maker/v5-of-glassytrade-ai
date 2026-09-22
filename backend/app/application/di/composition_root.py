@@ -150,12 +150,13 @@ def _advisor_enabled_from_env() -> bool:
 def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     """Build the QuantCoordinator — the deterministic decision brain for the
     WS viewer + REST shell. Reuses the same market-data / broker adapters
-    registered for the app; the coordinator only starts its engines when
-    main.py gates it via GREENFIELD_ENGINE=1."""
+    registered for the app; main.py resolves and starts it unconditionally
+    during lifespan startup (failures are caught and reported, not gated)."""
     from quant.multi_engine import QuantCoordinator
     from quant.contracts.ports.market_data import IMarketData
     from quant.contracts.ports.broker import IBroker
     from quant.contracts.ports.storage import IStorage
+    from app.infrastructure.telemetry import PrometheusTelemetry
 
     market_data = container.resolve(IMarketData)
     broker = container.resolve(IBroker)
@@ -208,6 +209,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         broker=broker,
         config=coord_config,
         storage=storage,
+        telemetry=PrometheusTelemetry(),
     )
 
 

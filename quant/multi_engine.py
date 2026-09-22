@@ -380,12 +380,21 @@ class QuantCoordinator:
         config=None,
         strategy=None,
         storage=None,
+        telemetry=None,
     ) -> None:
         self.market_data = market_data
         self.broker = broker
         self.config = {**_DEFAULT_CONFIG, **(config or {})}
         self._strategy = strategy  # TradingStrategy — None means engine uses default
         self._storage = storage
+        # Host-installed sink (B3). quant imports nothing from the host: the
+        # composition root passes an ITelemetry adapter, a bare embedding gets
+        # NULL_TELEMETRY. Named ``telemetry`` (not ``_telemetry``) because
+        # tests/quant/coordinator/test_coordinator_telemetry.py pins the
+        # absence of a private ``_telemetry`` attribute on the coordinator.
+        from quant.contracts.ports.telemetry import NULL_TELEMETRY
+
+        self.telemetry = telemetry or NULL_TELEMETRY
         self._contracts_file = self.config.get("contracts_file") or _DEFAULT_CONTRACTS_FILE
         # Shared across all engines (one file, one lock) so prior levels are
         # consistent and NPOC records dedupe per session.

@@ -274,6 +274,8 @@ def load_config(
             kelly_win_prob=risk_data.get("kelly_win_prob", 0.55),
             kelly_win_loss_ratio=risk_data.get("kelly_win_loss_ratio", 2.0),
             bootstrap_trade_count=risk_data.get("bootstrap_trade_count", 30),
+            max_portfolio_daily_loss_pct=risk_data.get("max_portfolio_daily_loss_pct"),
+            max_portfolio_risk_pct=risk_data.get("max_portfolio_risk_pct"),
         ),
         paper=PaperConfig(
             capital_deployment_pct=float(

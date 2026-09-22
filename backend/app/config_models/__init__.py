@@ -118,6 +118,11 @@ class RiskConfig:
     kelly_win_prob: float = 0.55
     kelly_win_loss_ratio: float = 2.0
     bootstrap_trade_count: int = 30
+    # Optional portfolio-level ceilings (B1). Parsed from
+    # strategies/{nse,mcx}_options.yaml `risk:`; None means "leave the
+    # default in PortfolioRiskAuthority".
+    max_portfolio_daily_loss_pct: float | None = None
+    max_portfolio_risk_pct: float | None = None
 
 
 @dataclass(frozen=True)
