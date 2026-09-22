@@ -17,6 +17,7 @@ Supports two specialized, role-swapping agents matching the AI Market Thesis:
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from typing import Any, Dict, Optional, Tuple
@@ -45,8 +46,13 @@ class LayaDecisionAdvisor:
 
     DEFAULT_CHECKPOINT = "aac6fef/laya-multilingual-mlx"
 
-    def __init__(self, model_id: str = DEFAULT_CHECKPOINT, enabled: bool = True):
-        self.enabled = enabled and _LAYA_AVAILABLE
+    def __init__(self, model_id: str = DEFAULT_CHECKPOINT, enabled: Optional[bool] = None):
+        if enabled is None:
+            # Model use is disabled by default for zero-overhead deterministic execution
+            laya_env = os.getenv("LAYA_MODEL_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+            self.enabled = laya_env and _LAYA_AVAILABLE
+        else:
+            self.enabled = enabled and _LAYA_AVAILABLE
         self.model_id = model_id
         self._agent = None
         self._warmed_up = False

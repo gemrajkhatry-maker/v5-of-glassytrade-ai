@@ -13,7 +13,6 @@ import {
 } from 'lightweight-charts';
 import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, LayaDecision, ChartMode, AggressivePrint, HalfTrendPoint, QuantDecisionAnalysis, LLMHistoryEntry, Portfolio } from '../types';
 import { IST_OFFSET_SECONDS } from '../constants';
-import AIAdvisorCard from './ai/AIAdvisorCard';
 
 // Extracted chart components (Phase 3)
 import {
@@ -1531,23 +1530,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           </div>
         )}
 
-        {/* AI Market Thesis Panel (TimesFM) */}
-        {Boolean(
-          agentDecision?.direction ||
-          agentDecision?.rationale ||
-          agentDecision?.source ||
-          agentDecision?.forecastSteps
-        ) && (
-          <div className="absolute top-3 right-3 z-40 w-80 sm:w-[355px] max-h-[calc(100%-1.5rem)] flex flex-col pointer-events-auto">
-            <AIAdvisorCard
-              agentDecision={agentDecision}
-              quantDecision={quantDecision}
-              portfolio={effectivePortfolio}
-              collapsible={true}
-              defaultExpanded={true}
-            />
-          </div>
-        )}
       </div>
 
       {/* TradingView-style Draggable Splitter Divider */}

@@ -275,7 +275,7 @@ describe('ChartScene', () => {
     expect(canvas).toBeInTheDocument();
   });
 
-  it('shows real agentDecision direction in the decision card', () => {
+  it('does not render AI Market Thesis panel inside ChartScene', () => {
     render(
       <ChartScene
         data={mockData}
@@ -292,8 +292,7 @@ describe('ChartScene', () => {
         }}
       />
     );
-    expect(screen.getByText(/LONG \(ENTER\)/)).toBeInTheDocument();
-    expect(screen.getByText(/AI Market Thesis/)).toBeInTheDocument();
+    expect(screen.queryByText(/AI Market Thesis/)).not.toBeInTheDocument();
   });
 
   it('stabilizes redraws when re-rendered with separately decoded but equal profile arrays', () => {
