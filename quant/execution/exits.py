@@ -69,18 +69,17 @@ class ExitEngine:
         spread_max_pct: float = 0.03,
         cvd_be_threshold: float = 2.0,
         vwap_adverse_drift_pct: float = 0.03,
+        enable_vwap_drift: bool = False,
     ) -> None:
         self.time_stop_bars = time_stop_bars
         self.cvd_kill_threshold = cvd_kill_threshold
         self.trail_giveback_pct = trail_giveback_pct
         self.spread_max_pct = spread_max_pct
         self.cvd_be_threshold = cvd_be_threshold
-        # VWAP adverse drift threshold: when a LONG position trades this
-        # fraction below session VWAP (or SHORT above), tighten trailing
-        # aggressively.  3% is the default — Fabio's rule: if price drifts
-        # more than 1 VA-width from VWAP without a structural reason, the
-        # thesis is weakened.
+        # VWAP adverse drift early exit is disabled by default to prevent
+        # premature stops during strong trend expansion / option scale mismatch.
         self.vwap_adverse_drift_pct = vwap_adverse_drift_pct
+        self.enable_vwap_drift = enable_vwap_drift
         # Trailing state is keyed by position._id (UUID) to prevent GC-recycling hazards.
         self._trail: dict[str, _Trail] = {}
         self._breakeven: dict[str, float | None] = {}  # position._id -> BE floor price
@@ -329,6 +328,7 @@ class ExitEngine:
                 position, close, low, high, sl, entry, risk, dto,
                 session_vwap, self.trail_giveback_pct, self.vwap_adverse_drift_pct,
                 self.cvd_be_threshold, be_floor, trail_stop,
+                enable_vwap_drift=self.enable_vwap_drift,
             )
             if be_floor is not None:
                 self._breakeven[position._id] = be_floor

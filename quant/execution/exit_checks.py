@@ -117,6 +117,7 @@ def check_trailing_stop(
     entry: float, risk: float, dto: dict, session_vwap: float,
     trail_giveback_pct: float, vwap_adverse_drift_pct: float,
     cvd_be_threshold: float, be_floor: float | None, trail_stop: float | None,
+    enable_vwap_drift: bool = False,
 ) -> tuple[ExitDecision | None, float | None, float | None]:
     """Rule 4b: trailing stop + breakeven.
 
@@ -149,7 +150,7 @@ def check_trailing_stop(
     # Trailing stop (armed at 1R)
     if profit >= risk:
         effective_giveback = trail_giveback_pct
-        if session_vwap > 0 and entry > 0:
+        if enable_vwap_drift and session_vwap > 0 and entry > 0 and 0.1 < (session_vwap / entry) < 10.0:
             vwap_drift = abs(close - session_vwap) / entry
             adverse = (long and close < session_vwap) or (not long and close > session_vwap)
             if adverse and vwap_drift > vwap_adverse_drift_pct:
@@ -174,8 +175,8 @@ def check_trailing_stop(
         else:
             trail_stop = max(trail_stop, candidate) if long else min(trail_stop, candidate)
 
-    # VWAP adverse-drift early exit
-    if 0 < profit < risk and session_vwap > 0 and entry > 0:
+    # VWAP adverse-drift early exit (disabled by default to let trends and structural SL/TP manage trades)
+    if enable_vwap_drift and 0 < profit < risk and session_vwap > 0 and entry > 0 and 0.1 < (session_vwap / entry) < 10.0:
         vwap_drift = abs(close - session_vwap) / entry
         adverse = (long and close < session_vwap) or (not long and close > session_vwap)
         if adverse and vwap_drift > 2.0 * vwap_adverse_drift_pct:

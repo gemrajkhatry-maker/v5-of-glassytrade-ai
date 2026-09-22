@@ -112,26 +112,29 @@ def test_dead_market_exits_at_close():
 # VWAP-aware exits
 # ---------------------------------------------------------------------------
 
+def test_vwap_drift_disabled_by_default():
+    """By default, VWAP drift exit is disabled so strong trends are not cut short."""
+    pos = _position(entry=100.0, sl=99.0, tp=102.0)
+    # Drift = 6.7% > 6%, profit = 0.3 < 1.0 risk
+    d = ExitEngine().evaluate(pos, bar_close=100.3, session_vwap=107.0, bar_index=5)
+    assert not d.should_exit
+
+
 def test_vwap_drift_long_exit():
-    """LONG drifting 6%+ below VWAP with <1R profit triggers VWAP_DRIFT."""
+    """When enabled, LONG drifting 6%+ below VWAP with <1R profit triggers VWAP_DRIFT."""
     pos = _position(entry=100.0, sl=99.0, tp=102.0)  # risk=1.0
-    # close at 97.0 = 3.0 below entry, 3.0 below VWAP=100.0 → 3% drift = 6%×entry
-    # profit = 97-100 = -3 → negative, won't trigger (need 0 < profit < risk)
-    # Actually we need profit > 0 and < risk: entry=100, close=100.5, VWAP=103
-    # drift = |100.5-103|/100 = 2.5%, need >6%
-    pos2 = _position(entry=100.0, sl=99.0, tp=102.0)
     # Close at 100.3, VWAP at 107 → drift = |100.3-107|/100 = 6.7% > 6%
     # profit = 0.3, risk = 1.0 → 0 < profit < risk ✓
-    d = ExitEngine().evaluate(pos2, bar_close=100.3, session_vwap=107.0, bar_index=5)
+    d = ExitEngine(enable_vwap_drift=True).evaluate(pos, bar_close=100.3, session_vwap=107.0, bar_index=5)
     assert d.should_exit and d.reason == "VWAP_DRIFT"
 
 
 def test_vwap_drift_short_exit():
-    """SHORT drifting 6%+ above VWAP with <1R profit triggers VWAP_DRIFT."""
+    """When enabled, SHORT drifting 6%+ above VWAP with <1R profit triggers VWAP_DRIFT."""
     pos = _short_position(entry=100.0, sl=101.0, tp=98.0)  # risk=1.0
     # close at 99.7, VWAP at 93 → drift = |99.7-93|/100 = 6.7% > 6%
     # profit = 100-99.7 = 0.3, risk = 1.0 → 0 < profit < risk ✓
-    d = ExitEngine().evaluate(pos, bar_close=99.7, session_vwap=93.0, bar_index=5)
+    d = ExitEngine(enable_vwap_drift=True).evaluate(pos, bar_close=99.7, session_vwap=93.0, bar_index=5)
     assert d.should_exit and d.reason == "VWAP_DRIFT"
 
 
@@ -139,26 +142,26 @@ def test_vwap_drift_no_exit_when_profit_above_risk():
     """VWAP_DRIFT only fires when profit < 1R — above 1R the trail manages it."""
     pos = _position(entry=100.0, sl=99.0, tp=102.0)  # risk=1.0
     # close at 101.5 = 1.5R profit → trail handles, not VWAP_DRIFT
-    d = ExitEngine().evaluate(pos, bar_close=101.5, session_vwap=108.0, bar_index=5)
+    d = ExitEngine(enable_vwap_drift=True).evaluate(pos, bar_close=101.5, session_vwap=108.0, bar_index=5)
     assert not d.should_exit or d.reason != "VWAP_DRIFT"
 
 
 def test_vwap_drift_no_exit_when_favorable_side():
     """LONG above VWAP = favorable, no drift exit."""
     pos = _position(entry=100.0, sl=99.0, tp=102.0)
-    d = ExitEngine().evaluate(pos, bar_close=100.3, session_vwap=93.0, bar_index=5)
+    d = ExitEngine(enable_vwap_drift=True).evaluate(pos, bar_close=100.3, session_vwap=93.0, bar_index=5)
     assert not d.should_exit
 
 
 def test_vwap_tightens_trail_on_adverse_drift():
-    """When price drifts 3%+ below VWAP against LONG, trailing tightens to 50%.
+    """When enabled and price drifts 3%+ below VWAP against LONG, trailing tightens to 50%.
 
     Verifies the tightened trail fires BEFORE the normal trail would have.
     Normal giveback=0.20 at profit=2.0 → trail=101.6
     Tightened giveback=0.10 at profit=2.0 → trail=101.8
     Bar with low=101.75 → tightened trail fires, normal would not.
     """
-    engine = ExitEngine(trail_giveback_pct=0.20)
+    engine = ExitEngine(trail_giveback_pct=0.20, enable_vwap_drift=True)
     pos = _position(entry=100.0, sl=99.0, tp=104.0)  # risk=1.0
     # Bar 1: reach 2R (close=102.0) — trail arms at 101.6 (normal giveback)
     d1 = engine.evaluate(pos, bar_close=102.0, bar_index=10)
@@ -172,7 +175,7 @@ def test_vwap_tightens_trail_on_adverse_drift():
 def test_vwap_drift_requires_positive_vwap():
     """session_vwap=0 disables VWAP drift checks."""
     pos = _position(entry=100.0, sl=99.0, tp=102.0)
-    d = ExitEngine().evaluate(pos, bar_close=100.3, session_vwap=0.0, bar_index=5)
+    d = ExitEngine(enable_vwap_drift=True).evaluate(pos, bar_close=100.3, session_vwap=0.0, bar_index=5)
     assert not d.should_exit
 
 
