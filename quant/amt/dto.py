@@ -77,6 +77,24 @@ def _to_cvd_state_dto(cs: object) -> CVDStateDict | None:
     )
 
 
+def _cvd_agrees(r) -> bool:
+    """Auction scoring flag: CVD slope sign agrees with the break direction.
+
+    Defaults False (same as ``bool(dto.get("cvdAgrees"))`` on a missing key)
+    when either side is unavailable, so no trading behavior changes for
+    absent CVD or absent break.
+    """
+    slope = getattr(r, "cvd_slope", 0.0) or 0.0
+    direction = str(getattr(r, "break_direction", "") or "").upper()
+    if not direction or not slope:
+        return False
+    if direction == "UP":
+        return slope > 0
+    if direction == "DOWN":
+        return slope < 0
+    return False
+
+
 def _to_ofi_result_dto(o: object) -> OFIResultDict | None:
     if o is None:
         return None
@@ -336,6 +354,19 @@ def amt_result_to_dto(r) -> dict:
             for k, v in r.footprints.items()
         },
         "legLvn": float(leg_lvns[0]) if leg_lvns else 0.0,
+        # Keys the decision layer reads (test_amt_dto_contract); absent keys
+        # silently zero/default in submission_handler / context_builder.
+        # AMTResult carries no top-of-book fields — bid/ask stay 0.0 ("no
+        # book"), which readers already treat as unknown/neutral.
+        "optionDelta": (
+            float(r.delta_normalized_option)
+            if getattr(r, "delta_normalized_option", 0.0)
+            else None
+        ),
+        "bid": float(getattr(r, "best_bid", 0.0) or 0.0),
+        "ask": float(getattr(r, "best_ask", 0.0) or 0.0),
+        "nearestLegLvn": float(leg_lvns[0]) if leg_lvns else 0.0,
+        "cvdAgrees": _cvd_agrees(r),
         "stackedImbalanceDirection": si_dir,
         "stackedImbalanceMagnitude": si_mag,
         "stackedImbalancePriceLow": si_low,

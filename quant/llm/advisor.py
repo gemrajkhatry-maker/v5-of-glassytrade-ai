@@ -74,7 +74,7 @@ class LLMAdvisor:
             try:
                 from quant.decision.laya_advisor import get_laya_advisor
                 decision["laya"] = get_laya_advisor().evaluate_from_context(ctx)
-            except Exception:
+            except Exception:  # silent-except - laya eval optional; baseline narrative still emits
                 pass
         self._emit_decision(ctx, decision)
 
