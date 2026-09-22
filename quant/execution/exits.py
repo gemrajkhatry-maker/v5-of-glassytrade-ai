@@ -87,7 +87,6 @@ class ExitEngine:
         # close_partial() preserves position._id across partial fills, so this
         # survives the TP1 -> TP2 transition on the same underlying trade.
         self._tp_tier: dict[str, int] = {}
-        self._timesfm_risk = None
         self.last_exit_source: str = ""
 
     def pop_trail(self, position: Position) -> None:
@@ -95,8 +94,6 @@ class ExitEngine:
         self._trail.pop(position._id, None)
         self._breakeven.pop(position._id, None)
         self._tp_tier.pop(position._id, None)
-        if getattr(self, "_timesfm_risk", None) is not None:
-            self._timesfm_risk.clear_position(position._id)
 
     def stop_state(self, position: Position) -> tuple[float | None, float | None]:
         """Current (breakeven_floor, trail_stop) for a position.
@@ -179,9 +176,7 @@ class ExitEngine:
             self._tp_tier[position._id] = int(tp_tier)
 
     def session_budget_multiplier(self) -> float:
-        if self._timesfm_risk is None:
-            return 1.0
-        return self._timesfm_risk.get_session_budget_multiplier()
+        return 1.0
 
     @property
     def model_risk_failures(self) -> int:

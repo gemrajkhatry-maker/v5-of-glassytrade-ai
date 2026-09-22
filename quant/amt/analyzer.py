@@ -55,7 +55,6 @@ from quant.contracts.value_objects import (
     AggressivePrint,
     AMTResult,
 )
-from quant.amt.models.observation import AMTObservation
 from quant.amt.triple_a import TripleAMachine
 from quant.contracts.constants import (
     LVN_MIN_PERSISTENCE_BARS,
@@ -88,7 +87,6 @@ from quant.amt.market.structure import (
 )
 from quant.amt.session.context import (
     classify_gap,
-    get_session_info,
     opening_inventory_bias,
 )
 from quant.amt.market.state_engine import (
@@ -103,7 +101,6 @@ from quant.amt.orderflow.aggression import (
 from quant.amt.orderflow.aggressive_prints import (
     AggressivePrintConfig,
     AggressivePrintRegistry,
-    compute_aggression_sigma,
     find_aggressive_prints,
 )
 from quant.amt.market.acceptance_rejection import (
@@ -164,27 +161,6 @@ class AMTConfig:
     BALANCE_RATIO_THRESHOLD: float = (
         0.70  # 70% of candles inside VA = BALANCED (Fabio's rule)
     )
-
-    @classmethod
-    def from_exchange_config(cls, exchange_config) -> AMTConfig:
-        """Create config from an ExchangeConfig value object.
-
-        DIP-compliant: no infrastructure imports.
-        """
-        instance = cls()
-        try:
-            instance.AGGRESSION_SIGMA_THRESHOLD = float(
-                exchange_config.aggression_sigma
-            )
-            instance.DISPLACEMENT_MULTIPLIER = float(
-                exchange_config.displacement_multiplier
-            )
-            instance.BALANCE_RATIO_THRESHOLD = float(
-                exchange_config.balance_ratio_threshold
-            )
-        except (TypeError, ValueError):
-            logger.warning("non-numeric exchange config override ignored; using defaults: %r", exchange_config, exc_info=True)
-        return instance
 
 
 # ---------------------------------------------------------------------------
@@ -1230,97 +1206,4 @@ absorption_side=absorption_side,
             data_quality=data_quality,
             session_extreme_low=session_extreme_low,
             session_extreme_high=session_extreme_high,
-        )
-
-    # -------------------------------------------------------------------
-    # RL Observation Builder
-    # -------------------------------------------------------------------
-
-    def compute_observation(
-        self,
-        data: list[OHLC],
-        order_book: OrderBook | None = None,
-        prior_vah: float = 0.0,
-        prior_val: float = 0.0,
-    ) -> AMTObservation:
-        """Build a full RL observation vector from current market state.
-
-        This method runs the standard AMT analysis and enriches it with
-        Valentini-specific features: CVD, profile shape, session context.
-        """
-        result = self.analyze(data, order_book)
-        current = (
-            data[-1]
-            if data
-            else OHLC(time="", open=0, high=0, low=0, close=0, volume=0)
-        )
-
-        # --- CVD --- (read state only; analyze() already called update())
-        cvd_state = self._cvd_tracker.state()
-
-        # --- Profile shape ---
-        shape = classify_shape(list(result.profile))
-
-        # --- POC migration ---
-        poc_mig = self._poc_tracker.update(result.poc, current.close)
-
-        # --- Session context ---
-        open_price = data[0].open if data else 0.0
-        use_prior_vah = prior_vah if prior_vah > 0 else result.value_area_high
-        use_prior_val = prior_val if prior_val > 0 else result.value_area_low
-        try:
-            from quant.contracts.instrument_registry import DEFAULT_REGISTRY
-            spec = DEFAULT_REGISTRY.try_resolve(self._last_resolve_key)
-            if spec is not None:
-                self._session_market = spec.session_profile
-        except Exception:
-            logger.warning("session-market resolution failed for %r; keeping prior session profile", self._last_resolve_key, exc_info=True)
-
-        session_info = get_session_info(
-            timestamp=current.time,
-            open_price=open_price,
-            prior_vah=use_prior_vah,
-            prior_val=use_prior_val,
-            market=self._session_market,
-        )
-
-        # --- Distance to POC (normalised by VA range) ---
-        va_range = max(result.value_area_high - result.value_area_low, 1e-9)
-        dist_to_poc = (current.close - result.poc) / va_range
-
-        # --- Nearest LVN ---
-        nearest_lvn = 0.0
-        if result.lvns:
-            nearest_lvn = min(result.lvns, key=lambda lvn: abs(current.close - lvn))
-
-        # --- Aggression sigma ---
-        agg_sigma = (
-            compute_aggression_sigma(current, data[-50:]) if len(data) >= 20 else 0.0
-        )
-
-        # --- OBI ---
-        obi = 0.0
-        if order_book:
-            bids_q = sum(b.quantity for b in order_book.bids)
-            asks_q = sum(a.quantity for a in order_book.asks)
-            total = bids_q + asks_q
-            if total > 0:
-                obi = (bids_q - asks_q) / total
-
-        # --- Normalised delta ---
-        norm_delta = current.delta / current.volume if current.volume > 0 else 0.0
-
-        return AMTObservation(
-            dist_to_poc=dist_to_poc,
-            is_in_balance=(result.market_state == MarketState.BALANCED.value),
-            delta_divergence=cvd_state.z_score,
-            nearest_lvn=nearest_lvn,
-            cvd_slope=cvd_state.slope,
-            profile_shape=shape.shape,
-            poc_migration=poc_mig.direction,
-            session=session_info.session,
-            opening_relation=session_info.opening_relation,
-            aggression_sigma=agg_sigma,
-            obi=obi,
-            norm_delta=norm_delta,
         )

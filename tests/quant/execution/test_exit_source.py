@@ -89,39 +89,10 @@ def test_full_close_preserves_engine_sourced_label():
     assert pm._exits.last_exit_source == "TIMESFM_RISK_AUTHORITY:VAR_STOP"
 
 
-def test_timesfm_risk_failure_never_consulted_on_exit_path():
-    """Wave 6: TimesFM is advisory-only — corrupt risk module must not run."""
-    from quant.decision.timesfm_agents import TimesFMForecast
-    import numpy as np
-
-    import quant.execution.exits as exits_mod
-
+def test_session_budget_multiplier_always_one_without_authority():
+    """No TimesFM risk authority seam — multiplier stays at the constant 1.0."""
     eng = ExitEngine()
-    pos = _position()
-    p50 = np.full(8, 101.0, dtype=np.float32)
-    fc = TimesFMForecast(
-        horizon=8, p50_path=p50, p10_path=p50 - 1, p90_path=p50 + 1,
-        q_spread=2.0, mean_forecast=101.0, pct_change=0.01,
-        forecast_steps=["LONG"] * 8, curr_price=100.0, lat_ms=1.0,
-    )
-
-    class _Boom:
-        def clear_position(self, *_a):
-            pass
-
-        def evaluate_exit(self, **_k):
-            raise RuntimeError("quantile path corrupt")
-
-        def get_session_budget_multiplier(self):
-            return 1.0
-
-    eng._timesfm_risk = _Boom()
-    before = exits_mod.MODEL_RISK_FAILURES
-    decision = eng.evaluate(pos, bar_close=100.5, bar_low=98.5, bar_index=2, timesfm_forecast=fc)
-
-    assert decision.should_exit is True
-    assert eng.last_exit_source == "DETERMINISTIC:SL"
-    assert exits_mod.MODEL_RISK_FAILURES == before
+    assert eng.session_budget_multiplier() == 1.0
 
 
 def test_displayed_stop_is_the_enforced_stop_after_a_ratchet():
