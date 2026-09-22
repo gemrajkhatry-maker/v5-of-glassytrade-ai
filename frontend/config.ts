@@ -9,13 +9,6 @@
  */
 
 // =============================================================================
-// Time Constants
-// =============================================================================
-
-/** One day in milliseconds */
-export const ONE_DAY_MS = 86_400_000;
-
-// =============================================================================
 // Chart Configuration Defaults
 // =============================================================================
 
@@ -106,19 +99,6 @@ export const THREE_A_CONFIG = {
 
   /** Minimum CVD slope to count as "Action" */
   cvdSlopeMin: 2.0,
-};
-
-// =============================================================================
-// Profile Context Configuration
-// =============================================================================
-
-/** Thresholds for POC confluence/divergence detection */
-export const PROFILE_CONFIG = {
-  /** POC difference ≤ this % → CONFLUENCE */
-  confluenceThreshold: 0.001,  // 0.1%
-
-  /** POC difference ≥ this % → DIVERGENCE */
-  divergenceThreshold: 0.005,  // 0.5%
 };
 
 // =============================================================================

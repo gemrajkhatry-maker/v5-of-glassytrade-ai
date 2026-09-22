@@ -59,7 +59,6 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
         positions: [],
         closedTrades: [],
     },
-    aiAnalysis: null,
     amtAnalysis: null,
     halfTrendSeries: [],
     auctionAnalysis: null,
@@ -442,36 +441,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 // The WS tick stream only carries the live bar; this fills the
                 // background with real Dhan candles matching the live interval.
                 warmHistoryForSymbols(symbols, String(state.interval || ''));
-                return;
-            }
-
-            // History loaded from server
-            if (state.status === 'history_loaded') {
-                if (state.history && state.symbol) {
-                    const sym = state.symbol;
-
-                    // Initial history load: replace data.
-                    // gap_fill messages are handled identically — the backend's gap-fill
-                    // history contains real candles; no candles are fabricated client-side.
-                    // CRITICAL: Ensure history is sorted by time to prevent Lightweight Charts crash
-                    const sortedHistory = [...state.history].sort((a, b) => 
-                        new Date(a.time).getTime() - new Date(b.time).getTime()
-                    );
-                    setInstruments(prev => {
-                        const inst = prev[sym] || createInstrumentState(sym);
-                        return {
-                            ...prev,
-                            [sym]: { ...inst, data: sortedHistory },
-                        };
-                    });
-                }
-                console.log(`[TradingSystem] History loaded: ${state.count} candles`);
-                return;
-            }
-
-            // Handle pong (heartbeat response)
-            if (state.pong) {
-                lastPongRef.current = Date.now();
                 return;
             }
 

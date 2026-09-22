@@ -198,7 +198,6 @@ export interface InstrumentState {
   data: OHLCData[];
   orderBook: OrderBook | null;
   portfolio: Portfolio;
-  aiAnalysis: AIAnalysis | null;
   amtAnalysis: AMTAnalysis | null;
   auctionAnalysis: AuctionAnalysis | null;
   quantDecisionAnalysis: QuantDecisionAnalysis | null;
@@ -209,9 +208,7 @@ export interface InstrumentState {
   overseerAction: string;
   overseerReason: string;
   depth20Active?: boolean;
-  modelWeights?: ModelWeights;
   generation?: number;
-  predictions?: OHLCData[];
   stats?: InstrumentStats | null;
   stale?: boolean;
   runtimeSafety?: RuntimeSafetyState;

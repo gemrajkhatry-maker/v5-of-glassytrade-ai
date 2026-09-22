@@ -5,14 +5,12 @@ import MarketSidebar from './components/MarketSidebar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { DEFAULT_CONFIG } from './constants';
 import { ChartConfig } from './types';
-import { X, Activity, Loader2, PanelsTopLeft, Brain, BarChart2, BookOpen, Eye } from 'lucide-react';
+import { X, Activity, Loader2, PanelsTopLeft, Brain, BarChart2, BookOpen } from 'lucide-react';
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
 import JournalPage from './components/JournalPage';
 import ModelStateBanner from './components/ModelStateBanner';
 import { useKeyboardNavigation, getDefaultTradingHotkeys } from './hooks/useKeyboardNavigation';
 import { useUIStore, selectChartMode, selectSidebarOpen, selectRightSidebarOpen, selectVpMode, selectShowHalfTrend, selectShowHARSI } from './stores/ui';
-
-const simpleId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
 function App() {
     // 1. UI State - Using Zustand for persistence

@@ -30,9 +30,6 @@ interface UIState {
     
     /** Current page */
     currentPage: 'trading' | 'journal';
-    
-    /** Workspace name */
-    workspaceName: string;
 }
 
 interface UIActions {
@@ -54,9 +51,6 @@ interface UIActions {
     /** Set volume profile mode */
     setVpMode: (mode: 'session' | 'leg' | 'combined' | 'off') => void;
     
-    /** Toggle volume profile */
-    toggleVolumeProfile: () => void;
-    
     /** Toggle HalfTrend overlay */
     toggleHalfTrend: () => void;
     
@@ -74,9 +68,6 @@ interface UIActions {
     
     /** Set current page */
     setCurrentPage: (page: 'trading' | 'journal') => void;
-    
-    /** Set workspace name */
-    setWorkspaceName: (name: string) => void;
     
     /** Reset UI to defaults */
     resetUI: () => void;
@@ -97,7 +88,6 @@ export const useUIStore = create<UIStore>()(
             showHARSI: true,
             harsiHeight: 180,
             currentPage: 'trading',
-            workspaceName: 'Default',
             
             // Actions
             setChartMode: (mode) => set((state) => {
@@ -125,13 +115,6 @@ export const useUIStore = create<UIStore>()(
                 state.showVolumeProfile = mode !== 'off';
             }),
             
-            toggleVolumeProfile: () => set((state) => {
-                state.showVolumeProfile = !state.showVolumeProfile;
-                if (!state.showVolumeProfile) {
-                    state.vpMode = 'off';
-                }
-            }),
-            
             toggleHalfTrend: () => set((state) => {
                 state.showHalfTrend = !state.showHalfTrend;
             }),
@@ -154,10 +137,6 @@ export const useUIStore = create<UIStore>()(
             
             setCurrentPage: (page) => set((state) => {
                 state.currentPage = page;
-            }),
-            
-            setWorkspaceName: (name) => set((state) => {
-                state.workspaceName = name;
             }),
             
             resetUI: () => set((state) => {
@@ -184,7 +163,6 @@ export const useUIStore = create<UIStore>()(
                 showHalfTrend: state.showHalfTrend,
                 showHARSI: state.showHARSI,
                 harsiHeight: state.harsiHeight,
-                workspaceName: state.workspaceName,
             }),
         }
     )
@@ -227,9 +205,4 @@ export const selectShowHARSI = (state: UIStore): boolean => {
 /** Select HARSI subplot height */
 export const selectHarsiHeight = (state: UIStore): number => {
     return state.harsiHeight || 180;
-};
-
-/** Select current page */
-export const selectCurrentPage = (state: UIStore): 'trading' | 'journal' => {
-    return state.currentPage;
 };

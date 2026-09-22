@@ -74,7 +74,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
       equity: 100000,
       leverage: 10,
     },
-    aiAnalysis: null,
     amtAnalysis: null,
     auctionAnalysis: null,
     quantDecisionAnalysis: null,

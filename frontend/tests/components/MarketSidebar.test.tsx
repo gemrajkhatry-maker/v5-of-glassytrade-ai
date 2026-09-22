@@ -20,7 +20,6 @@ const createMockInstrument = (symbol?: string, overrides: Partial<InstrumentStat
     equity: 100000,
     leverage: 10,
   },
-  aiAnalysis: null,
   amtAnalysis: null,
   auctionAnalysis: null,
   quantDecisionAnalysis: null,
