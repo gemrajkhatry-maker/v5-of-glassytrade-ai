@@ -16,7 +16,6 @@ from quant.events import (
     PositionClosed,
     PositionOpened,
     SignalApproved,
-    SignalProduced,
 )
 from quant.execution.order import Fill, Order, Position
 
@@ -71,12 +70,6 @@ def create_golden_tape():
             symbol="NIFTY24AUG25000CE",
             time="2026-09-11T09:30:00",
             bar=bar,
-        ),
-        SignalProduced(
-            symbol="NIFTY24AUG25000CE",
-            time="2026-09-11T09:31:00",
-            signal=signal,
-            setup_name="TRIPLE_A",
         ),
         SignalApproved(
             symbol="NIFTY24AUG25000CE",

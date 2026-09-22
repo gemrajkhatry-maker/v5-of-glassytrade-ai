@@ -25,7 +25,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from quant.event_store import EventStore
-from quant.events import BarClosed, Event
+from quant.events import BarClosed, Event, EventBus
 from quant.persistence import Journal
 from quant.state_machine import Bar, EngineState
 
@@ -136,7 +136,7 @@ def test_append_is_constant_time():
 
 def test_subscribe_does_not_sort_on_every_call():
     """subscribe() must not re-sort the entire handler list each time."""
-    store = EventStore()
+    bus = EventBus()
 
     def handler(e: Event) -> None:
         pass
@@ -144,7 +144,7 @@ def test_subscribe_does_not_sort_on_every_call():
     N = 500
     t0 = time.perf_counter()
     for i in range(N):
-        store.subscribe(BarClosed, handler, priority=i)
+        bus.subscribe(BarClosed, handler, priority=i)
     elapsed = time.perf_counter() - t0
 
     per_op_ms = (elapsed / N) * 1e3

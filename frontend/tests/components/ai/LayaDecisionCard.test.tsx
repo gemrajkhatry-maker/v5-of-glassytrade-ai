@@ -82,4 +82,33 @@ describe('LayaDecisionCard component', () => {
         expect(screen.getByText(/HOLD: 92%/i)).toBeInTheDocument();
         expect(screen.getByText(/Holding Conviction:/i)).toBeInTheDocument();
     });
+
+    it('overrides stale scanning action (ENTER_LONG) with HOLD when position is open', () => {
+        const staleDecision: LayaDecision = {
+            role: 'SCANNING',
+            action: 'ENTER_LONG',
+            setup: 'NO_EDGE',
+            probabilities: { HOLD: 0.80, TIGHTEN_SL: 0.10, TAKE_PROFIT: 0.05, EXIT: 0.05 },
+            conviction_score: 1.69,
+            active_position: {
+                side: 'LONG',
+                entryPrice: 6.80,
+                currentPrice: 6.30,
+                pnl: -62.50,
+                stopLoss: 5.15,
+                takeProfit: 10.10,
+                barsHeld: 1,
+                isRiskFree: false,
+            },
+        };
+
+        render(<LayaDecisionCard layaDecision={staleDecision} />);
+
+        expect(screen.getByText(/Role: Position Manager/i)).toBeInTheDocument();
+        expect(screen.getByText(/HOLD \(TREND INTACT\)/i)).toBeInTheDocument();
+        expect(screen.queryByText(/ENTER LONG/i)).not.toBeInTheDocument();
+        expect(screen.getByText(/Entry: 6.80/i)).toBeInTheDocument();
+        expect(screen.getByText(/-62.50/i)).toBeInTheDocument();
+        expect(screen.getByText(/1.69 \/ 4.0/i)).toBeInTheDocument();
+    });
 });

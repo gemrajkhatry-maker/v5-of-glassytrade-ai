@@ -44,24 +44,6 @@ class TestEventStoreHardening:
         store._events[0] = BarClosed(symbol="TAMPERED", time="t0", bar=Bar(close=999.0))
         assert store.verify_chain() is False
 
-    def test_dead_letter_queue(self):
-        """Failed handlers should go to dead-letter queue."""
-        from quant.event_store import EventStore
-        from quant.events import BarClosed
-        from quant.state_machine import Bar
-
-        store = EventStore()
-        store.append(BarClosed(symbol="NIFTY", time="t0", bar=Bar(close=100.0)))
-
-        def failing_handler(event):
-            raise RuntimeError("Handler failed")
-
-        store.subscribe(BarClosed, failing_handler)
-        store.publish_with_dead_letter(
-            BarClosed(symbol="NIFTY", time="t1", bar=Bar(close=101.0))
-        )
-        assert len(store.get_dead_letter_queue()) == 1
-
     def test_import_reconstructs_events(self):
         """import_() should fully reconstruct Event objects."""
         from quant.event_store import EventStore

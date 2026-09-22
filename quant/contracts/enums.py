@@ -219,16 +219,3 @@ class MessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
-
-
-class CushionState(str, Enum):
-    """Position cushioning lifecycle state.
-
-    The cushioning lifecycle follows a strict progression:
-    OPEN → CUSHIONED → TRAILING → CLOSED
-    """
-
-    OPEN = "OPEN"        # Position open, no cushioning yet
-    CUSHIONED = "CUSHIONED"  # Partial TP taken, SL moved to break-even
-    TRAILING = "TRAILING"    # Trailing stop active (ATR or VWAP)
-    CLOSED = "CLOSED"        # Position closed

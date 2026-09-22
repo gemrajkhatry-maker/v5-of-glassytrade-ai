@@ -485,11 +485,6 @@ class Portfolio:
                 # Move stop to break-even on the Position entity
                 pos.stop_loss = pos.entry_price
 
-                # Mark the position as having taken a partial so the ATR
-                # trailing stop can arm (Fabio: trail only after a partial TP).
-                # Without this flag apply_atr_trail silently no-ops forever.
-                pos.set_partial_taken(True)
-
                 # If all partials sum to full size, treat as a full close
                 if pos.size <= 0:
                     pos.size = Decimal("0")

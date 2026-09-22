@@ -130,20 +130,7 @@ class StopMoved(Event):
     stop_kind: str = "TRAIL"
 
 
-@dataclass(frozen=True)
-class SignalProduced(Event):
-    """Emitted when Strategy Gates 1-4 produce a candidate execution signal."""
-    signal: Any = None
-    setup_name: str = ""
 
-
-@dataclass(frozen=True)
-class StopLossRatchet(Event):
-    """Emitted on monotonic stop adjustment."""
-    old_sl: float = 0.0
-    new_sl: float = 0.0
-    reason: str = ""
-    position_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -201,9 +188,13 @@ class EventBus:
         Higher priority handlers run first. Default priority is 0.
         """
         handlers = self._handlers.setdefault(event_type, [])
-        handlers.append((priority, handler))
-        # Sort by priority descending (higher priority first)
-        handlers.sort(key=lambda x: x[0], reverse=True)
+        # Insert into sorted position (descending priority, ties in
+        # subscription order) — same result as a stable descending sort
+        # without the O(n log n) re-sort per call.
+        index = 0
+        while index < len(handlers) and handlers[index][0] >= priority:
+            index += 1
+        handlers.insert(index, (priority, handler))
 
     def publish(self, event: Event) -> None:
         """Publish an event to all subscribed handlers.

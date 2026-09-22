@@ -10,7 +10,9 @@ This module provides:
 
 Hardening features:
 - SHA-256 checksum chain (tamper-evident)
-- Dead-letter queue for failed handlers
+
+Dispatch note: handler subscription/dispatch lives in quant.events.EventBus.
+This class is append + fold only.
 """
 
 from __future__ import annotations
@@ -26,14 +28,12 @@ from collections.abc import Sequence
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, TypeVar
+from typing import Any
 
 from quant.contracts.timezones import IST
 from quant.events import Event
 from quant.state_machine import EngineState
 from quant.transitions import apply_event
-
-E = TypeVar("E", bound=Event)
 
 # Genesis secret — in production, load from env or secure key store
 # This ensures checksums cannot be forged without the secret
@@ -258,8 +258,6 @@ class EventStore:
         self._events: list[Event] = []
         self._sequence: int = 0
         self._checksums: list[str] = []  # Stored HMAC checksums for tamper detection
-        self._handlers: dict[type[Event], list[tuple[int, Callable[[Event], None]]]] = {}
-        self._dead_letter_queue: list[tuple[Event, Exception]] = []
         # Incremental fold cache: derived state up to ``_fold_base`` events.
         # ``append()`` does NOT invalidate it — the next fold() applies only
         # the delta, keeping repeated snapshot folds O(Δ) instead of O(n).
@@ -372,52 +370,6 @@ class EventStore:
         """Convert an event and nested payloads to deterministic JSON data."""
         value = _json_value(event)
         return value if isinstance(value, dict) else {"value": value}
-
-    def subscribe(
-        self,
-        event_type: type[E],
-        handler: Callable[[E], None],
-        priority: int = 0,
-    ) -> None:
-        """Subscribe a handler to an event type with optional priority.
-
-        Handlers stay sorted by descending priority. Insertion is O(n) into
-        the sorted position instead of a full O(n log n) re-sort per call,
-        so bulk subscription at setup time stays cheap.
-        """
-        handlers = self._handlers.setdefault(event_type, [])
-        index = 0
-        while index < len(handlers) and handlers[index][0] >= priority:
-            index += 1
-        handlers.insert(index, (priority, handler))
-
-    def publish_with_dead_letter(self, event: Event) -> None:
-        """Publish an event to all subscribed handlers with dead-letter queue.
-
-        Failed handlers are captured in the dead-letter queue instead of
-        propagating exceptions.
-        """
-        import logging
-
-        logger = logging.getLogger(__name__)
-        for _, handler in self._handlers.get(type(event), ()):
-            try:
-                handler(event)
-            except Exception as exc:
-                self._dead_letter_queue.append((event, exc))
-                logger.exception(
-                    "Handler %r failed for %s — moved to dead-letter queue",
-                    getattr(handler, "__name__", repr(handler)),
-                    type(event).__name__,
-                )
-
-    def get_dead_letter_queue(self) -> list[tuple[Event, Exception]]:
-        """Return the dead-letter queue."""
-        return list(self._dead_letter_queue)
-
-    def clear_dead_letter_queue(self) -> None:
-        """Clear the dead-letter queue."""
-        self._dead_letter_queue = []
 
     def get_all(self) -> list[Event]:
         """Return all events in insertion order."""

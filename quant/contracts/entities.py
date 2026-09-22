@@ -16,7 +16,6 @@ from quant.contracts.enums import (
     Source,
     SetupType,
     PositionStatus,
-    CushionState,
 )
 from quant.contracts.decimal_utils import to_decimal
 from quant.execution.exit_rules import classify_exit, ExitReason
@@ -173,54 +172,10 @@ class Position:
     metadata: dict[str, Any] | None = None
 
     # ── Lifecycle State ─────────────────────────────────────
-    cushion_state: CushionState = CushionState.OPEN
     initial_stop: Decimal = field(default_factory=lambda: Decimal("0"))    # Original SL for R-multiple calc
-    peak_profit: Decimal = field(default_factory=lambda: Decimal("0"))    # Highest unrealized profit (price units)
-    mae: Decimal = field(default_factory=lambda: Decimal("0"))            # Maximum Adverse Excursion
-    mfe: Decimal = field(default_factory=lambda: Decimal("0"))            # Maximum Favorable Excursion
-    tick_count: int = 0                                                    # Ticks since entry
-
-    # ── Cushioning Flags ────────────────────────────────────
-    partial_taken: bool = False         # True after first partial TP
-    runner_active: bool = False         # True when runner portion trailing
-    breakeven_set: bool = False         # True once SL moved to entry
-    atr_trail_active: bool = False      # True once ATR trail armed
-
-    # ── Session Context ─────────────────────────────────────
-    entry_cvd_direction: str = ""       # CVD confirmation direction
-    session_phase: str = ""             # "MORNING" or "AFTERNOON"
-    is_expiry: bool = False             # True on options expiry day
-    applied_time_stop: float = 0.0     # Computed session time stop (monotonic)
-
-    # ── Scale-In (Fabio Rule 4: 40/30/30) ──────────────────
-    scale_step: int = 1                 # 1=initial, 2=confirmation, 3=breakout
-    scale_confirm_price: Decimal = field(default_factory=lambda: Decimal("0"))
-    scale_breakout_price: Decimal = field(default_factory=lambda: Decimal("0"))
-    entry_lvns: list[float] = field(default_factory=list)  # LVNs used for scale-ins
-
     @property
     def is_open(self) -> bool:
         return self.status == PositionStatus.OPEN
-
-    def validate_cushion_transition(self, new_state: CushionState) -> bool:
-        """Validate cushion state transitions: OPEN → CUSHIONED → TRAILING → CLOSED."""
-        valid_transitions: dict[CushionState, set[CushionState]] = {
-            CushionState.OPEN: {CushionState.CUSHIONED, CushionState.CLOSED},
-            CushionState.CUSHIONED: {CushionState.TRAILING, CushionState.CLOSED},
-            CushionState.TRAILING: {CushionState.CLOSED},
-            CushionState.CLOSED: set(),
-        }
-        return new_state in valid_transitions.get(self.cushion_state, set())
-
-    def advance_cushion_state(self, new_state: CushionState) -> None:
-        """Advance cushion state with validation. Logs warning on invalid transition."""
-        if not self.validate_cushion_transition(new_state):
-            import logging
-            logging.getLogger(__name__).warning(
-                "Invalid cushion transition %s → %s for position %s",
-                self.cushion_state.value, new_state.value, self.id
-            )
-        self.cushion_state = new_state
 
     def update_pnl(self, current_price) -> Decimal:
         """Recalculate unrealised PnL from *current_price*."""
@@ -236,13 +191,6 @@ class Position:
     def move_stop_to_breakeven(self) -> None:
         """Move stop-loss to entry price (break-even)."""
         self.stop_loss = self.entry_price
-
-    def set_partial_taken(self, value: bool) -> None:
-        """Set partial_taken flag and auto-transition cushion state."""
-        self.partial_taken = value
-        # Auto-transition to CUSHIONED when partial is taken (Fabio Rule 4)
-        if value and self.cushion_state == CushionState.OPEN:
-            self.advance_cushion_state(CushionState.CUSHIONED)
 
     def should_close(self, current_price: Decimal) -> tuple[bool, str]:
         """Check whether the position should be closed at *current_price*."""
@@ -302,7 +250,6 @@ class Position:
     @staticmethod
     def from_signal(signal: Signal, symbol: str, size: Decimal) -> "Position":
         """Factory: create a new open position from a signal."""
-        meta = signal.metadata or {}
         return Position(
             id=str(uuid.uuid4()),
             symbol=symbol,
@@ -317,6 +264,4 @@ class Position:
             status=PositionStatus.OPEN,
             metadata=signal.metadata,
             initial_stop=signal.stop_loss,
-            session_phase=str(meta.get("session_phase", "")),
-            is_expiry=bool(meta.get("is_expiry", False)),
         )

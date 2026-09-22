@@ -67,8 +67,14 @@ export const LayaDecisionCard: React.FC<LayaDecisionCardProps> = React.memo(({
     const role = (data.role || (data.active_position || openPos ? 'POSITION_MANAGEMENT' : 'SCANNING')).toUpperCase();
     const isPositionMgmt = role === 'POSITION_MANAGEMENT' || Boolean(data.active_position) || Boolean(openPos);
 
-    const action = String(data.action || (isPositionMgmt ? 'HOLD' : 'FLAT')).toUpperCase();
-    const setup = String(data.setup || (isPositionMgmt ? 'POSITION_MGMT' : 'NO_EDGE')).toUpperCase();
+    const rawAction = String(data.action || '').toUpperCase();
+    const isMgmtAction = ['HOLD', 'TIGHTEN', 'PROFIT', 'EXIT'].some(k => rawAction.includes(k));
+    const action = isPositionMgmt
+        ? (isMgmtAction ? (rawAction.includes('HOLD') ? 'HOLD' : rawAction.includes('TIGHTEN') ? 'TIGHTEN_SL' : rawAction.includes('PROFIT') ? 'TAKE_PROFIT' : 'EXIT') : 'HOLD')
+        : (rawAction || 'FLAT');
+    const setup = isPositionMgmt
+        ? (data.setup && data.setup !== 'NO_EDGE' ? String(data.setup).toUpperCase() : 'POSITION_MGMT')
+        : String(data.setup || 'NO_EDGE').toUpperCase();
     const latency = data.latency_ms ?? 13.2;
     const model = data.model || 'Laya-MLX (322M mmBERT)';
     const tradePermittedP = data.trade_permitted_p ?? 0.0;

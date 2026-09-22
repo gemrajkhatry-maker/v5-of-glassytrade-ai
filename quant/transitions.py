@@ -81,21 +81,19 @@ def _position_to_state(pos) -> PositionState:
         _validate_position_payload(pos)
         return pos
 
-    # Otherwise, extract from execution.order.Position
+    # Otherwise, extract from execution.order.Position. Validation above
+    # guarantees order.signal exists. Engine-shape fields only — no broker
+    # family sniffing (entry_price/entry_time/stop_loss): entity families
+    # cross exclusively via ADR-0001's named mappers, never by getattr.
     _validate_position_payload(pos)
-    sig = getattr(pos, "order", None) and getattr(pos.order, "signal", None)
-    entry_time = str(
-        getattr(pos, "open_time", "")
-        or getattr(pos, "entry_time", "")
-        or (sig.timestamp if sig else "")
-        or ""
-    )
+    sig = pos.order.signal
+    entry_time = str(getattr(pos, "open_time", "") or sig.timestamp)
     return PositionState(
         id=pos._id,
-        entry=float(sig.entry) if sig else float(getattr(pos, "open_price", 0.0) or getattr(pos, "entry_price", 0.0)),
+        entry=float(sig.entry),
         size=float(pos.size),
-        sl=float(sig.sl) if sig else float(getattr(pos, "stop_loss", 0.0)),
-        tp=float(sig.tp) if sig else float(getattr(pos, "take_profit", 0.0)),
+        sl=float(sig.sl),
+        tp=float(sig.tp),
         side="LONG" if pos.size > 0 else "SHORT",
         pyramid_level=int(getattr(pos, "pyramid_level", 0)),
         is_pyramid=bool(getattr(pos, "is_pyramid", False)),
@@ -121,20 +119,22 @@ def _build_closed_trade_dto(fill, time_str: str = "") -> dict:
     pos = getattr(fill, "position", None)
     pos_id = str(getattr(pos, "_id", None) or getattr(pos, "id", "") or "")
     sig = getattr(pos, "order", None) and getattr(pos.order, "signal", None)
-    side = getattr(pos, "side", "") or (sig.type if sig else ("LONG" if getattr(pos, "size", 0) > 0 else "SHORT"))
-    entry_px = float(getattr(pos, "open_price", 0.0) or getattr(pos, "entry_price", 0.0) or (sig.entry if sig else 0.0))
+    # Engine-shape only: side/entry/sl/tp derive from the signal (ADR-0001 —
+    # broker Position shapes never reach this fold).
+    side = sig.type if sig else ("LONG" if getattr(pos, "size", 0) > 0 else "SHORT")
+    entry_px = float(getattr(pos, "open_price", 0.0) or (sig.entry if sig else 0.0))
     size_val = float(getattr(pos, "size", 0.0))
-    sl = float(getattr(pos, "stop_loss", 0.0) or (sig.sl if sig else 0.0))
-    tp = float(getattr(pos, "take_profit", 0.0) or (sig.tp if sig else 0.0))
+    sl = float(sig.sl) if sig else 0.0
+    tp = float(sig.tp) if sig else 0.0
     pnl_val = float(getattr(fill, "pnl", 0.0))
-    open_t = str(getattr(pos, "open_time", "") or getattr(pos, "entry_time", "") or (sig.timestamp if sig else "") or "")
+    open_t = str(getattr(pos, "open_time", "") or (sig.timestamp if sig else "") or "")
     close_t = str(getattr(fill, "close_time", "") or time_str or "")
     close_px = float(getattr(fill, "close_price", 0.0))
     reason = str(getattr(fill, "reason", "EXIT"))
 
     return {
         "id": pos_id,
-        "symbol": str(getattr(pos, "symbol", "") or (sig.symbol if sig else "")),
+        "symbol": str(sig.symbol if sig else ""),
         "side": side,
         "source": "AMT",
         "entryPrice": entry_px,

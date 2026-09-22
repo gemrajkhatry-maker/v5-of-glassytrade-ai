@@ -317,28 +317,6 @@ class TestHandlerExceptionIsolation:
             "BUG: Failing handler blocked subsequent handlers"
         )
 
-    def test_all_handlers_run_despite_multiple_failures(self):
-        """Multiple failing handlers should not block the good one."""
-        from quant.event_store import EventStore
-
-        store = EventStore()
-        results = []
-
-        def failing_handler(event):
-            raise RuntimeError("fail")
-
-        def good_handler(event):
-            results.append("good")
-
-        store.subscribe(BarClosed, failing_handler, priority=10)
-        store.subscribe(BarClosed, good_handler, priority=0)
-
-        event = BarClosed(symbol="NIFTY", time="t0", bar=_make_bar())
-        store.publish_with_dead_letter(event)
-
-        assert "good" in results
-        assert len(store.get_dead_letter_queue()) == 1
-
 
 # ---------------------------------------------------------------------------
 # Attack 6: Concurrent emit race condition

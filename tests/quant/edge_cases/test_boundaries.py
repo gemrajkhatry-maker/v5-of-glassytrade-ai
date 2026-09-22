@@ -884,25 +884,6 @@ class TestPositionStateEdgeCases:
 # =============================================================================
 
 
-class TestEventHandlerEdgeCases:
-    """Attack: Event handler failures and dead-letter queue."""
-
-    def test_handler_exception_captured_in_dead_letter_queue(self):
-        """Handler failures should be captured, not crash the system."""
-        store = EventStore()
-
-        def failing_handler(event):
-            raise RuntimeError("Handler crashed!")
-
-        store.subscribe(BarClosed, failing_handler)
-        event = BarClosed(symbol="NIFTY", time="t", bar=_make_bar())
-        store.publish_with_dead_letter(event)
-
-        dlq = store.get_dead_letter_queue()
-        assert len(dlq) == 1
-        assert isinstance(dlq[0][1], RuntimeError)
-
-
 # =============================================================================
 # TEST CLASS: PositionManager Edge Cases
 # =============================================================================

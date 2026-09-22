@@ -267,3 +267,38 @@ def test_engine_order_imports_stay_in_allowlist():
         if re.search(_ORDER_IMPORT_RE, _without_type_checking(_read(rel))):
             bad.append(rel)
     assert bad == [], bad
+
+
+# --- ADR-0001 crossing-function allowlist (Consequences section, now built) --
+#
+# Engine (float) and broker (Decimal) entity families may cross ONLY through
+# the four named mappers, and those mappers may be referenced only from their
+# defining modules and the three sanctioned call sites. Any new hit elsewhere
+# is an unreviewed crossing — the exact defect class (qty dropped, field
+# sniffing) this ADR exists to prevent. Definitions live in the allowlist, so
+# the gate governs callers.
+_CROSSING_RE = re.compile(
+    r"\b(to_broker_signal|broker_position_to_fill|position_to_row|row_to_position)\s*\("
+)
+
+_CROSSING_ALLOWED_FILES = frozenset({
+    "quant/execution/broker_mapper.py",   # defines to_broker_signal
+    "quant/execution/fills.py",           # defines broker_position_to_fill
+    "quant/execution/order.py",           # defines position_to_row / row_to_position
+    "quant/execution/live_oms.py",        # sanctioned crossings (ADR-0001)
+    "quant/persistence_bridge.py",        # sanctioned crossings (ADR-0001)
+    "quant/multi_engine.py",              # sanctioned restore call (ADR-0001)
+})
+
+
+def test_crossing_functions_stay_in_allowlist():
+    bad: list = []
+    for rel in _py_files():
+        if rel.startswith(_TEST_SCOPE_PREFIXES) or rel in _CROSSING_ALLOWED_FILES:
+            continue
+        if _CROSSING_RE.search(_without_type_checking(_read(rel))):
+            bad.append(rel)
+    assert bad == [], (
+        "engine↔broker entity crossing outside ADR-0001's named mappers — "
+        f"route it through broker_mapper/fills/order instead: {bad}"
+    )
