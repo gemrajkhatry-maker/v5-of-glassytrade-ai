@@ -110,6 +110,9 @@ def make_context(
     """Build a DecisionContext with sensible defaults for behavioral tests."""
     if bar is None:
         bar = make_bar(close=close)
+    if bid <= 0 or ask <= 0:
+        bid = float(bar.close) - tick_size
+        ask = float(bar.close) + tick_size
     return DecisionContext(
         state=None,
         bar=bar,
@@ -250,6 +253,10 @@ def test_valid_triple_a_entry():
         aggression=True,
         acceptance=True,
         cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=True,
+        price=110.0,
+        session_vwap=100.0,
     )
     ctx = make_context(
         market_state=MarketState.IMBALANCED,
@@ -271,10 +278,10 @@ def test_valid_triple_a_entry():
 
 
 def test_structural_stop_placement():
-    """Long entry with support below -> stop 1-2 ticks inside support (toward market).
+    """Long entry with support below -> stop 1-2 ticks BEHIND support.
 
-    The structural stop must be placed inside the support level, toward the
-    market (above the support for a LONG). This is Fabio's live placement rule.
+    Playbook §11.1: protective stop sits outside the bubble, not toward the
+    market.
     """
     evidence = SetupEvidence(
         setup_type="TRIPLE_A",
@@ -284,6 +291,10 @@ def test_structural_stop_placement():
         aggression=True,
         acceptance=True,
         cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=True,
+        price=110.0,
+        session_vwap=100.0,
     )
     ctx = make_context(
         market_state=MarketState.IMBALANCED,
@@ -302,9 +313,9 @@ def test_structural_stop_placement():
     d = DecisionService().evaluate(ctx)
     assert d.approved
     assert d.signal is not None
-    # Stop must be below entry (LONG) and above the support (toward market)
     assert d.signal.sl < d.signal.entry, "Stop must be below entry for LONG"
-    assert d.signal.sl > 105.0, "Stop must be inside support (toward market)"
+    assert d.signal.sl < 105.0, "Stop must sit behind support (outside cluster)"
+    assert d.signal.sl == pytest.approx(104.90)
 
 
 def test_structural_target_priority():
@@ -322,6 +333,10 @@ def test_structural_target_priority():
         aggression=True,
         acceptance=True,
         cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=True,
+        price=110.0,
+        session_vwap=100.0,
     )
     ctx = make_context(
         market_state=MarketState.IMBALANCED,
@@ -383,6 +398,10 @@ def test_cushion_escalation():
         aggression=True,
         acceptance=True,
         cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=True,
+        price=110.0,
+        session_vwap=100.0,
     )
     # Winning day: equity increased from 1M to 1.2M
     ctx = make_context(
@@ -441,6 +460,10 @@ def test_pre_market_lock():
         aggression=True,
         acceptance=True,
         cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=True,
+        price=110.0,
+        session_vwap=100.0,
     )
     # 09:20 IST is Phase 1 (opening noise) — session_open=False
     ctx = make_context(

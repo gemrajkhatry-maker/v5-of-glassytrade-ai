@@ -17,7 +17,9 @@ from quant.contracts.constants import (
 )
 from quant.contracts.enums import MarketState
 from quant.contracts.instrument_registry import is_option_contract
+from quant.contracts.ports.greeks import GreeksPort
 from quant.contracts.vocabulary import absorption_direction
+from quant.amt.snapshot import AnalysisSnapshot
 from quant.decision.context import DecisionContext
 from quant.session_gates import ist_dt, session_allow_entry
 from quant.amt.session.context import get_session_info
@@ -25,14 +27,6 @@ from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.decision.data_quality import normalize_data_quality, normalize_evidence_provenance
 
 logger = logging.getLogger(__name__)
-
-# Conservative ATM delta used to scale underlying stop distance into option
-# premium distance. There is NO chain Greek producer in this codebase:
-# AMTResult carries no option delta, and deltaNormalizedOption is candle
-# order-flow delta (see tests/quant/decision/test_option_delta_semantics.py).
-# So this default is authoritative until a real option chain is wired.
-# ponytail: wire a real chain delta here when the chain feed lands.
-DEFAULT_OPTION_DELTA = 0.50
 
 # Deterministic conviction the engine reports for its auction-state decisions.
 # Construction metadata on the context only — no decision branch may read it
@@ -75,6 +69,28 @@ def _print_levels_from_dto(amt_dto: dict, bar) -> tuple[float, float]:
     return support, resistance
 
 
+def _print_levels_from_result(prints, bar) -> tuple[float, float]:
+    """Same as ``_print_levels_from_dto`` but reads typed ``AggressivePrint`` rows."""
+    if not prints:
+        return 0.0, 0.0
+    px = float(getattr(bar, "close", 0) or 0) if bar is not None else 0.0
+    if px <= 0:
+        return 0.0, 0.0
+    mean_vol = sum(float(getattr(p, "volume", 0) or 0) for p in prints) / len(prints)
+    big = [p for p in prints if float(getattr(p, "volume", 0) or 0) >= 2.0 * mean_vol]
+    support = max(
+        (float(p.price) for p in big
+         if getattr(p, "side", None) == "BUY" and float(p.price) < px),
+        default=0.0,
+    )
+    resistance = min(
+        (float(p.price) for p in big
+         if getattr(p, "side", None) == "SELL" and float(p.price) > px),
+        default=0.0,
+    )
+    return support, resistance
+
+
 def _latest_stacked_imbalance(amt_dto: dict) -> tuple[str, int, float, float]:
     """Summarize the most recent stacked footprint imbalance.
 
@@ -85,28 +101,30 @@ def _latest_stacked_imbalance(amt_dto: dict) -> tuple[str, int, float, float]:
     fps = amt_dto.get("footprints") or {}
     if not fps:
         return "", 0, 0.0, 0.0
-    latest_key = max(fps.keys())  # epoch-string keys sort chronologically
-    levels = (fps[latest_key] or {}).get("levels") or []
-    best_dir, best_n = "", 0
-    run_dir, run_n, run_prices = "", 0, []
-    for lvl in levels:
-        if not lvl.get("stacked"):
-            # close any open run only if direction differs; stacked flags mark
-            # ALL levels of a run, so a non-stacked level ends the run
-            run_dir, run_n, run_prices = "", 0, []
-            continue
-        d = "BUY" if lvl.get("ask", 0) > lvl.get("bid", 0) else "SELL"
-        if d != run_dir:
-            run_dir, run_n, run_prices = d, 1, [lvl.get("price", 0.0)]
-        else:
-            run_n += 1
-            run_prices.append(lvl.get("price", 0.0))
-        if run_n > best_n:
-            best_dir, best_n = run_dir, run_n
-            best_prices = list(run_prices)
-    if best_n < 3:
-        return "", 0, 0.0, 0.0
-    return best_dir, best_n, min(best_prices), max(best_prices)
+    sorted_keys = sorted(fps.keys(), reverse=True)
+    # Check current forming candle, and fall back to the most recently completed candle
+    for key in sorted_keys[:2]:
+        levels = (fps[key] or {}).get("levels") or []
+        best_dir, best_n = "", 0
+        run_dir, run_n, run_prices = "", 0, []
+        best_prices: list[float] = []
+        for lvl in levels:
+            if not lvl.get("stacked"):
+                run_dir, run_n, run_prices = "", 0, []
+                continue
+            d = "BUY" if lvl.get("ask", 0) > lvl.get("bid", 0) else "SELL"
+            if d != run_dir:
+                run_dir, run_n, run_prices = d, 1, [lvl.get("price", 0.0)]
+            else:
+                run_n += 1
+                run_prices.append(lvl.get("price", 0.0))
+            if run_n > best_n:
+                best_dir, best_n = run_dir, run_n
+                best_prices = list(run_prices)
+        if best_n >= 3:
+            return best_dir, best_n, min(best_prices), max(best_prices)
+    return "", 0, 0.0, 0.0
+
 
 
 class DecisionContextBuilder:
@@ -116,6 +134,54 @@ class DecisionContextBuilder:
     edge, absorption side, OBI imbalance, VA location) and the VWAP bias
     filter, producing a fully-populated DecisionContext ready for evaluation.
     """
+
+    def __init__(self, *, greeks: GreeksPort | None = None) -> None:
+        # Missing Greeks → option_delta stays None (DATA_DEGRADED at translate).
+        self._greeks = greeks
+
+    def _option_delta(
+        self,
+        symbol: str,
+        *,
+        contract_symbol: str | None = None,
+        amt_dto: dict | None = None,
+    ) -> float | None:
+        """Greek delta for the *execution* option contract — never invent 0.50.
+
+        When the decision context is built on the underlying (eval_symbol) but
+        the engine trades an option, pass ``contract_symbol`` so lookup keys
+        off the contract, not the futures root.
+        """
+        lookup = contract_symbol or symbol
+        if not is_option_contract(lookup):
+            return None
+        if self._greeks is not None:
+            try:
+                raw = self._greeks.delta(lookup)
+            except Exception:
+                logger.debug("GreeksPort.delta failed for %s", lookup, exc_info=True)
+                raw = None
+            parsed = self._parse_delta(raw)
+            if parsed is not None:
+                return parsed
+        # Bridge: scan/coordinator may stamp optionDelta onto the AMT DTO.
+        if amt_dto:
+            parsed = self._parse_delta(amt_dto.get("optionDelta"))
+            if parsed is not None:
+                return parsed
+        return None
+
+    @staticmethod
+    def _parse_delta(raw: object) -> float | None:
+        if raw is None:
+            return None
+        try:
+            d = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if not (0.0 < abs(d) <= 1.0):
+            return None
+        return abs(d)
 
     # ------------------------------------------------------------------
     # DTO safe-access helpers (eliminate repeated ``or`` patterns)
@@ -140,6 +206,15 @@ class DecisionContextBuilder:
     def _di(d: dict, key: str, default: int = 0) -> int:
         """Safely read an int from a dict (None/empty -> default)."""
         return int(d.get(key) or default)
+
+    @staticmethod
+    def _vwap_std_from_result(result) -> float:
+        """Price-unit σ from VWAP bands (not deviation-in-sigmas)."""
+        session_vwap = float(getattr(result, "session_vwap", 0) or 0)
+        upper_1 = float(getattr(result, "vwap_upper_1", 0) or 0)
+        if session_vwap > 0 and upper_1 > 0:
+            return abs(upper_1 - session_vwap)
+        return 0.0
 
     # ------------------------------------------------------------------
     # Direction resolution
@@ -203,19 +278,8 @@ class DecisionContextBuilder:
     # ------------------------------------------------------------------
 
     def _build_setup_evidence(self, amt_dto: dict, agent_direction: str | None,
-                              nearest_leg_lvn: float) -> object | None:
-        """Construct SetupEvidence from AMT state.
-
-        Evidence is derived EXCLUSIVELY from live DTO keys (triple-a phase /
-        acceptance, drive flags, rejection flags, absorption side, leg LVNs).
-        It is NOT derived from the analyzer's ``setup`` regime key
-        (``TREND_MODEL``/``MEAN_REVERSION``/``RESPONSIVE_FADE``) — that is a
-        market-regime taxonomy, not a playbook detection, and the legacy
-        ``setupType``/``setupDirection``/``cvdAgrees`` DTO reads removed here
-        had no producer (architectural review finding 5): a dead ``setupType``
-        read made the VA_FADE/LVN_SNIPER fall-through arms and the direction
-        fallback silently depend on a key that never arrived.
-        """
+                              nearest_leg_lvn: float, bar=None) -> object | None:
+        """Construct SetupEvidence from AMT state."""
         from quant.decision.setup_state import SetupEvidence
         setup_dir = str(agent_direction or "").upper()
         cvd_val = self._df(amt_dto, "cvdSlope")
@@ -230,6 +294,55 @@ class DecisionContextBuilder:
         triple_phase = self._ds(amt_dto, "tripleAPhase")
         triple_signal = self._ds(amt_dto, "tripleASignal")
 
+        close_px = float(bar.close) if bar is not None else 0.0
+        tick = float(getattr(bar, "tick_size", 0.0) or 0.0) if bar is not None else 0.0
+        if tick <= 0:
+            tick = 0.05
+        vah = self._df(amt_dto, "valueAreaHigh")
+        val = self._df(amt_dto, "valueAreaLow")
+        session_vwap = self._df(amt_dto, "sessionVwap") or self._df(amt_dto, "vwap")
+        price_loc = "IN_VA"
+        if close_px > 0 and vah > 0 and val > 0:
+            if close_px > vah:
+                price_loc = "ABOVE_VAH"
+            elif close_px < val:
+                price_loc = "BELOW_VAL"
+
+        cb_bars = self._di(amt_dto, "compressionBoxBars")
+        cb_vah = self._df(amt_dto, "compressionBoxVah")
+        cb_val = self._df(amt_dto, "compressionBoxVal")
+        in_compression = bool(cb_bars >= 3 and cb_vah > 0 and cb_val > 0 and cb_val <= close_px <= cb_vah)
+
+        cluster_high = self._df(amt_dto, "absorptionClusterHigh")
+        cluster_low = self._df(amt_dto, "absorptionClusterLow")
+        departed = self._db(amt_dto, "driveDepartedAndReapproached") or self._db(
+            amt_dto, "departedAndReapproached"
+        )
+        # isSecondDrive / drive_entry_valid is only set by the drive tracker when
+        # a genuine Drive-2 re-approach is valid — treat that as the departure flag.
+        if is_second_drive or self._db(amt_dto, "driveEntryValid"):
+            departed = True
+
+        def _lvn_ok(level: float, max_ticks: float = 5.0) -> bool:
+            if level <= 0 or close_px <= 0:
+                return False
+            return abs(close_px - level) <= (max_ticks * tick + 1e-9)
+
+        def _breakout(direction: str) -> bool:
+            if direction == "LONG":
+                if cluster_high > 0:
+                    return close_px > cluster_high
+                if cb_bars >= 3 and cb_vah > 0:
+                    return close_px > cb_vah
+                return price_loc in ("ABOVE_VAH", "AT_LVN") or not in_compression
+            if direction == "SHORT":
+                if cluster_low > 0:
+                    return close_px < cluster_low
+                if cb_bars >= 3 and cb_val > 0:
+                    return close_px < cb_val
+                return price_loc in ("BELOW_VAL", "AT_LVN") or not in_compression
+            return False
+
         if triple_phase == "AGGRESSION" and (triple_signal in ("LONG", "SHORT") or agent_direction in ("LONG", "SHORT")):
             direction = triple_signal or agent_direction
             accepted = bool(
@@ -237,37 +350,66 @@ class DecisionContextBuilder:
                 else amt_dto.get("acceptanceBelow")
             )
             if accepted:
+                # Only mark cvd_agrees against the setup's own direction.
+                setup_cvd = bool(
+                    (direction == "LONG" and cvd_val >= -0.2)
+                    or (direction == "SHORT" and cvd_val <= 0.2)
+                )
                 return SetupEvidence(
                     setup_type="TRIPLE_A", direction=direction,
                     absorption=True, accumulation=True, aggression=True,
-                    acceptance=True, cvd_agrees=cvd_agrees,
+                    acceptance=True, cvd_agrees=setup_cvd,
+                    price_location="IN_COMPRESSION" if in_compression else price_loc,
+                    price=close_px, tick_size=tick, session_vwap=session_vwap,
+                    level=nearest_leg_lvn,
+                    breakout_beyond_cluster=_breakout(direction),
+                    lvn_proximity_ok=_lvn_ok(nearest_leg_lvn, max_ticks=5.0),
                 )
-            # No A/R-engine acceptance for this direction: do NOT fabricate it.
-            # Fall through — a different setup may still qualify; we never
-            # claim Triple-A completeness from "machine says AGGRESSION" alone.
         if is_second_drive:
+            direction = setup_dir or ("SHORT" if rejection_at_high else "LONG")
+            setup_cvd = bool(
+                (direction == "LONG" and cvd_val >= -0.2)
+                or (direction == "SHORT" and cvd_val <= 0.2)
+            )
             return SetupEvidence(
                 setup_type="SECOND_DRIVE",
-                direction=setup_dir or ("SHORT" if rejection_at_high else "LONG"),
+                direction=direction,
                 drive_number=drive_number or 2, d1_rejected=True,
                 rejection=rejection_at_high or rejection_at_low,
-                cvd_agrees=cvd_agrees,
+                cvd_agrees=setup_cvd,
+                price_location=price_loc,
+                price=close_px, tick_size=tick, session_vwap=session_vwap,
+                departed_and_reapproached=bool(departed),
             )
         if rejection_at_high or rejection_at_low:
             direction = "SHORT" if rejection_at_high else "LONG"
+            setup_cvd = bool(
+                (direction == "LONG" and cvd_val >= -0.2)
+                or (direction == "SHORT" and cvd_val <= 0.2)
+            )
             return SetupEvidence(
                 setup_type="VA_FADE", direction=direction,
                 rejection=rejection_at_high or rejection_at_low,
                 acceptance=self._db(amt_dto, "acceptanceAbove") or self._db(amt_dto, "acceptanceBelow"),
-                cvd_agrees=cvd_agrees,
+                cvd_agrees=setup_cvd,
+                price_location=price_loc,
+                price=close_px, tick_size=tick, session_vwap=session_vwap,
             )
         if nearest_leg_lvn > 0 and absorption_direction(amt_dto.get("absorptionSide")):
             direction = absorption_direction(amt_dto.get("absorptionSide"))
+            setup_cvd = bool(
+                (direction == "LONG" and cvd_val >= -0.2)
+                or (direction == "SHORT" and cvd_val <= 0.2)
+            )
             return SetupEvidence(
                 setup_type="LVN_SNIPER", direction=direction,
-                level=nearest_leg_lvn, absorption=True, cvd_agrees=cvd_agrees,
+                level=nearest_leg_lvn, absorption=True, cvd_agrees=setup_cvd,
+                price_location=price_loc,
+                price=close_px, tick_size=tick, session_vwap=session_vwap,
+                lvn_proximity_ok=_lvn_ok(nearest_leg_lvn, max_ticks=3.0),
             )
         return None
+
 
     # ------------------------------------------------------------------
     # Position extraction helpers
@@ -517,11 +659,18 @@ class DecisionContextBuilder:
         squeeze_detected, squeeze_dir, trapped_lvl, pullback,
         break_dir, break_type, si_dir, si_mag, si_low, si_high,
         buy_wall_below, sell_wall_above, recent_decisions, session_info,
+        vwap_std_override=None,
+        contract_symbol: str | None = None,
     ) -> dict:
         """Build the keyword-argument dict for the DecisionContext constructor."""
         df, ds, db, di = self._df, self._ds, self._db, self._di
         session_open = self._resolve_session_open(
             effective_time, market, contract_expiry, session_info)
+        vwap_std = (
+            float(vwap_std_override)
+            if vwap_std_override is not None
+            else df(amt_dto, "vwapDeviationSigmas")
+        )
         return dict(
             state=None,
             bar=bar,
@@ -565,7 +714,7 @@ class DecisionContextBuilder:
             npoc_below=df(amt_dto, "npocBelow"),
             tick_size=tick_size,
             session_vwap=df(amt_dto, "sessionVwap") or (float(bar.vwap) if bar and getattr(bar, "vwap", None) else 0.0),
-            vwap_std=df(amt_dto, "vwapDeviationSigmas"),
+            vwap_std=vwap_std,
             vwap_upper_2=df(amt_dto, "vwapUpper2"),
             vwap_lower_2=df(amt_dto, "vwapLower2"),
             cvd_slope=df(amt_dto, "cvdSlope"),
@@ -591,11 +740,11 @@ class DecisionContextBuilder:
             allow_reversion=allow_reversion,
             is_expiry=is_expiry,
             profile_shape=ds(amt_dto, "profileShape"),
-            # deltaNormalizedOption is candle order-flow delta, not an option
-            # Greek. No chain-Greek producer exists, so options fall back to
-            # DEFAULT_OPTION_DELTA and futures stay None.
-            option_delta=(
-                DEFAULT_OPTION_DELTA if is_option_contract(symbol) else None
+            # Greek delta only — never invent 0.50. Missing → None → DATA_DEGRADED
+            # at option translation / sizing. Key off the execution contract when
+            # the decision context is built on the underlying eval symbol.
+            option_delta=self._option_delta(
+                symbol, contract_symbol=contract_symbol, amt_dto=amt_dto,
             ),
             contested_bubble_zone=db(amt_dto, "contestedZone"),
             stacked_imbalance_direction=si_dir,
@@ -639,12 +788,14 @@ class DecisionContextBuilder:
         warm_bars: int,
         cooldown_remaining_sec: float,
         risk_state,
-        amt_dto: dict,
+        amt_dto: dict | None = None,
+        snapshot: AnalysisSnapshot | None = None,
         order_book=None,
         interval_seconds: int = DEFAULT_INTERVAL_SEC,
         position=None,
         entry_bar_index: int = 0,
         recent_decisions: list | None = None,
+        contract_symbol: str | None = None,
     ) -> DecisionContext:
         """Build a DecisionContext from the given inputs.
         
@@ -658,21 +809,41 @@ class DecisionContextBuilder:
             warm_bars: Number of seeded history bars
             cooldown_remaining_sec: Cooldown time remaining in seconds
             risk_state: Current RiskState
-            amt_dto: AMT analysis DTO
+            amt_dto: AMT analysis DTO (fallback when snapshot is absent)
+            snapshot: Typed analysis snapshot (preferred over amt_dto)
             interval_seconds: Bar interval in seconds
             
         Returns:
             A fully-populated DecisionContext
         """
         warmup_bars = 15
+        vwap_std_override = None
+        if snapshot is not None:
+            from quant.amt.dto import amt_result_to_dto
+
+            r = snapshot.result
+            effective_dto = amt_result_to_dto(r)
+            vwap_std_override = self._vwap_std_from_result(r)
+            _si_dir = snapshot.stacked_imbalance_direction
+            _si_mag = snapshot.stacked_imbalance_magnitude
+            _si_low = snapshot.stacked_imbalance_low
+            _si_high = snapshot.stacked_imbalance_high
+            _buy_wall_below, _sell_wall_above = _print_levels_from_result(
+                r.aggressive_prints, bar
+            )
+        else:
+            effective_dto = amt_dto or {}
+            _si_dir, _si_mag, _si_low, _si_high = _latest_stacked_imbalance(effective_dto)
+            _buy_wall_below, _sell_wall_above = _print_levels_from_dto(effective_dto, bar)
+
         df = self._df
-        obi = df(amt_dto, "obi")
+        obi = df(effective_dto, "obi")
         close_px = float(bar.close if bar else 0.0)
-        vah = df(amt_dto, "valueAreaHigh")
-        val = df(amt_dto, "valueAreaLow")
-        ofi = df(amt_dto, "ofi")
-        vwap_upper_1 = df(amt_dto, "vwapUpper1") or float("inf")
-        vwap_lower_1 = df(amt_dto, "vwapLower1") or float("-inf")
+        vah = df(effective_dto, "valueAreaHigh")
+        val = df(effective_dto, "valueAreaLow")
+        ofi = df(effective_dto, "ofi")
+        vwap_upper_1 = df(effective_dto, "vwapUpper1") or float("inf")
+        vwap_lower_1 = df(effective_dto, "vwapLower1") or float("-inf")
         best_bid, best_ask = self._extract_best_bid_ask(order_book)
 
         # Session & Expiry
@@ -682,23 +853,27 @@ class DecisionContextBuilder:
         is_expiry = self._resolve_expiry(effective_time, is_epoch, is_iso, contract_expiry)
 
         # Direction, Setup, Position via extracted helpers
-        agent_direction = self._resolve_direction(amt_dto, close_px, vah, val, obi, ofi, vwap_upper_1, vwap_lower_1, market=market)
-        nearest_leg_lvn = self._nearest_leg_lvn(amt_dto, close_px)
-        setup_evidence = self._build_setup_evidence(amt_dto, agent_direction, nearest_leg_lvn)
+        agent_direction = self._resolve_direction(
+            effective_dto, close_px, vah, val, obi, ofi, vwap_upper_1, vwap_lower_1, market=market
+        )
+        nearest_leg_lvn = self._nearest_leg_lvn(effective_dto, close_px)
+        setup_evidence = self._build_setup_evidence(
+            effective_dto, agent_direction, nearest_leg_lvn, bar=bar
+        )
         # ponytail: a confirmed structural setup evidence establishes the trade direction
         agent_direction = self._apply_setup_direction(agent_direction, setup_evidence)
         agent_direction = self._apply_option_short_suppression(symbol, agent_direction)
         pos = self._extract_position(position, close_px, bar_index, entry_bar_index)
-        _si_dir, _si_mag, _si_low, _si_high = _latest_stacked_imbalance(amt_dto)
-        _buy_wall_below, _sell_wall_above = _print_levels_from_dto(amt_dto, bar)
 
         # Squeeze, market state, session
-        squeeze_detected, squeeze_dir, trapped_lvl, pullback = self._resolve_squeeze(amt_dto, bar, tick_size)
-        amt_market_state = self._resolve_market_state_enum(amt_dto)
+        squeeze_detected, squeeze_dir, trapped_lvl, pullback = self._resolve_squeeze(
+            effective_dto, bar, tick_size
+        )
+        amt_market_state = self._resolve_market_state_enum(effective_dto)
         allow_trend = session_info.allow_trend if session_info else True
         allow_reversion = session_info.allow_reversion if session_info else True
-        break_dir = self._ds(amt_dto, "breakDirection").upper()
-        break_type = self._ds(amt_dto, "breakType").upper()
+        break_dir = self._ds(effective_dto, "breakDirection").upper()
+        break_type = self._ds(effective_dto, "breakType").upper()
 
         ctx_kwargs = self._build_context_kwargs(
             bar=bar, symbol=symbol, market=market, bar_index=bar_index,
@@ -706,7 +881,7 @@ class DecisionContextBuilder:
             warm_bars=warm_bars, warmup_bars=warmup_bars,
             cooldown_remaining_sec=cooldown_remaining_sec, risk_state=risk_state,
             agent_direction=agent_direction, setup_evidence=setup_evidence,
-            pos=pos, amt_dto=amt_dto, best_bid=best_bid, best_ask=best_ask,
+            pos=pos, amt_dto=effective_dto, best_bid=best_bid, best_ask=best_ask,
             session_phase=session_phase, is_expiry=is_expiry,
             allow_trend=allow_trend, allow_reversion=allow_reversion,
             amt_market_state=amt_market_state, obi=obi, vah=vah, val=val,
@@ -717,5 +892,7 @@ class DecisionContextBuilder:
             si_dir=_si_dir, si_mag=_si_mag, si_low=_si_low, si_high=_si_high,
             buy_wall_below=_buy_wall_below, sell_wall_above=_sell_wall_above,
             recent_decisions=recent_decisions, session_info=session_info,
+            vwap_std_override=vwap_std_override,
+            contract_symbol=contract_symbol,
         )
         return DecisionContext(**ctx_kwargs)

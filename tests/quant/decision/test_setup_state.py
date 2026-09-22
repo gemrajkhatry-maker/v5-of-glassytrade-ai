@@ -20,6 +20,10 @@ def test_triple_a_requires_all_three_legs_and_acceptance():
         aggression=True,
         acceptance=True,
         cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=True,
+        price=100.0,
+        session_vwap=99.0,
     )
     assert evidence.is_complete() is True
 
@@ -33,6 +37,8 @@ def test_triple_a_without_accumulation_is_incomplete():
         aggression=True,
         acceptance=True,
         cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=True,
     )
     assert evidence.is_complete() is False
     assert "Accumulation" in evidence.rejection_reason()
@@ -46,6 +52,7 @@ def test_second_drive_requires_d1_rejection_and_d2():
         d1_rejected=True,
         rejection=True,
         cvd_agrees=True,
+        departed_and_reapproached=True,
     )
     assert evidence.is_complete() is True
 
@@ -58,6 +65,7 @@ def test_second_drive_first_touch_rejected():
         d1_rejected=False,
         rejection=False,
         cvd_agrees=True,
+        departed_and_reapproached=False,
     )
     assert evidence.is_complete() is False
     assert "Drive number 1 != 2" in evidence.rejection_reason()
@@ -70,6 +78,8 @@ def test_lvn_sniper_requires_lvn_return_and_absorption():
         level=100.5,
         absorption=True,
         cvd_agrees=True,
+        price=100.5,
+        tick_size=0.05,
     )
     assert evidence.is_complete() is True
 
@@ -81,6 +91,7 @@ def test_lvn_sniper_without_level_is_incomplete():
         level=0.0,
         absorption=True,
         cvd_agrees=True,
+        price=100.0,
     )
     assert evidence.is_complete() is False
     assert "Missing LVN price level" in evidence.rejection_reason()

@@ -10,6 +10,8 @@ Verifies that:
 import pytest
 from quant.decision.context_builder import DecisionContextBuilder
 from quant.contracts.enums import MarketState
+from quant.contracts.value_objects import AMTResult
+from quant.amt.snapshot import analysis_snapshot_from_result
 from quant.bars import Bar
 
 
@@ -32,6 +34,35 @@ def _dummy_bar(close=100.5):
         sell_volume=400.0,
         delta=200.0,
     )
+
+
+def test_build_from_snapshot_does_not_need_camel_dto():
+    result = AMTResult(
+        market_state="BALANCED",
+        poc=100.0,
+        value_area_high=102.0,
+        value_area_low=98.0,
+        session_vwap=100.0,
+        cvd_slope=1.5,
+        cvd_divergence="NONE",
+    )
+    snap = analysis_snapshot_from_result(result, "2026-09-22T10:00:00+05:30")
+    ctx = DecisionContextBuilder().build(
+        bar=_dummy_bar(),
+        symbol="NIFTY",
+        market="NSE",
+        contract_expiry=None,
+        tick_size=0.05,
+        bar_index=20,
+        warm_bars=0,
+        cooldown_remaining_sec=0.0,
+        risk_state=DummyRisk(),
+        snapshot=snap,
+        amt_dto={},  # empty dto must not wipe typed fields
+    )
+    assert ctx.poc == 100.0
+    assert ctx.vah == 102.0
+    assert ctx.cvd_slope == 1.5
 
 
 def test_imbalanced_context_has_no_complete_setup_without_sequence():
@@ -75,9 +106,11 @@ def test_va_fade_dto_rejection_maps_to_complete_setup():
         "acceptanceAbove": False,
     }
     bar = _dummy_bar()
+    # Close back INSIDE the VA after the VAH rejection wick — fade incomplete
+    # while price is still ABOVE_VAH.
     bar = Bar(
         time=bar.time, open=bar.open, high=bar.high, low=bar.low,
-        close=101.6, volume=bar.volume, buy_volume=bar.buy_volume,
+        close=100.4, volume=bar.volume, buy_volume=bar.buy_volume,
         sell_volume=bar.sell_volume, delta=bar.delta,
     )
     ctx = builder.build(

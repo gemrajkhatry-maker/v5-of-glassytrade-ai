@@ -359,6 +359,8 @@ class QuantEngine:
         self.symbol = symbol
         self._tick_size = tick_size
         self._max_lots = max_lots
+        from quant.contracts.ports.greeks import DictGreeks
+        self._greeks = DictGreeks()
         # Session market for the Fabio phase gates: NSE closes 15:30, MCX
         # trades until 23:30 — a hardcoded NSE table would block every MCX
         # entry after 15:15 ("Session closed").
@@ -524,6 +526,10 @@ class QuantEngine:
         # _session_date is always None at __init__ time (set on first bar), so
         # we pass None here and SessionRisk._today() fills it correctly.
         base_risk = risk_per_trade_pct if risk_per_trade_pct is not None else 0.005
+        from quant.contracts.aggregates import INITIAL_CAPITAL
+        _equity = float(
+            getattr(self._portfolio_risk, "_starting_equity", None) or INITIAL_CAPITAL
+        )
         self._risk = SessionRisk(
             storage=self._session_levels,
             symbol=self.symbol,
@@ -534,6 +540,7 @@ class QuantEngine:
             max_consecutive_losses=max_consecutive_losses,
             base_risk_pct=base_risk,
             day_of_week=datetime.now(tz=IST).weekday(),
+            starting_equity=_equity,
         )
         self._bus = EventBus()
         # Passive hot-path trace (B7): bar/decision/fill phases are mapped by
@@ -702,16 +709,25 @@ class QuantEngine:
         from quant.persistence_bridge import PositionStorageBridge
         PositionStorageBridge(storage, contract=self._contract).attach(self._bus)
         self._storage = storage
+        # Dated SessionLevelStore is the sole prior-levels authority.
+        # Do NOT overwrite with undated prior_profile kv (audit §5.3).
         try:
-            from quant.amt.session.context import load_prior_profile
-            prior = load_prior_profile(storage, self.symbol)
-            if prior and prior.get("poc"):
-                if hasattr(self, "_amt_engine") and hasattr(self._amt_engine, "set_prior_profile"):
+            if hasattr(self, "_amt_engine") and hasattr(self._amt_engine, "_prior"):
+                dated = self._session_levels.load_levels(self.symbol) if self._session_levels else {}
+                if dated and dated.get("poc"):
                     self._amt_engine.set_prior_profile(
-                        poc=prior["poc"], vah=prior.get("vah", 0.0), val=prior.get("val", 0.0)
+                        poc=float(dated["poc"]),
+                        vah=float(dated.get("vah") or 0.0),
+                        val=float(dated.get("val") or 0.0),
+                        close=float(dated.get("close") or 0.0),
                     )
         except Exception:
-            logger.exception("Failed to load prior profile from storage for %s", self.symbol)
+            logger.exception("Failed to load dated prior levels for %s", self.symbol)
+        self.restore_kernel_state()
+
+    def set_option_delta(self, delta: float, *, symbol: str | None = None) -> None:
+        """Stamp the execution contract's Greek delta for option translation."""
+        self._greeks.set_delta(symbol or self.symbol, delta)
 
     def persist_prior_profile(self) -> None:
         """Persist current session POC/VAH/VAL to storage as prior profile."""
@@ -732,14 +748,61 @@ class QuantEngine:
                 )
             except Exception:
                 logger.exception("Failed to persist prior profile for %s", self.symbol)
+        self.persist_kernel_state()
 
-    def restore_position(self, position) -> None:
+    def persist_kernel_state(self) -> None:
+        """Persist SessionKernel CVD/VWAP/IB/warmth for mid-session restart."""
+        storage = getattr(self, "_storage", None)
+        amt = getattr(self, "_amt_engine", None)
+        if storage is None or amt is None or not hasattr(amt, "export_kernel_state"):
+            return
+        try:
+            from quant.amt.session.context import persist_kernel_state
+            persist_kernel_state(storage, self.symbol, amt.export_kernel_state())
+        except Exception:
+            logger.exception("Failed to persist kernel state for %s", self.symbol)
+
+    def restore_kernel_state(self) -> None:
+        """Rehydrate SessionKernel trackers from the durable kv snapshot."""
+        storage = getattr(self, "_storage", None)
+        amt = getattr(self, "_amt_engine", None)
+        if storage is None or amt is None or not hasattr(amt, "import_kernel_state"):
+            return
+        try:
+            from quant.amt.session.context import load_kernel_state
+            snap = load_kernel_state(storage, self.symbol)
+            if snap:
+                amt.import_kernel_state(snap)
+        except Exception:
+            logger.exception("Failed to restore kernel state for %s", self.symbol)
+
+    def restore_position(self, position, *, stop_meta: dict | None = None) -> None:
         """Rehydrate the in-memory book after a process restart."""
         pm = self._get_position_manager()
         pm.current_position = position
         self.state = self.state.with_position(_position_to_state(position))
         self._entry_bar_index = self._bar_index
-        self._entry_time_epoch = 0.0
+        meta = stop_meta or {}
+        epoch = float(meta.get("entry_time_epoch") or 0.0)
+        if epoch <= 0:
+            # Prefer a parseable open_time over leaving the time-stop dead (0.0).
+            try:
+                from quant.contracts.timezones import parse_bar_time
+                parsed = parse_bar_time(getattr(position, "open_time", "") or "")
+                epoch = float(parsed.timestamp()) if parsed is not None else 0.0
+            except Exception:
+                epoch = 0.0
+        self._entry_time_epoch = epoch
+        be = meta.get("breakeven")
+        trail = meta.get("trail_stop")
+        tier = int(meta.get("tp_tier") or 0)
+        if be or trail or tier:
+            pm._exits.restore_stop_state(
+                position,
+                breakeven=float(be) if be else None,
+                trail_stop=float(trail) if trail else None,
+                tp_tier=tier,
+            )
         # Seed EventStore with baseline PositionOpened so event sourcing
         # and subsequent fold()/PositionClosed remain consistent.
         from quant.events import PositionOpened
@@ -842,6 +905,7 @@ class QuantEngine:
         deps = {
             "risk": _LateBound(lambda: self._risk),
             "get_portfolio_risk": lambda: self._portfolio_risk,
+            "get_opportunity_auction": lambda: getattr(self, "_opportunity_auction", None),
             "oms": _LateBound(lambda: self._oms),
             "strategy": _LateBound(lambda: self._strategy),
             "amt_engine": _LateBound(lambda: self._amt_engine),
@@ -853,6 +917,7 @@ class QuantEngine:
             "live_mode": lambda: bool(getattr(self._oms, "is_live", False)),
             "get_underlying_symbol": self._underlying if self._underlying_gateway is not None else None,
             "trades_executed": self._trades_executed,
+            "greeks": getattr(self, "_greeks", None),
         }
         state = {
             "get_bar_index": lambda: self._bar_index,
@@ -909,6 +974,7 @@ class QuantEngine:
             "close_lock": self._close_lock,
             "underlying_gateway": self._underlying_gateway,
             "risk": _LateBound(lambda: self._risk),
+            "greeks": getattr(self, "_greeks", None),
         }
         state = {
             "get_bar_index": lambda: self._bar_index,
@@ -967,7 +1033,10 @@ class QuantEngine:
 
         initial_amt = self._option_amt_dto or self._amt_engine.last_amt_dto
         if initial_amt and hasattr(self, "_advisor") and self._advisor is not None:
-            ctx = DecisionContextBuilder().build(
+            contract_symbol = (
+                self.symbol if self._underlying_gateway is not None else None
+            )
+            ctx = DecisionContextBuilder(greeks=self._greeks).build(
                 bar=self._amt_engine.last_bar,
                 symbol=self.symbol,
                 market=self._market,
@@ -980,6 +1049,7 @@ class QuantEngine:
                 amt_dto=initial_amt,
                 order_book=self._last_depth,
                 recent_decisions=list(self._recent_decisions),
+                contract_symbol=contract_symbol,
             )
             self._advisor.on_context(ctx)
 
@@ -992,7 +1062,13 @@ class QuantEngine:
             if tick is None:
                 break
             steps += 1
-            self._last_tick_wall = time.time()
+            # Freshness from exchange epoch carried on the tick, not dequeue wall
+            # clock — a backlog hours old must not report as healthy.
+            try:
+                tick_epoch = float(getattr(tick, "time", 0) or 0)
+            except (TypeError, ValueError):
+                tick_epoch = 0.0
+            self._last_tick_wall = tick_epoch if tick_epoch > 1e9 else time.time()
             tick_handler.process_tick(tick)
         return list(self._trace)
 
@@ -1112,9 +1188,13 @@ class QuantEngine:
         """Single DecisionContext source shared by the flat-path ``_decide()``
         and the positioned thesis-flip check — extracted, not duplicated."""
         eval_symbol = self._underlying() if self._underlying_gateway is not None else self.symbol
+        contract_symbol = (
+            self.symbol if self._underlying_gateway is not None else None
+        )
         pm = self._get_position_manager() if hasattr(self, "_get_position_manager") else None
         active_pos = (pm.current_position if pm is not None else None) or self.state.position
-        return DecisionContextBuilder().build(
+        snap = getattr(self._amt_engine, "last_snapshot", None)
+        return DecisionContextBuilder(greeks=self._greeks).build(
             bar=bar,
             symbol=eval_symbol,
             market=self._market,
@@ -1125,10 +1205,12 @@ class QuantEngine:
             cooldown_remaining_sec=cooldown_remaining_sec,
             risk_state=self._risk.state(),
             amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
+            snapshot=snap,
             order_book=self._last_depth,
             position=active_pos,
             entry_bar_index=self._entry_bar_index,
             recent_decisions=list(self._recent_decisions),
+            contract_symbol=contract_symbol,
         )
 
     def _check_thesis_flip(self, amt_dto: dict, bar) -> None:
@@ -1164,6 +1246,7 @@ class QuantEngine:
                 tick_size=self._tick_size,
                 get_depth=lambda: self._last_depth,
                 get_amt_dto=lambda: self._amt_engine.last_amt_dto,
+                get_snapshot=lambda: self._amt_engine.last_snapshot,
                 portfolio_risk=self._portfolio_risk,  # E11: pyramid add-ons reserve aggregate risk
             )
         return self._pos_mgr
@@ -1305,9 +1388,38 @@ class QuantEngine:
                 # Lifecycle state is canonical only after durable append. Other
                 # telemetry/market events may still update the operational cache.
                 self.state = apply_event(self.state, event)
+            if lifecycle_event:
+                # Always adopt the execution-book cache from the lifecycle
+                # event. On a durable append this is the journal rebuild; on
+                # append failure the OMS fill still happened and must not be
+                # orphaned (reconciliation_required is already latched above).
+                self._adopt_position_cache_from_journal(event)
             if lifecycle_event and not append_failed:
                 self._bus.publish(event)
                 self._trace.append(event)
+                self.persist_kernel_state()
+
+    def _adopt_position_cache_from_journal(self, event: Event) -> None:
+        """Rebuild ``pm.current_position`` from the lifecycle journal event.
+
+        OMS fill paths emit PositionOpened/Reduced/Closed; this is the only
+        writer that adopts the execution-book cache from those events so the
+        fold and the book stay aligned after every durable append.
+        """
+        pm = self._get_position_manager()
+        if isinstance(event, PositionOpened):
+            pos = event.position
+            # Pyramid add-ons live on pm.pyramid_positions; do not clobber base.
+            if int(getattr(pos, "pyramid_level", 0) or 0) > 0:
+                return
+            pm.current_position = pos
+        elif isinstance(event, PositionReduced):
+            pm.current_position = event.remaining
+        elif isinstance(event, PositionClosed):
+            closed = getattr(event.fill, "position", None)
+            if closed is not None and int(getattr(closed, "pyramid_level", 0) or 0) > 0:
+                return
+            pm.current_position = None
 
     def _underlying(self) -> str:
         from quant.contracts.exchange_config import ExchangeConfig

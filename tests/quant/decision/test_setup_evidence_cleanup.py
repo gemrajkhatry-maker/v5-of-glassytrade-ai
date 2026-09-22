@@ -81,21 +81,19 @@ class TestSetupEvidenceLiveKeys:
         assert ev.level == 99.5
 
     def test_cvd_agrees_derived_from_direction_and_cvd_slope(self):
-        # cvd_agrees is computed from the resolved direction + cvdSlope; the
-        # rejection key only makes evidence exist so the flag is inspectable.
+        # cvd_agrees is computed from the VA_FADE direction (rejection side)
+        # + cvdSlope. rejectionAtHigh → SHORT; rejectionAtLow → LONG.
         # LONG requires cvd >= -0.2
-        ev = _evidence({"rejectionAtHigh": True, "cvdSlope": -0.1},
-                       agent_direction="LONG")
+        ev = _evidence({"rejectionAtLow": True, "cvdSlope": -0.1})
+        assert ev is not None and ev.direction == "LONG"
         assert ev.cvd_agrees is True
-        ev = _evidence({"rejectionAtHigh": True, "cvdSlope": -1.0},
-                       agent_direction="LONG")
+        ev = _evidence({"rejectionAtLow": True, "cvdSlope": -1.0})
         assert ev.cvd_agrees is False
         # SHORT requires cvd <= 0.2
-        ev = _evidence({"rejectionAtHigh": True, "cvdSlope": 0.1},
-                       agent_direction="SHORT")
+        ev = _evidence({"rejectionAtHigh": True, "cvdSlope": 0.1})
+        assert ev is not None and ev.direction == "SHORT"
         assert ev.cvd_agrees is True
-        ev = _evidence({"rejectionAtHigh": True, "cvdSlope": 1.0},
-                       agent_direction="SHORT")
+        ev = _evidence({"rejectionAtHigh": True, "cvdSlope": 1.0})
         assert ev.cvd_agrees is False
 
 

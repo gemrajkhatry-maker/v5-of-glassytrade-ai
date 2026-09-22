@@ -63,15 +63,16 @@ def _costs_from_dict(value) -> TradeCosts | None:
     })
 
 
-def position_to_row(symbol: str, position: Position) -> dict:
+def position_to_row(symbol: str, position: Position, *, stop_meta: dict | None = None) -> dict:
     sig = position.order.signal
+    meta = stop_meta or {}
     return {
         "id": position._id,
         "symbol": symbol,
         "side": "LONG" if position.size > 0 else "SHORT",
         "entry_price": position.open_price,
         "size": position.size,
-        "stop_loss": sig.sl,
+        "stop_loss": float(meta.get("stop_loss") or sig.sl),
         "take_profit": sig.tp,
         "source": sig.model_label,
         "opened_at": position.open_time,
@@ -85,6 +86,10 @@ def position_to_row(symbol: str, position: Position) -> dict:
         "pyramid_level": position.pyramid_level,
         "is_pyramid": position.is_pyramid,
         "entry_costs": _costs_to_dict(position.entry_costs),
+        "breakeven": meta.get("breakeven"),
+        "trail_stop": meta.get("trail_stop"),
+        "tp_tier": int(meta.get("tp_tier") or 0),
+        "entry_time_epoch": float(meta.get("entry_time_epoch") or 0.0),
     }
 
 

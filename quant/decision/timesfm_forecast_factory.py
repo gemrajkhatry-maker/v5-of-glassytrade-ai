@@ -49,12 +49,15 @@ def build_forecast(
     a model upgrade corrupts every downstream consumer at once.
     """
     curr_price = float(curr_price)
+    source = "TIMESFM_3.0_NATIVE"
 
     if quantiles is None or len(quantiles) == 0:
         p50 = np.full(horizon, curr_price, dtype=np.float32)
         p10 = p50 - (curr_price * FALLBACK_BAND_PCT)
         p90 = p50 + (curr_price * FALLBACK_BAND_PCT)
-        q_spread = 0.0
+        # Honest spread: the fabricated band width, not 0.0 (which lied as "certain").
+        q_spread = float(curr_price * FALLBACK_BAND_PCT * 2.0)
+        source = "FALLBACK_BAND"
     else:
         q = np.asarray(quantiles)
         if q.ndim != 2 or q.shape[1] != QUANTILE_COUNT:
@@ -82,6 +85,7 @@ def build_forecast(
         forecast_steps=make_steps(p50, curr_price),
         curr_price=curr_price,
         lat_ms=float(lat_ms),
+        source=source,
     )
 
 
@@ -101,7 +105,12 @@ def fresh_forecast(
     if engine is not None:
         getter = getattr(engine, "last_forecast_for", None)
         if callable(getter):
-            fc = getter(symbol)
+            # Pass observation identity when the engine supports it so a stale
+            # micro-bar forecast is never served under a different observation.
+            try:
+                fc = getter(symbol, observation_id=bar_index)
+            except TypeError:
+                fc = getter(symbol)
             if fc is not None:
                 return fc
     getter = getattr(strategy, "get_latest_forecast", None) if strategy is not None else None

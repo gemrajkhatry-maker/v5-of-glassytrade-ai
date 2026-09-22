@@ -70,6 +70,12 @@ class LLMAdvisor:
         """
         # 1. Instant baseline emission (0ms)
         decision = self._backend.analyze(ctx) if self._backend is not None else self._rule_based_narrative(ctx)
+        if isinstance(decision, dict) and "laya" not in decision:
+            try:
+                from quant.decision.laya_advisor import get_laya_advisor
+                decision["laya"] = get_laya_advisor().evaluate_from_context(ctx)
+            except Exception:
+                pass
         self._emit_decision(ctx, decision)
 
         # 2. If MLX model is configured, queue for deep model reasoning

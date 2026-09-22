@@ -130,6 +130,8 @@ backend/.active_contracts.json
 
 # local junk
 .env.bak-*
+backend/.session-levels-*.tmp
+backend/*.db.bak-*
 
 # Local MLX model weights (never stage)
 models/

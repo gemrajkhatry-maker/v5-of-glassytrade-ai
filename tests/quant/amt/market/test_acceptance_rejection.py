@@ -39,6 +39,31 @@ class TestAcceptanceRejectionEngine:
         result = engine.update(_candle("2024-01-01T09:17:00+00:00", 94, 95, 93, 93.5, v=2000), 105.0, 95.0, 1000.0)
         assert result.acceptance_below is True
 
+    def test_acceptance_tracks_only_the_current_close_side(self):
+        engine = AcceptanceRejectionEngine(time_threshold=50.0)
+        engine.update(_candle("2024-01-01T09:15:00+00:00", 100, 101, 99, 100), 105.0, 95.0, 1000.0)
+
+        above = engine.update(
+            _candle("2024-01-01T09:17:00+00:00", 106, 107, 105.5, 106.5, v=2000),
+            105.0, 95.0, 1000.0,
+        )
+        assert above.acceptance_above is True
+        assert above.acceptance_below is False
+
+        below = engine.update(
+            _candle("2024-01-01T09:18:00+00:00", 94, 94.5, 93, 93.5, v=2000),
+            105.0, 95.0, 1000.0,
+        )
+        assert below.acceptance_above is False
+        assert below.acceptance_below is True
+
+        inside = engine.update(
+            _candle("2024-01-01T09:19:00+00:00", 100, 101, 99, 100, v=2000),
+            105.0, 95.0, 1000.0,
+        )
+        assert inside.acceptance_above is False
+        assert inside.acceptance_below is False
+
     def test_rejection_at_high(self):
         engine = AcceptanceRejectionEngine()
         # Wicks above VAH with volume spike, close back below

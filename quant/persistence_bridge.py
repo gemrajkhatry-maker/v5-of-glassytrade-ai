@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from quant.events import PositionClosed, PositionOpened, PositionReduced
+from quant.events import PositionClosed, PositionOpened, PositionReduced, StopMoved
 from quant.execution.order import position_to_row
 
 
@@ -24,6 +24,7 @@ class PositionStorageBridge:
     def __init__(self, storage, contract=None) -> None:
         self._storage = storage
         self._contract = contract
+        self._open_rows: dict[str, dict] = {}  # position_id -> last saved row
 
     def _identity(self) -> dict:
         """Return durable broker-neutral identity without changing old schemas."""
@@ -43,6 +44,7 @@ class PositionStorageBridge:
         bus.subscribe(PositionOpened, self.on_opened, priority=-50)
         bus.subscribe(PositionReduced, self.on_reduced, priority=-50)
         bus.subscribe(PositionClosed, self.on_closed, priority=-50)
+        bus.subscribe(StopMoved, self.on_stop_moved, priority=-50)
 
     def _save_fill(self, *, fill_id: str, position_id: str, symbol: str,
                    side: str, quantity: float, fill_price: float,
@@ -72,10 +74,12 @@ class PositionStorageBridge:
 
     def on_opened(self, event: PositionOpened) -> None:
         position = event.position
-        self._storage.save_open_position({
+        row = {
             **position_to_row(event.symbol, position),
             **self._identity(),
-        })
+        }
+        self._open_rows[position.id] = row
+        self._storage.save_open_position(row)
         self._save_fill(
             fill_id=f"entry:{position.id}",
             position_id=position.id,
@@ -90,6 +94,7 @@ class PositionStorageBridge:
 
     def on_closed(self, event: PositionClosed) -> None:
         pos = event.fill.position
+        self._open_rows.pop(pos.id, None)
         self._save_fill(
             fill_id=(getattr(event.fill, "logical_id", "") or f"close:{pos.id}:{event.fill.close_time}:{event.fill.reason}"),
             position_id=pos.id,
@@ -129,10 +134,20 @@ class PositionStorageBridge:
 
     def on_reduced(self, event: PositionReduced) -> None:
         """Persist both the partial fill and the still-open residual."""
-        self._storage.save_open_position({
-            **position_to_row(event.symbol, event.remaining),
+        prior = self._open_rows.get(event.remaining.id, {})
+        row = {
+            **prior,
+            **position_to_row(event.symbol, event.remaining, stop_meta={
+                "breakeven": prior.get("breakeven"),
+                "trail_stop": prior.get("trail_stop"),
+                "tp_tier": prior.get("tp_tier"),
+                "entry_time_epoch": prior.get("entry_time_epoch"),
+                "stop_loss": prior.get("stop_loss"),
+            }),
             **self._identity(),
-        })
+        }
+        self._open_rows[event.remaining.id] = row
+        self._storage.save_open_position(row)
         partial = event.fill
         pos = partial.position
         self._save_fill(
@@ -156,3 +171,34 @@ class PositionStorageBridge:
                 "pnl": event.fill.pnl,
                 "reason": event.fill.reason,
             })
+
+    def on_stop_moved(self, event: StopMoved) -> None:
+        """Persist ratcheted stop / BE onto the durable open-position row."""
+        pid = str(event.position_id or "")
+        if not pid:
+            return
+        row = dict(self._open_rows.get(pid) or {})
+        if not row:
+            # Best-effort: load from storage if we missed the open event.
+            try:
+                rows = self._storage.load_open_positions() or []
+            except Exception:
+                rows = []
+            for r in rows:
+                if str(r.get("id") or "") == pid:
+                    row = dict(r)
+                    break
+        if not row:
+            return
+        row["stop_loss"] = float(event.new_sl)
+        if event.stop_kind == "BREAKEVEN" or event.reason == "BREAKEVEN_ARMED":
+            row["breakeven"] = float(event.new_sl)
+        if event.stop_kind == "TRAIL" or event.reason == "TRAIL_RATCHET":
+            row["trail_stop"] = float(event.new_sl)
+        # Persist TP tier when carried on the event (restart rehydrate).
+        tier = getattr(event, "tp_tier", None)
+        if tier is not None:
+            row["tp_tier"] = int(tier)
+        row.update(self._identity())
+        self._open_rows[pid] = row
+        self._storage.save_open_position(row)

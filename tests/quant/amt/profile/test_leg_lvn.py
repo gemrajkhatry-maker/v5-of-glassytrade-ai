@@ -1,4 +1,28 @@
 from quant.amt.profile.leg_lvn import resolve_leg_lvn
+from quant.amt.snapshot import analysis_snapshot_from_result
+from quant.contracts.value_objects import AMTResult
+
+
+def test_resolve_leg_lvn_reads_amt_result_leg_lvns():
+    result = AMTResult(
+        market_state="BALANCED", poc=100.0, value_area_high=101.0, value_area_low=99.0,
+        leg_lvns=(99.0, 101.5),
+    )
+    resolved = resolve_leg_lvn(result, 101.0)
+    assert resolved.available is True
+    assert resolved.level == 101.5
+    assert resolved.source == "leg_lvns"
+
+
+def test_resolve_leg_lvn_reads_snapshot_result_leg_lvns():
+    result = AMTResult(
+        market_state="BALANCED", poc=100.0, value_area_high=101.0, value_area_low=99.0,
+        leg_lvns=(100.5,),
+    )
+    snap = analysis_snapshot_from_result(result, asof_time="t")
+    resolved = resolve_leg_lvn(snap, 101.0)
+    assert resolved.available is True
+    assert resolved.level == 100.5
 
 
 def test_resolve_leg_lvn_prefers_nearest_positive_plural_level():

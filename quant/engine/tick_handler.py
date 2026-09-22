@@ -7,8 +7,9 @@ Handles both option contracts (with underlying feed) and direct futures.
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING, Any, Callable
+
+from quant.contracts.timezones import parse_bar_time
 
 if TYPE_CHECKING:
     from quant.aggregator import BarAggregator
@@ -99,6 +100,37 @@ class TickHandler:
         self._last_underlying_bar = None
         self._underlying_amt_dto = None
         self._option_amt_dto = None
+
+    def _decide_if_macro_fresh(
+        self,
+        amt_dto: dict,
+        macro_bar: Any,
+        execution_bar: Any,
+        *,
+        decision_bar: Any | None = None,
+    ) -> bool:
+        """Evaluate only while the AMT snapshot is at most one macro bar old."""
+        dto_time = parse_bar_time(
+            (amt_dto or {}).get("time")
+            or getattr(
+                getattr(self._amt_engine, "last_snapshot", None),
+                "asof_time",
+                None,
+            )
+        )
+        decision_time = parse_bar_time(
+            getattr(decision_bar or execution_bar or macro_bar, "time", "")
+        )
+        macro_seconds = int(
+            getattr(self._macro_aggregator, "interval_seconds", 0) or 0
+        )
+        if dto_time is None or decision_time is None or macro_seconds <= 0:
+            return False
+        age_seconds = (decision_time - dto_time).total_seconds()
+        if age_seconds < 0 or age_seconds > macro_seconds:
+            return False
+        self._decide(amt_dto, macro_bar, execution_bar)
+        return True
     
     def process_tick(self, tick: Any) -> None:
         """Process a single market tick.
@@ -131,9 +163,20 @@ class TickHandler:
                 self.symbol, tick, self._macro_aggregator.current_bar
             )
         
-        # Depth/book update
-        if tick.depth is not None and self._depth_callback is not None:
-            self._depth_callback(tick.depth)
+        # Depth/book update. Depth-less tapes (synthetic/replay) get a 1-tick
+        # book around LTP so Gate1 can still enforce the spread formula; live
+        # MultiplexedFeed overwrites this with the real book on every packet.
+        if self._depth_callback is not None:
+            if tick.depth is not None:
+                self._depth_callback(tick.depth)
+            else:
+                px = float(getattr(tick, "price", 0) or 0)
+                if px > 0:
+                    step = 0.05
+                    self._depth_callback({
+                        "bids": [{"price": px - step, "quantity": 1.0}],
+                        "asks": [{"price": px + step, "quantity": 1.0}],
+                    })
     
     def _process_option_tick(self, tick: Any, state: Any) -> None:
         """Process tick for option contracts with underlying feed.
@@ -145,7 +188,7 @@ class TickHandler:
             micro_bar = self._micro_aggregator.add_tick(tick)
             if micro_bar is not None and state.position is None:
                 if self._underlying_amt_dto and self._last_underlying_bar is not None:
-                    self._decide(
+                    self._decide_if_macro_fresh(
                         self._underlying_amt_dto,
                         self._last_underlying_bar,
                         micro_bar,
@@ -178,7 +221,7 @@ class TickHandler:
                     self._manage_exit(self._option_amt_dto, option_bar)
                 elif self._micro_aggregator is None:
                     if self._underlying_amt_dto and self._last_underlying_bar is not None:
-                        self._decide(
+                        self._decide_if_macro_fresh(
                             self._underlying_amt_dto,
                             self._last_underlying_bar,
                             option_bar,
@@ -221,17 +264,19 @@ class TickHandler:
     
     def _process_futures_tick(self, tick: Any, state: Any) -> None:
         """Process tick for direct futures (no underlying feed)."""
-        # Micro-trigger evaluation
+        # 1. Macro-bar aggregation: if the macro bar closes on this tick,
+        # run AMT analysis first so micro decision evaluates on fresh macro context.
+        bar = self._macro_aggregator.add_tick(tick)
+        self._amt_engine.on_tick(tick, self._macro_aggregator.current_bar)
+        if bar is not None:
+            self._on_bar_closed(bar)
+
+        # 2. Micro-trigger evaluation (using fresh macro analysis if macro closed)
         if self._micro_aggregator is not None:
             micro_bar = self._micro_aggregator.add_tick(tick)
             if micro_bar is not None and state.position is None:
                 amt_dto = self._amt_engine.last_amt_dto
                 if amt_dto:
-                    self._decide(amt_dto, micro_bar, None)
-        
-        # Macro-bar aggregation
-        bar = self._macro_aggregator.add_tick(tick)
-        self._amt_engine.on_tick(tick, self._macro_aggregator.current_bar)
-        
-        if bar is not None:
-            self._on_bar_closed(bar)
+                    self._decide_if_macro_fresh(
+                        amt_dto, micro_bar, None, decision_bar=micro_bar
+                    )

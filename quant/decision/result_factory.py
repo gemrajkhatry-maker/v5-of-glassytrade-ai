@@ -71,7 +71,7 @@ def build_decision_result(
         "gateResults": gate_results,
         "activePosition": active_position,
         "dynamicTrailStop": round(dynamic_trail_stop, 2) if dynamic_trail_stop is not None else None,
-        "source": "TIMESFM_3.0_NATIVE",
+        "source": getattr(forecast, "source", "TIMESFM_3.0_NATIVE") if forecast else "DETERMINISTIC_AMT",
         "latencyMs": lat_ms,
         "modelLabel": model_label or f"TimesFM-{role}-{action}",
         "modelVersions": {"timesfm": "3.0", "engine": "native_direct"},

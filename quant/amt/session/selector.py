@@ -431,13 +431,14 @@ class OptionSelector:
         signal,
         option_symbol: str,
         option_ltp: float,
-        delta: float = 0.50,
+        delta: float | None = None,
         tick_size: float = 0.05,
     ):
         """Translate an underlying futures/index signal into an option contract signal.
         
         - Underlying LONG -> Buys Call Option at option_ltp
         - Underlying SHORT -> Buys Put Option at option_ltp
+        - Requires an explicit Greek delta — never invents 0.50.
         - Delta-adjusted stop & target:
             opt_risk_pts = max(tick_size, abs(signal.entry - signal.sl) * max(MIN_EFFECTIVE_DELTA, min(1.0, abs(delta))))
             opt_reward_pts = max(tick_size * 2, abs(signal.tp - signal.entry) * max(MIN_EFFECTIVE_DELTA, min(1.0, abs(delta))))
@@ -497,9 +498,27 @@ class OptionSelector:
         opt_risk = max(tick_size, underlying_risk * eff_delta)
         opt_reward = max(tick_size * 2, underlying_reward * eff_delta)
         opt_entry = float(option_ltp)
-        opt_sl = max(tick_size, opt_entry - opt_risk)
+        opt_sl = opt_entry - opt_risk
+        # Reject tick-floor / non-positive stops — never publish fake RR.
+        if opt_sl <= tick_size:
+            logger.info(
+                "[OPTION TRANSLATE REJECT] %s: SL clamps to tick floor "
+                "(entry=%.2f risk=%.2f) — no stop",
+                option_symbol, opt_entry, opt_risk,
+            )
+            return None
         opt_tp = opt_entry + opt_reward
-        rr = opt_reward / opt_risk if opt_risk > 0 else signal.rr
+        actual_risk = opt_entry - opt_sl
+        if actual_risk <= 0:
+            return None
+        rr = opt_reward / actual_risk
+        from quant.contracts.constants import MIN_RR_RATIO
+        if rr < MIN_RR_RATIO:
+            logger.info(
+                "[OPTION TRANSLATE REJECT] %s: RR %.2f < min %.2f after clamp",
+                option_symbol, rr, MIN_RR_RATIO,
+            )
+            return None
         
         return Signal(
             type="LONG",  # Option buying is always LONG on the option contract

@@ -98,6 +98,13 @@ def build_decision_payload(
     regime = ctx.market_state.value if hasattr(ctx.market_state, "value") else str(ctx.market_state or MarketState.BALANCED.value)
     timing = str(ctx.session_phase or "REGULAR")
 
+    laya_eval = None
+    try:
+        from quant.decision.laya_advisor import get_laya_advisor
+        laya_eval = get_laya_advisor().evaluate_from_context(ctx)
+    except Exception as e:
+        logger.debug("Laya evaluation skipped in build_decision_payload: %s", e)
+
     return {
         "role": role,
         "action": action,
@@ -116,6 +123,7 @@ def build_decision_payload(
         "activePosition": active_pos,
         "dynamicTrailStop": dyn_trail,
         "modelVersions": model_versions,
+        "laya": laya_eval,
         # Backward compatibility with WSAgentDecision:
         "modelLabel": f"TimesFM-{role}",
         "regime": regime,

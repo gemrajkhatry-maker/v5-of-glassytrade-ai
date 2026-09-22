@@ -8,7 +8,7 @@ from typing import Any
 
 from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.timezones import IST
-from quant.execution.lots import clamp_to_freeze, snap_to_lot
+from quant.execution.lots import clamp_to_freeze, snap_to_lot, snap_to_lot_floor
 
 logger = logging.getLogger(__name__)
 
@@ -61,12 +61,13 @@ class RiskState:
 
 class SessionRisk:
     def __init__(self, starting_equity: float = float(INITIAL_CAPITAL),
-                 base_risk_pct: float = 0.05,          # 5% default risk budget (aggressive mode)
+                 base_risk_pct: float = 0.01,          # unused by HMP tiers; kept for compat
                  max_daily_loss_pct: float = 0.10,      # 10% default max daily loss
                  max_consecutive_losses: int = 3,
                  max_trades_per_session: int = 6,
                  capital_deployment_pct: float | None = None,
                  *,
+                 aggressive_mode: bool = False,
                  storage: Any | None = None,
                  symbol: str = "",
                  date: str | None = None,
@@ -82,9 +83,15 @@ class SessionRisk:
         self._max_daily_loss_pct = max_daily_loss_pct
         self._max_consecutive_losses = max_consecutive_losses
         self._max_trades_per_session = max_trades_per_session
-        self._capital_deployment_pct = (
-            None if capital_deployment_pct is None else float(capital_deployment_pct)
-        )
+        # Explicit aggressive_mode enables 50% capital deployment cap on top of
+        # HMP stop-distance sizing — never a separate formula selected by threshold.
+        self._aggressive_mode = bool(aggressive_mode)
+        if capital_deployment_pct is not None:
+            self._capital_deployment_pct = float(capital_deployment_pct)
+        elif self._aggressive_mode:
+            self._capital_deployment_pct = 0.50
+        else:
+            self._capital_deployment_pct = None
         self._daily_pnl = 0.0
         self._peak_daily_pnl = 0.0
         self._macro_risk_cap: float | None = None
@@ -97,8 +104,11 @@ class SessionRisk:
         self._storage = storage
         self._portfolio_risk = portfolio_risk
         self._symbol = symbol
-        # Always use today's date — never inherit a None date key
-        self._date = date if (date and date != "None") else _today()
+        # Always use today's date — never inherit a None date key.
+        # Explicit constructor dates are pinned (tests / replay); only an
+        # explicit ensure_session_date(new_date) or reset_session rolls them.
+        self._date_pinned = bool(date and date != "None")
+        self._date = date if self._date_pinned else _today()
         # Day-of-week for defensive sizing on Mon/Fri (Fabio spec)
         if day_of_week is None:
             self._day_of_week = datetime.now(_IST).weekday()
@@ -109,6 +119,26 @@ class SessionRisk:
 
     def _key(self) -> str:
         return f"daily_risk:{self._symbol}:{self._date}"
+
+    def ensure_session_date(self, date: str | None = None) -> None:
+        """Roll over to a new IST session date when the calendar day changes.
+
+        Pinned-date instances (constructor ``date=``) ignore wall-clock
+        rollover so tests/replay keep their session; pass ``date=`` explicitly
+        to force a roll.
+        """
+        if date is None or date == "None":
+            if self._date_pinned:
+                return
+            today = _today()
+        else:
+            today = date
+            self._date_pinned = True
+        with self._lock:
+            if today == self._date:
+                return
+            self.reset_session(date=today)
+            self._day_of_week = datetime.now(_IST).weekday()
 
     @property
     def load_status(self) -> RiskLoadStatus:
@@ -249,8 +279,10 @@ class SessionRisk:
                 return self.state()
 
             # Halt checks
-            # Session Kill Switch (§12.2): Cumulative loss reaching 2.0% of starting equity
-            if self._daily_pnl <= -0.02 * self._starting_equity:
+            # Session Kill Switch (§12.2): when a PortfolioRiskAuthority is
+            # present it owns the book −2% halt. Per-engine −2% would
+            # double-count the same capital across N engines.
+            if self._portfolio_risk is None and self._daily_pnl <= -0.02 * self._starting_equity:
                 self._halted = True
                 self._halt_reason = "session kill switch: cumulative loss reaches 2.0% of equity"
             elif self._daily_pnl <= -self._max_daily_loss_pct * self._starting_equity:
@@ -274,6 +306,7 @@ class SessionRisk:
 
     def can_trade(self) -> tuple[bool, str]:
         """Return (allowed, reason). False means do not enter a new position."""
+        self.ensure_session_date()
         with self._lock:
             if self._halted:
                 return False, self._halt_reason
@@ -388,45 +421,9 @@ class SessionRisk:
                     + float(getattr(self._portfolio_risk, "realized_pnl", 0.0))
                 )
 
-            # Aggressive mode override (>= 5% risk) for legacy deployment tests
-            if self._base_risk_pct >= 0.05:
-                open_deployed = float(getattr(self._portfolio_risk, "open_risk", 0.0)) if self._portfolio_risk is not None else 0.0
-                deployment_pct = 0.50
-                available_capital = max(0.0, (sizing_equity * deployment_pct) - open_deployed)
-                target_capital = available_capital if available_capital > (sizing_equity * 0.1) else (sizing_equity * deployment_pct)
-                if is_expiry:
-                    target_capital *= 0.5
-                cost_per_unit = entry if entry > 0 else abs(entry - sl)
-                if lot_size and lot_size > 1.0:
-                    # Derivatives (futures/options) use margin (~15% of notional),
-                    # not full cash. Using full notional for high-price underlyings
-                    # (e.g. BANKNIFTY @ 56000, lot=30 → 1.68M/lot) makes every lot
-                    # unaffordable against the deployment capital and returns 0.
-                    _DERIVATIVE_MARGIN_FRACTION = 0.15
-                    cost_per_lot = cost_per_unit * lot_size * _DERIVATIVE_MARGIN_FRACTION
-                    lots = int(target_capital // cost_per_lot) if cost_per_lot > 0 else 0
-                    if lots == 0 and cost_per_lot > 0 and target_capital >= cost_per_lot * 0.3:
-                        lots = 1
-                    if max_lots is not None and max_lots > 0:
-                        lots = min(lots, max_lots)
-                    qty = float(lots * lot_size)
-                else:
-                    qty = target_capital / cost_per_unit
-                    if max_lots is not None and max_lots > 0:
-                        qty = min(qty, float(max_lots))
-                if freeze_limit is not None and freeze_limit > 0:
-                    qty = clamp_to_freeze(qty, freeze_limit)
-                # The day-of-week multiplier scales AFTER the lot computation:
-                # without a re-snap, a 0.5 multiplier on Mon/Fri turned a
-                # lot-aligned quantity into a half-lot (16,650 -> 8,325 for
-                # lot 50) that can never be ordered on-exchange. Round DOWN
-                # to the lot so scaling never up-sizes risk.
-                scaled = qty * DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
-                if lot_size and lot_size > 1.0:
-                    return float(int(scaled // lot_size) * lot_size)
-                return scaled
-
-            # House Money Protocol fractional risk sizing
+            # House Money Protocol fractional risk sizing (sole formula).
+            # aggressive_mode only sets capital_deployment_pct — never a
+            # separate margin/deployment sizing branch.
             risk_pct = self._risk_per_trade_pct()
             risk_amount = sizing_equity * risk_pct
             if max_rupee_risk_cap is not None and max_rupee_risk_cap > 0:
@@ -440,7 +437,13 @@ class SessionRisk:
 
             raw_qty = risk_amount / loss_per_unit
             if lot_size and lot_size > 1.0:
-                qty = snap_to_lot(raw_qty, lot_size)
+                # Expiry half-size must not round UP past half of the full-day size.
+                qty = (
+                    snap_to_lot_floor(raw_qty, lot_size) if is_expiry
+                    else snap_to_lot(raw_qty, lot_size)
+                )
+                if qty <= 0 and raw_qty > 0 and not is_expiry:
+                    qty = float(lot_size)
                 if self._capital_deployment_pct is not None:
                     deployment_capital = max(0.0, sizing_equity * self._capital_deployment_pct)
                     # ponytail: derivatives use margin (~15% of notional), not full cash
@@ -472,7 +475,11 @@ class SessionRisk:
 
             qty *= DAY_OF_WEEK_MULTIPLIER.get(self._day_of_week, 1.0)
             if lot_size and lot_size > 1.0:
-                qty = float(int(qty // lot_size) * lot_size)
+                floored = float(int(qty // lot_size) * lot_size)
+                # Mon/Fri half-size must not zero a viable 1-lot setup.
+                if floored <= 0 and qty > 0:
+                    floored = float(lot_size)
+                qty = floored
 
             if max_rupee_risk_cap is not None and max_rupee_risk_cap > 0 and loss_per_unit > 0 and lot_size > 1.0:
                 _cap_lots = int(max_rupee_risk_cap // (loss_per_unit * lot_size))
@@ -578,30 +585,27 @@ class SessionRisk:
         if self._halted:
             return 0.0
 
-        if self._base_risk_pct >= 0.05:
-            return self._base_risk_pct
-
         tier = self._cushion_tier()
         if tier == "BASE_RETRACEMENT_VETO":
             risk = 0.0025  # 0.25%
         elif tier == "MOMENTUM":
-            risk = 0.0040  # 0.40% Momentum Day
+            risk = 0.0040  # 0.40% Momentum Day (flat; no whole-pct profit cap)
         elif tier == "CUSHION_TIER_1":
-            # 0.35% + 20% of session profit, capped at 0.50%
-            cushion = 0.0035
-            profit_share = max(0.0, self._daily_pnl) * 0.20 / self._starting_equity
-            risk = min(cushion + profit_share, 0.0050)
+            # §12.2: Risk₹ = E0×0.25% + 0.40×cushion; 30%-of-profit caps
+            # the cushion add-on only (never the base 0.25%).
+            base = 0.0025
+            cushion_add = max(0.0, self._daily_pnl) * 0.40 / self._starting_equity
+            if self._daily_pnl > 0:
+                cushion_add = min(
+                    cushion_add, self._daily_pnl * 0.30 / self._starting_equity
+                )
+            risk = min(base + cushion_add, 0.0050)
         else:
             # Conservative: 0.25%
             risk = 0.0025
 
         # Absolute ceiling: never > 0.50% of account
         risk = min(risk, 0.0050)
-
-        # Never risk more than 30% of session profit
-        if self._daily_pnl > 0:
-            max_from_profit = self._daily_pnl * 0.30 / self._starting_equity
-            risk = min(risk, max_from_profit)
 
         if self._macro_risk_cap is not None and self._macro_risk_cap > 0:
             risk = min(risk, self._macro_risk_cap)

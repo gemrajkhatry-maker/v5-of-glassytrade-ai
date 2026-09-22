@@ -232,16 +232,27 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
             return replace(new_state, sl=sl)
 
         if state.position is not None and rem_id == state.position.id:
-            return state.with_position(
+            reduced_pnl = float(getattr(event.fill, "pnl", 0.0) or 0.0)
+            new_state = state.with_position(
                 _merge_stop(_position_to_state(remaining), state.position)
+            )
+            return replace(
+                new_state,
+                realized_pnl=float(new_state.realized_pnl) + reduced_pnl,
             )
         pyramid_ids = {p.id for p in state.pyramids}
         if rem_id in pyramid_ids:
+            reduced_pnl = float(getattr(event.fill, "pnl", 0.0) or 0.0)
             new_pyramids = tuple(
                 _merge_stop(_position_to_state(remaining), p) if p.id == rem_id else p
                 for p in state.pyramids
             )
-            return replace(state, pyramids=new_pyramids, sequence=state.sequence + 1)
+            return replace(
+                state,
+                pyramids=new_pyramids,
+                sequence=state.sequence + 1,
+                realized_pnl=float(state.realized_pnl) + reduced_pnl,
+            )
         # Unknown id — fold never raises on an unmatched reduce (replay of a
         # stale/foreign partial must not poison the chain).
         logger.warning(

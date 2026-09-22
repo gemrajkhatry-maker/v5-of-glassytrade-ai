@@ -35,6 +35,7 @@ class DriveState:
     d1_volume: float = 0.0  # Volume at first drive (for momentum fade)
     d1_range: float = 0.0  # Range at first drive (for momentum fade)
     last_touch_time: str = ""
+    departed: bool = False  # True after price left the level by DEPARTURE_TICKS
 
 
 @dataclass
@@ -65,9 +66,14 @@ class DriveTracker:
     # Momentum fade: D2 volume/range < D1 volume/range × multiplier
     MOMENTUM_FADE_MULTIPLIER = 0.8
 
+    # Departure: price must leave the level by this many ticks before a
+    # re-approach can count as Drive 2 (consecutive touches = rotation).
+    DEPARTURE_TICKS = 5
+
     def __init__(self, alert_manager=None) -> None:
         self._levels: dict[float, DriveState] = {}
         self._alert_manager = alert_manager
+        self._last_price_by_level: dict[float, float] = {}
 
     def classify_touch(
         self,
@@ -134,9 +140,32 @@ class DriveTracker:
 
         state = self._levels[bucket]
 
-        # Same direction — this is a re-touch
+        # Mark departure when price leaves the level by DEPARTURE_TICKS.
+        dep_dist = self.DEPARTURE_TICKS * (tick_size if tick_size > 0 else 0.05)
+        if abs(float(price) - float(level)) > dep_dist:
+            state.departed = True
+            return DriveResult(
+                drive_number=state.drive_count,
+                entry_valid=False,
+                rejection_detected=False,
+                fading_momentum=False,
+                level=level,
+                reason="away from level — departure recorded",
+            )
+
+        # Same direction — this is a re-touch. Require prior departure for D2+.
         if state.direction == direction:
+            if state.drive_count >= 1 and not state.departed:
+                return DriveResult(
+                    drive_number=state.drive_count,
+                    entry_valid=False,
+                    rejection_detected=False,
+                    fading_momentum=False,
+                    level=level,
+                    reason="consecutive touch without departure (range rotation)",
+                )
             state.drive_count += 1
+            state.departed = False  # consume departure; need another leave for D3
 
             # D2 check
             if state.drive_count == 2:

@@ -3,7 +3,7 @@ from quant.decision.gate_position_cooldown import gate_position_cooldown
 from quant.decision.gate_session_phase import gate_session_phase
 
 def _ctx(**kw):
-    d = dict(state=None, bar=None)
+    d = dict(state=None, bar=None, bid=99.95, ask=100.05, tick_size=0.05)
     d.update(kw)
     return DecisionContext(**d)
 

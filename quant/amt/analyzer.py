@@ -434,6 +434,42 @@ class AMTAnalyzer:
         self._session_extreme_high = max(self._session_extreme_high, hi)
         return self._session_extreme_low, self._session_extreme_high
 
+    def warmup_candles(self, candles: list[OHLC]) -> None:
+        """Feed historical candles sequentially through stateful trackers so order flow,
+        CVD, VWAP, and Initial Balance are fully warmed."""
+        session_open = candles[0].time if candles else None
+        for c in candles:
+            if c is not None:
+                self._cvd_tracker.update(c)
+                tp = (float(c.high) + float(c.low) + float(c.close)) / 3.0
+                self._vwap.update(c, tp)
+                self._ib_tracker.update(c, session_open=session_open)
+
+    def reset_session(self) -> None:
+        """Reset all session-scoped stateful trackers on session rollover."""
+        self._cvd_tracker = CVDTracker()
+        self._poc_tracker = POCMigrationTracker()
+        self._value_migration = ValueMigrationTracker()
+        self._prev_agg_prints = []
+        self._prev_agg_data_len = 0
+        self._bubble_registry = AggressivePrintRegistry()
+        from quant.amt.profile.vwap import SessionVWAP
+        self._vwap = SessionVWAP()
+        self._ib_tracker = InitialBalanceEngine(ib_minutes=IB_MINUTES)
+        self._ib_break_direction = ""
+        self._ar_engine = AcceptanceRejectionEngine()
+        self._prev_cvd_slope = 0.0
+        self._previous_state = None
+        self._drive_tracker = DriveTracker()
+        self._opening_classifier = OpeningTypeClassifier()
+        from quant.amt.market.regime import RegimeDetector
+        self._regime = RegimeDetector()
+        self._session_extreme_low = float("inf")
+        self._session_extreme_high = float("-inf")
+        self._triple_a.reset()
+        self._display_vah = 0.0
+        self._display_val = 0.0
+
     # ponytail: dead methods below deleted — all callers migrated to
     # quant.amt.orderflow.compute, quant.amt.session.structure,
     # quant.amt.profile.displacement, quant.amt.profile.vwap.
@@ -537,27 +573,30 @@ class AMTAnalyzer:
         # Value Area — CME two-row pairs method (shared impl, average-weighted)
         vah, val = compute_value_area(profile, poc_index, VALUE_AREA_PCT)
 
-        # Clamp the value area to the recently-traded range. After an intraday
-        # regime collapse (e.g. the option premium halving 195 -> 102), the
-        # whole-session profile legitimately spans both regimes, so 70% of the
-        # session's volume can extend VAH far beyond the current auction (~158
-        # while price sits at ~102). The VA used for decisions must reflect the
-        # CURRENT auction — clamp VAH/VAL to the high/low of the last
-        # RECENT_VA_LOOKBACK candles so a stale tail can never dominate.
+        # Clamp is DISPLAY ONLY — decision VA stays the CME expansion result.
+        # Recent-range display_va is computed separately for UI consumers.
         from quant.contracts.constants import RECENT_VA_LOOKBACK
 
         recent_window = recent_data[-RECENT_VA_LOOKBACK:]
+        display_vah, display_val = vah, val
         if recent_window:
             recent_high = max(d.high for d in recent_window)
             recent_low = min(d.low for d in recent_window)
             if recent_high > 0:
-                vah = min(vah, recent_high)
+                display_vah = min(vah, recent_high)
             if recent_low > 0:
-                val = max(val, recent_low)
-            # Keep the interval valid if the recent range sits entirely above
-            # (or below) the whole-session VA.
-            if vah < val:
-                vah, val = recent_high, recent_low
+                display_val = max(val, recent_low)
+            if display_vah < display_val:
+                display_vah, display_val = recent_high, recent_low
+        # Decision post-condition: POC must lie inside [VAL, VAH].
+        if not (val <= poc <= vah) and vah > val:
+            logger.warning(
+                "AMT: POC %.2f outside decision VA [%.2f, %.2f] — leaving VA unclamped",
+                poc, val, vah,
+            )
+        # Stash display VA on the instance for DTO consumers that want the clamp.
+        self._display_vah = display_vah
+        self._display_val = display_val
 
         # LVN detection with persistence filter
         raw_lvns = find_lvns(profile, self.config)
@@ -607,25 +646,6 @@ class AMTAnalyzer:
         ))
         has_displacement = leg_data["has_displacement"]
         has_acceptance = detect_acceptance(recent_data, vah, val)
-
-        # Task 2.3: Validate session VA encompasses leg VA bounds
-        # Session profile uses all session data, leg profile uses only displacement leg
-        # So session VA should be >= leg VA (session encompasses leg)
-        leg_vah_temp = leg_data.get("vah", 0.0)
-        leg_val_temp = leg_data.get("val", 0.0)
-        if vah > 0 and leg_vah_temp > 0 and vah < leg_vah_temp:
-            logger.warning(
-                "Session VAH (%.2f) < Leg VAH (%.2f) — clamping to leg VAH (Task 2.3)",
-                vah, leg_vah_temp
-            )
-            vah = leg_vah_temp
-            
-        if val > 0 and leg_val_temp > 0 and val > leg_val_temp:
-            logger.warning(
-                "Session VAL (%.2f) > Leg VAL (%.2f) — clamping to leg VAL (Task 2.3)",
-                val, leg_val_temp
-            )
-            val = leg_val_temp
 
         if ar_state_first["acceptance_above"] or ar_state_first["acceptance_below"]:
             has_acceptance = True
@@ -716,13 +736,9 @@ class AMTAnalyzer:
         has_aggression = flow["has_aggression"]
         aggression_components = flow.get("aggression_components", {})
 
-        # Profile shape and bimodal override
+        # Profile shape classification (descriptive; does not override market state)
         shape = classify_shape(profile)
         effective_profile_shape = shape.shape
-
-        if shape.shape == "B" and market_state == MarketState.IMBALANCED:
-            market_state = MarketState.BALANCED
-            effective_profile_shape = "D"
 
         # VWAP bands — same recent window as the VA clamp, so the deviation
         # sigma, the bands and the displayed session VWAP describe the CURRENT
@@ -1002,9 +1018,10 @@ absorption_side=absorption_side,
         else:
             provenance["footprint_imbalance"] = DataQuality.UNAVAILABLE
 
-        # 2. cvd_delta: TICK_EXACT if CVD tracker has live tick source
+        # 2. cvd_delta: Dhan WS has no aggressor flag — buy/sell is a
+        # price-direction proxy. Never stamp TICK_EXACT from instrument class.
         if cvd_state and cvd_source in ("underlying", "option"):
-            provenance["cvd_delta"] = DataQuality.TICK_EXACT
+            provenance["cvd_delta"] = DataQuality.PRICE_DIRECTION_PROXY
         elif cvd_state:
             provenance["cvd_delta"] = DataQuality.CANDLE_DISTRIBUTED
         else:
@@ -1072,8 +1089,10 @@ absorption_side=absorption_side,
         )
         from quant.decision.data_quality import DataQuality
         if cvd_source in ("underlying", "option"):
+            # Honest grade: tape is live ticks but aggression is price-direction
+            # proxy (Dhan has no aggressor flag). Aggregate quality follows CVD.
             data_quality = (
-                DataQuality.TICK_EXACT.value
+                DataQuality.PRICE_DIRECTION_PROXY.value
                 if (footprint_accumulator and _footprints)
                 else DataQuality.CANDLE_DISTRIBUTED.value
             )

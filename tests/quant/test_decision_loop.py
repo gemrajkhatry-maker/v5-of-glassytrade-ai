@@ -209,6 +209,8 @@ def make_decision_loop(
     forecast_fn: Any = None,
     exposure_state: ExposureState | None = None,
     emit: Any = None,
+    greeks: Any = None,
+    symbol: str = "NIFTY24JAN100CE",
 ) -> DecisionLoop:
     """Build a DecisionLoop with test-friendly defaults."""
     _bar_index = bar_index
@@ -225,7 +227,7 @@ def make_decision_loop(
 
     return DecisionLoop(
         config={
-            "symbol": "NIFTY24JAN100CE",
+            "symbol": symbol,
             "market": "NSE",
             "contract_expiry": None,
             "tick_size": 0.05,
@@ -243,7 +245,8 @@ def make_decision_loop(
             "contract": None,
             "underlying_gateway": underlying_gateway,
             "execution_enabled": execution_enabled,
-            "get_underlying_symbol": lambda: "NIFTY",
+            "get_underlying_symbol": lambda: "NIFTY FUT",
+            "greeks": greeks,
         },
         state={
             "get_bar_index": lambda: _bar_index,
@@ -718,6 +721,34 @@ class TestForecast:
 
 
 # ---------------------------------------------------------------------------
+# Tests: AnalysisSnapshot threading (Task 4)
+# ---------------------------------------------------------------------------
+
+class TestSnapshotThreading:
+    def test_build_context_passes_engine_last_snapshot(self, monkeypatch):
+        """DecisionContextBuilder.build receives amt_engine.last_snapshot."""
+        snap = object()
+        amt_engine = FakeAMTEngine()
+        amt_engine.last_snapshot = snap
+        loop = make_decision_loop(amt_engine=amt_engine)
+        captured: dict[str, Any] = {}
+
+        def capture_build(self, **kwargs):
+            captured.update(kwargs)
+            return MagicMock(spec=DecisionContext)
+
+        monkeypatch.setattr(
+            "quant.engine.decision_loop.DecisionContextBuilder.build",
+            capture_build,
+        )
+        bar = FakeBar()
+        loop._build_context(bar, {"poc": 100.0}, 0.0)
+
+        assert captured.get("snapshot") is snap
+        assert captured.get("amt_dto") == {"poc": 100.0}
+
+
+# ---------------------------------------------------------------------------
 # Tests: Edge cases
 # ---------------------------------------------------------------------------
 
@@ -754,3 +785,67 @@ class TestEdgeCases:
         result = loop.evaluate({}, bar)
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: Option translation seam (P0-3 production wire)
+# ---------------------------------------------------------------------------
+
+class TestOptionTranslationSeam:
+    def test_gateway_plus_greeks_submits_premium_scaled_signal(self):
+        """underlying_gateway + DictGreeks → OMS gets option premium levels."""
+        from quant.contracts.ports.greeks import DictGreeks
+
+        contract = "NIFTY 24600 CALL"
+        underlying_signal = make_signal(
+            entry=25000.0, sl=24980.0, tp=25040.0, rr=2.0, symbol="NIFTY FUT",
+        )
+        strategy = FakeStrategy(decision=make_decision(signal=underlying_signal))
+        oms = FakeOMS()
+        greeks = DictGreeks({contract: 0.55})
+        loop = make_decision_loop(
+            strategy=strategy,
+            oms=oms,
+            underlying_gateway=object(),
+            greeks=greeks,
+            symbol=contract,
+        )
+        # Underlying bar for strategy; execution_bar is the option premium tape.
+        und_bar = FakeBar(close=25000.0, open=24990.0, high=25010.0, low=24980.0)
+        opt_bar = FakeBar(close=100.0, open=99.0, high=101.0, low=98.0)
+
+        result = loop.evaluate({}, und_bar, execution_bar=opt_bar)
+
+        assert result is not None
+        assert result.approved is True
+        assert len(oms.submitted) == 1
+        submitted, _qty = oms.submitted[0]
+        assert submitted.symbol == contract
+        assert submitted.entry == 100.0
+        assert submitted.sl == 89.0
+        assert submitted.tp == 122.0
+
+    def test_gateway_without_greeks_refuses_data_degraded(self):
+        """Missing Greeks on a translated engine → DATA_DEGRADED, not OMS."""
+        contract = "NIFTY 24600 CALL"
+        underlying_signal = make_signal(
+            entry=25000.0, sl=24980.0, tp=25040.0, symbol="NIFTY FUT",
+        )
+        strategy = FakeStrategy(decision=make_decision(signal=underlying_signal))
+        oms = FakeOMS()
+        loop = make_decision_loop(
+            strategy=strategy,
+            oms=oms,
+            underlying_gateway=object(),
+            greeks=None,
+            symbol=contract,
+        )
+        und_bar = FakeBar(close=25000.0)
+        opt_bar = FakeBar(close=100.0)
+
+        result = loop.evaluate({}, und_bar, execution_bar=opt_bar)
+
+        assert result is not None
+        assert result.approved is False
+        assert result.reason == "DATA_DEGRADED"
+        assert oms.submitted == []

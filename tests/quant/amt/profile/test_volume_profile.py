@@ -166,6 +166,46 @@ class TestComputeValueArea:
         assert vah > 105.0  # upper edge of the top cluster bin
         assert val < 96.0
 
+    def test_soft_shell_reaches_value_area_pct(self):
+        """Quiet-but-nonzero shell around a fat POC must still expand to 70%.
+
+        Audit §1.7: a 1%-of-POC desert threshold froze coverage at ~45% when
+        adjacent bins carried volume 4 (pair=8 < 0.01*POC).
+        """
+        profile = []
+        for i in range(40):
+            if i == 20:
+                v = 1000.0
+            elif abs(i - 20) <= 8:
+                v = 4.0
+            else:
+                v = 50.0
+            profile.append(VolumeProfileLevel(price=float(i), volume=v))
+        total = sum(p.volume for p in profile)
+        vah, val = compute_value_area(profile, poc_index=20, value_area_pct=0.70)
+        cov = sum(p.volume for p in profile if val <= p.price <= vah) / total
+        assert cov >= 0.70 - 1e-9
+        assert vah > 20.5  # expanded beyond the POC bin
+
+
+class TestIncrementalFlatPrice:
+    def test_identical_ltp_conserves_volume_in_one_bucket(self):
+        from quant.amt.profile.volume_profile import IncrementalVolumeProfile
+
+        inc = IncrementalVolumeProfile(buckets=10, concentrated=False, tick_size=0.05)
+        for i in range(5):
+            c = OHLC.create(
+                time=str(i), open=100.0, high=100.0, low=100.0, close=100.0,
+                volume=100.0, vwap=100.0, taker_buy_volume=60.0, delta=20.0,
+            )
+            inc.update(c)
+        levels = inc.get_profile()
+        nonzero = [lv for lv in levels if lv.volume > 0]
+        assert len(nonzero) == 1
+        assert nonzero[0].volume == pytest.approx(500.0)
+        assert nonzero[0].buy_volume == pytest.approx(300.0)
+        assert nonzero[0].sell_volume == pytest.approx(200.0)
+
 
 class TestBuildSnapshot:
     def test_empty_profile(self):

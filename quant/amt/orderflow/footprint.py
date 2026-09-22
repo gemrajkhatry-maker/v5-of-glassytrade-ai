@@ -11,6 +11,7 @@ when data grows by one.
 from __future__ import annotations
 
 from quant.contracts.value_objects import OHLC, FootprintLevel, FootprintCandle
+from quant.contracts.timezones import epoch_to_iso
 from quant.amt import compute as mc
 
 
@@ -19,23 +20,29 @@ class FootprintAnalyzer:
 
     def __init__(self) -> None:
         self._last_data_len: int = 0
+        self._last_keys: tuple[str, ...] = ()
         self._cached_result: dict[str, FootprintCandle] = {}
 
     def _generate_candle(self, candle: OHLC) -> FootprintCandle:
         """Generate a FootprintCandle for a single OHLC candle."""
+        candle_time = epoch_to_iso(candle.time)
         price_range = candle.high - candle.low
 
         # Flat candle
         if price_range <= 1e-9:
-            buy_vol = (candle.volume + candle.delta) / 2
-            sell_vol = (candle.volume - candle.delta) / 2
+            total_vol = max(0, round(float(candle.volume)))
+            delta = float(candle.delta)
+            if abs(delta) > total_vol:
+                delta = float(total_vol if delta > 0 else -total_vol)
+            buy_vol = round((total_vol + delta) / 2.0)
+            sell_vol = total_vol - buy_vol
             level = FootprintLevel(
                 price=candle.open,
-                bid=int(sell_vol), ask=int(buy_vol),
+                bid=sell_vol, ask=buy_vol,
                 delta=candle.delta, imbalance=False,
             )
             return FootprintCandle(
-                time=candle.time, levels=(level,),
+                time=candle_time, levels=(level,),
                 poc_price=candle.open, total_delta=candle.delta,
                 step_price=(candle.close * 0.0001) or 0.01,
             )
@@ -64,25 +71,64 @@ class FootprintAnalyzer:
         bucket_centers = [candle.low + i * actual_step for i in range(steps + 1)]
         weights = mc.gaussian_weights(bucket_centers, mean, std_dev)
 
-        # Second pass: allocate volume using round() to avoid truncation
-        buy_vol_total = max(0.0, (candle.volume + candle.delta) / 2)
-        sell_vol_total = max(0.0, (candle.volume - candle.delta) / 2)
+        # Volume conservation: reconcile total to candle.volume first, then
+        # split by delta sign. Independent per-side rounding violated buy+sell==vol.
+        total_vol = max(0.0, float(candle.volume))
+        delta = float(candle.delta)
+        # Clamp delta so |delta| <= volume
+        if abs(delta) > total_vol:
+            delta = total_vol if delta > 0 else -total_vol
+        buy_vol_total = max(0.0, (total_vol + delta) / 2.0)
+        sell_vol_total = max(0.0, total_vol - buy_vol_total)
+        # Fix float drift so buy + sell == volume exactly before integer split.
+        sell_vol_total = total_vol - buy_vol_total
 
-        raw_levels: list[tuple[float, int, int]] = []
-        max_vol_level = 0
-        poc_price = candle.open
+        raw_levels: list[list[float | int]] = []
 
         for i in range(steps + 1):
             price = candle.low + i * actual_step
             ratio = float(weights[i])
             ask_ = round(float(buy_vol_total) * ratio)
             bid_ = round(float(sell_vol_total) * ratio)
-            if ask_ + bid_ > 0:
-                raw_levels.append((price, bid_, ask_))
-                level_vol = ask_ + bid_
-                if level_vol > max_vol_level:
-                    max_vol_level = level_vol
-                    poc_price = price
+            raw_levels.append([price, bid_, ask_])
+
+        poc_index = max(
+            range(len(raw_levels)),
+            key=lambda i: (
+                int(raw_levels[i][1]) + int(raw_levels[i][2]),
+                float(weights[i]),
+            ),
+        )
+
+        # Reconcile so sum(bid)+sum(ask) == round(volume) and sides match targets.
+        target_total = round(total_vol)
+        target_buy = round(buy_vol_total)
+        target_sell = target_total - target_buy
+        targets = (
+            (1, target_sell),
+            (2, target_buy),
+        )
+        for side, target in targets:
+            residual = target - sum(int(level[side]) for level in raw_levels)
+            if residual >= 0:
+                raw_levels[poc_index][side] = int(raw_levels[poc_index][side]) + residual
+                continue
+            for index in sorted(
+                range(len(raw_levels)),
+                key=lambda i: int(raw_levels[i][side]),
+                reverse=True,
+            ):
+                removable = min(int(raw_levels[index][side]), -residual)
+                raw_levels[index][side] = int(raw_levels[index][side]) - removable
+                residual += removable
+                if residual == 0:
+                    break
+
+        raw_levels = [level for level in raw_levels if int(level[1]) + int(level[2]) > 0]
+        poc_price = (
+            max(raw_levels, key=lambda level: int(level[1]) + int(level[2]))[0]
+            if raw_levels else candle.open
+        )
 
         levels: list[FootprintLevel] = []
         for price, bid_, ask_ in reversed(raw_levels):
@@ -93,7 +139,7 @@ class FootprintAnalyzer:
             ))
 
         return FootprintCandle(
-            time=candle.time, levels=tuple(levels),
+            time=candle_time, levels=tuple(levels),
             poc_price=poc_price, total_delta=candle.delta,
             step_price=actual_step,
         )
@@ -101,25 +147,38 @@ class FootprintAnalyzer:
     def generate(self, data: list[OHLC]) -> dict[str, FootprintCandle]:
         if not data:
             self._last_data_len = 0
+            self._last_keys = ()
             self._cached_result = {}
             return {}
 
         new_len = len(data)
+        keys = tuple(epoch_to_iso(candle.time) for candle in data)
 
-        # If data grew by exactly 1, only compute the new candle (incremental)
-        if new_len == self._last_data_len + 1 and self._cached_result:
+        same_forming_bar = (
+            new_len == self._last_data_len
+            and keys[:-1] == self._last_keys[:-1]
+        )
+        appended_bar = (
+            new_len == self._last_data_len + 1
+            and keys[:-1] == self._last_keys
+        )
+        if self._cached_result and (same_forming_bar or appended_bar):
             candle = data[-1]
-            self._cached_result[candle.time] = self._generate_candle(candle)
+            if same_forming_bar and self._last_keys[-1] != keys[-1]:
+                self._cached_result.pop(self._last_keys[-1], None)
+            self._cached_result[keys[-1]] = self._generate_candle(candle)
             self._last_data_len = new_len
+            self._last_keys = keys
             return self._cached_result
 
         # Data shrank, reset, or first call — full rebuild
         result: dict[str, FootprintCandle] = {}
         for candle in data:
-            result[candle.time] = self._generate_candle(candle)
+            result[epoch_to_iso(candle.time)] = self._generate_candle(candle)
 
         self._cached_result = result
         self._last_data_len = new_len
+        self._last_keys = keys
         return result
 
 
@@ -138,10 +197,18 @@ class TickFootprintAccumulator:
         self._completed: dict[str, FootprintCandle] = {}
         self._prev_ltp: float = 0.0
 
+    def reset(self) -> None:
+        """Clear all session footprint state (rollover / kernel reset)."""
+        self._current_candle_time = ""
+        self._levels = {}
+        self._completed = {}
+        self._prev_ltp = 0.0
+
     def on_tick(self, ltp: float, ltq: int, best_bid: float, best_ask: float, candle_time: str) -> None:
         """Process a single tick. Classify aggressor side using tick rule."""
         if ltq <= 0 or ltp <= 0:
             return
+        candle_time = epoch_to_iso(candle_time)
 
         # New candle period — finalize previous
         if candle_time != self._current_candle_time and self._current_candle_time:

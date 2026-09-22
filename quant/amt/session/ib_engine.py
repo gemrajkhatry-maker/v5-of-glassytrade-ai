@@ -141,7 +141,15 @@ class InitialBalanceEngine:
             self._session_open_time = candle.time
 
         # Update IB high/low & collect 30-min profile candles
-        if not self._complete:
+        is_same_candle = (
+            bool(self._ib_candles) and self._ib_candles[-1].time == candle.time
+        )
+        if not self._complete and is_same_candle:
+            self._ib_candles[-1] = candle
+            self._ib_high = max(float(c.high) for c in self._ib_candles)
+            self._ib_low = min(float(c.low) for c in self._ib_candles)
+            self._recompute_ib_profile()
+        elif not self._complete:
             self._ib_high = max(self._ib_high, float(candle.high))
             self._ib_low = min(self._ib_low, float(candle.low))
             self._ib_candles.append(candle)

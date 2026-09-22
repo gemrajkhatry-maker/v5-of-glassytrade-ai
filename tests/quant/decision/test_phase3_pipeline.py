@@ -93,7 +93,7 @@ def test_decision_context_builder_propagates_market_and_direction():
 
 def test_all_setup_paths_pass_gate3():
     """Verify setup paths (TRIPLE_A, SECOND_DRIVE, LVN_SNIPER, INITIATIVE, SQUEEZE) pass Gate 3."""
-    # 1. SetupEvidence path (TRIPLE_A)
+    # 1. SetupEvidence path (TRIPLE_A) — certificate must be complete
     ev = SetupEvidence(
         setup_type="TRIPLE_A",
         direction="LONG",
@@ -102,6 +102,10 @@ def test_all_setup_paths_pass_gate3():
         aggression=True,
         acceptance=True,
         cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=True,
+        price=100.0,
+        session_vwap=99.0,
     )
     ctx_ev = DecisionContext(
         bar=_bar(100.0),
@@ -184,7 +188,8 @@ def test_all_setup_paths_pass_gate3():
 
 
 def test_amt_engine_and_quant_engine_prior_profile_lifecycle():
-    """Verify prior profile can be set, loaded, and persisted across QuantEngine/AMTEngine."""
+    """Verify prior profile can be set, loaded from dated SessionLevelStore,
+    and persisted across QuantEngine/AMTEngine."""
     store = SessionLevelStore()
     amt = AMTEngine(
         symbol="CRUDEOIL",
@@ -196,29 +201,31 @@ def test_amt_engine_and_quant_engine_prior_profile_lifecycle():
     assert amt._prior["vah"] == 7500.0
     assert amt._prior["val"] == 7400.0
 
-    # Test QuantEngine storage attachment and persistence
+    symbol = "CRUDEOIL 19 DEC 7450 CALL"
+    store.save_levels(symbol, "2026-09-18", 7450.0, 7500.0, 7400.0, close=7440.0)
     gw = SyntheticGateway([])
     engine = QuantEngine(
         gateway=gw,
-        symbol="CRUDEOIL 19 SEP 7450 CALL",
+        symbol=symbol,
         market="MCX",
         session_levels=store,
     )
-    # Mock storage adapter
     mock_storage = MagicMock()
-    mock_storage.kv_get.return_value = '{"poc": 7450.0, "vah": 7500.0, "val": 7400.0}'
-
     engine.attach_storage(mock_storage)
     assert engine._amt_engine._prior["poc"] == 7450.0
 
-    # Test persist_prior_profile
+    # Test persist_prior_profile still projects to storage for operators
     engine._amt_engine._last_amt_dto = {
         "poc": 7480.0,
         "valueAreaHigh": 7520.0,
         "valueAreaLow": 7440.0,
     }
     engine.persist_prior_profile()
-    mock_storage.kv_set.assert_called_once_with(
-        "prior_profile:CRUDEOIL 19 SEP 7450 CALL",
+    mock_storage.kv_set.assert_any_call(
+        f"prior_profile:{symbol}",
         {"poc": 7480.0, "vah": 7520.0, "val": 7440.0},
+    )
+    assert any(
+        call.args and str(call.args[0]).startswith("kernel_state:")
+        for call in mock_storage.kv_set.call_args_list
     )

@@ -28,7 +28,7 @@ class TestDetectMarketState:
         assert result.state == MarketState.BALANCED
 
     def test_price_at_poc_without_acceptance(self):
-        """Price at POC without acceptance → IMBALANCED (no confirmation)."""
+        """Low balance ratio alone cannot flip an inside-VA price to IMBALANCED."""
         result = detect_market_state(
             price=100.0,
             poc=100.0,
@@ -39,8 +39,8 @@ class TestDetectMarketState:
             has_acceptance=False,
             balance_ratio=0.3,  # Low balance ratio
         )
-        # Outside VA or low acceptance -> IMBALANCED
-        assert result.state == MarketState.IMBALANCED
+        assert result.state == MarketState.BALANCED
+        assert "low balance ratio" in result.trigger.lower()
 
     def test_balanced_inside_va(self):
         """Price inside VAH-VAL with balance >= named threshold -> BALANCED."""

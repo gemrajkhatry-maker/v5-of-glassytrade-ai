@@ -1,6 +1,12 @@
 """Architecture test: the AMT DTO producer -> reader key contract.
 
-Entry gates, exits, sizing, rotation and the advisor narrative read the AMT DTO
+The live money path increasingly reads ``AnalysisSnapshot`` (``AMTEngine.last_snapshot``,
+``DecisionContextBuilder.build(..., snapshot=...)``); ``quant/engine/decision_loop.py``
+and ``quant/execution/exits.py`` pass snapshot alongside the DTO. The camelCase DTO
+remains the WS adapter and compat fallback — this test still guards any *dict* reads
+under ``quant/`` against producer omissions.
+
+Entry gates, exits, sizing, rotation and the advisor narrative may still touch the AMT DTO
 as a *plain dict*; ``amt_result_to_dto`` emits it. Nothing in the type system
 links the two, so a producer-side rename or drop is invisible: every consumer
 test builds its own dict and keeps passing while production loses the field.

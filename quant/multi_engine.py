@@ -447,18 +447,28 @@ class QuantCoordinator:
         # Lifecycle ops are rare admin actions; coarse serialization is the
         # correct ownership boundary here.
         self._lifecycle_lock = threading.RLock()
+        # Symbol → Greek delta from the last option scan (feeds option translation).
+        self._option_deltas: dict[str, float] = {}
         # Shared cross-engine risk ceiling: every engine registers entries and
         # exits against ONE authority so the aggregate book can't risk more
         # than the portfolio limit (8 engines x 5% each would otherwise
         # simultaneously risk 40% of capital).
         from quant.execution.portfolio_risk import PortfolioRiskAuthority
+        from quant.execution.opportunity_auction import OpportunityAuction
         self._portfolio_risk = PortfolioRiskAuthority(
             starting_equity=float(self.config.get("starting_equity", float(INITIAL_CAPITAL))),
             max_portfolio_risk_pct=float(self.config.get("max_portfolio_risk_pct", 0.25)),
-            max_portfolio_daily_loss_pct=float(self.config.get("max_portfolio_daily_loss_pct", 0.15)),
+            max_portfolio_daily_loss_pct=float(self.config.get("max_portfolio_daily_loss_pct", 0.02)),
             max_root_risk_pct=self.config.get("max_root_risk_pct"),
             max_exchange_risk_pct=self.config.get("max_exchange_risk_pct"),
-            separate_by="symbol",
+            separate_by="root",
+            max_concurrent_positions=int(self.config.get("max_concurrent_positions", 0) or 0) or None,
+        )
+        # Short hold lets sibling engines join the pending book before settle
+        # ranks by score (first-come without a window is not an auction).
+        self._opportunity_auction = OpportunityAuction(
+            self._portfolio_risk,
+            hold_sec=float(self.config.get("auction_hold_sec", 0.05)),
         )
         # One capital book is shared by every LiveOMS. Per-engine Portfolio
         # instances otherwise each report the full account balance and allow
@@ -830,7 +840,55 @@ class QuantCoordinator:
     def _synthesize_position_mgmt(open_p, agent_dec, symbol, vs,
                                    entry_px, curr_px, sl_px, tp_px,
                                    pos_side, pnl, is_risk_free):
-        """Synthesize a full POSITION_MANAGEMENT decision dict."""
+        """UI narrative for an open position. Never a money-path decision.
+
+        Without an advisor decision, return NO_ADVISOR — never invent a forecast.
+        """
+        advisor_present = bool(
+            agent_dec
+            and isinstance(agent_dec, dict)
+            and (
+                agent_dec.get("role")
+                or agent_dec.get("action")
+                or agent_dec.get("modelLabel")
+                or agent_dec.get("forecastSteps")
+            )
+        )
+        if not advisor_present:
+            return {
+                "role": "POSITION_MANAGEMENT",
+                "action": "NO_ADVISOR",
+                "direction": pos_side,
+                "setup": "POSITION_MGMT",
+                "reason": "NO_ADVISOR",
+                "confidence": "Low",
+                "confidenceScore": 0.0,
+                "rationale": f"No advisor decision for {symbol}; holding without synthetic forecast.",
+                "forecastSteps": [],
+                "quantileSpread": 0.0,
+                "meanForecast": None,
+                "gateResults": [],
+                "activePosition": {
+                    "side": pos_side,
+                    "entryPrice": entry_px,
+                    "currentPrice": curr_px,
+                    "pnl": pnl,
+                    "stopLoss": sl_px if sl_px > 0 else None,
+                    "takeProfit": tp_px if tp_px > 0 else None,
+                    "barsHeld": int(open_p.get("barsHeld", 0) or 0),
+                    "isRiskFree": is_risk_free,
+                    "rrAchieved": 0.0,
+                },
+                "dynamicTrailStop": sl_px if sl_px > 0 else None,
+                "source": "NO_ADVISOR",
+                "latencyMs": 0.0,
+                "modelLabel": "",
+                "modelVersions": {},
+                "regime": str((vs.amt or {}).get("marketState") or MarketState.BALANCED.value),
+                "timing": "REGULAR",
+                "sizeFraction": 1.0,
+                "latencyBudget": 100,
+            }
         steps = list((agent_dec or {}).get("forecastSteps") or [pos_side] * 32)
         mean_fc = float(
             (agent_dec or {}).get("meanForecast")
@@ -871,7 +929,7 @@ class QuantCoordinator:
                 "rrAchieved": rr_achieved,
             },
             "dynamicTrailStop": sl_px if sl_px > 0 else None,
-            "source": (agent_dec or {}).get("source") or "TIMESFM_3.0_NATIVE",
+            "source": (agent_dec or {}).get("source") or "POSITION_MGMT_SYNTHETIC",
             "latencyMs": (agent_dec or {}).get("latencyMs") or 0.1,
             "modelLabel": "TimesFM-POSITION_MANAGEMENT",
             "modelVersions": {"timesfm": "3.0", "agent_role": "POSITION_MANAGEMENT", "engine": "native_direct"},
@@ -964,6 +1022,7 @@ class QuantCoordinator:
             amt=getattr(engine, "latest_amt", None),
             quant_decision=getattr(engine, "latest_quant_decision", None),
             agent_decision=agent_dec,
+            laya_decision=(agent_dec.get("laya") if isinstance(agent_dec, dict) else None) or getattr(engine, "latest_laya_decision", None),
         )
 
     @staticmethod
@@ -1197,6 +1256,17 @@ class QuantCoordinator:
                 logger.exception("eod_square_off: force-close failed for %s", eng.symbol)
         if closed:
             logger.warning("eod_square_off: force-closed %d position(s) (%s)", closed, reason)
+        # Persist session levels so a restart-between-sessions still has prior POC/VA.
+        for eng in engines:
+            try:
+                amt = getattr(eng, "_amt_engine", None)
+                if amt is not None and hasattr(amt, "persist_session_levels"):
+                    amt.persist_session_levels()
+                risk = getattr(eng, "_risk", None)
+                if risk is not None and hasattr(risk, "ensure_session_date"):
+                    risk.ensure_session_date()
+            except Exception:
+                logger.exception("eod persist_session_levels failed for %s", getattr(eng, "symbol", "?"))
         return closed
 
     def _intraday_reconcile(self) -> list[str]:
@@ -1497,10 +1567,23 @@ class QuantCoordinator:
                 underlying_priority=self.config.get("underlying_priority"),
                 timesfm_forecasts=tfm_forecasts,
             )
-            option_symbols = [
-                r.symbol for r in results if (r.ltp or 0) > 0
-            ][:n_options]
-        symbols = futures_symbols + option_symbols
+            option_symbols = []
+            for r in results:
+                if (r.ltp or 0) <= 0:
+                    continue
+                option_symbols.append(r.symbol)
+                d = float(getattr(r, "delta", 0.0) or 0.0)
+                if 0.0 < abs(d) <= 1.0:
+                    self._option_deltas[r.symbol] = abs(d)
+                if len(option_symbols) >= n_options:
+                    break
+        # Dedup while preserving order — futures claimed first, then options.
+        seen: set[str] = set()
+        symbols: list[str] = []
+        for s in futures_symbols + option_symbols:
+            if s and s not in seen:
+                seen.add(s)
+                symbols.append(s)
         if symbols:
             save_persisted_contracts(
                 symbols, self._contracts_file, exchange=self.config.get("exchange")
@@ -1834,6 +1917,13 @@ class QuantCoordinator:
         # a scan requests, concurrent engines can never exceed
         # self._max_threads OS threads.
         with self._lock:
+            if symbol in self._engines:
+                logger.warning(
+                    "QuantCoordinator: refusing duplicate spawn for %s — "
+                    "engine already running (stop it before re-spawn)",
+                    symbol,
+                )
+                return self._engines[symbol]
             if len(self._engines) >= self._max_threads:
                 logger.warning(
                     "QuantCoordinator: refusing to spawn %s — at the bounded "
@@ -1843,9 +1933,36 @@ class QuantCoordinator:
                 )
                 return None
         gateway = LiveGateway(self._feed, symbol)
-        # Every instrument (futures and options) trades independently as a self-contained scalper.
-        # No underlying gateway coupling or cross-feed translation.
+        # Options: thesis from underlying auction (LEGACY_TRANSLATED); futures stay independent.
+        from quant.contracts.instrument_registry import is_option_contract, root_token
+        from quant.execution.execution_model import ExecutionModel
         underlying_gateway = None
+        execution_model = self.config.get("execution_model", "independent")
+        if is_option_contract(symbol):
+            root = root_token(symbol)
+            fut_sym = None
+            with self._lock:
+                for s in self._engines:
+                    if root_token(s) == root and not is_option_contract(s):
+                        fut_sym = s
+                        break
+            if fut_sym is not None:
+                try:
+                    reader_q = self._feed.add_reader(fut_sym)
+                    underlying_gateway = LiveGateway(self._feed, fut_sym, reader_queue=reader_q)
+                    execution_model = ExecutionModel.LEGACY_TRANSLATED.value
+                except Exception:
+                    logger.warning(
+                        "Could not attach underlying reader for %s (root=%s)",
+                        symbol, root, exc_info=True,
+                    )
+                    underlying_gateway = None
+            if underlying_gateway is None:
+                logger.warning(
+                    "Option engine %s has no underlying futures feed — "
+                    "premium-tape Triple-A is unreliable; execution stays independent",
+                    symbol,
+                )
 
         # Per-day event journal (fsync JSONL) — feeds the L1 nightly replay
         # determinism loop. One file per symbol per day keeps writes bounded.
@@ -1881,7 +1998,7 @@ class QuantCoordinator:
             market=self._session_profile_for(symbol),
             session_levels=self._session_levels,
             underlying_gateway=underlying_gateway,
-            execution_model=self.config.get("execution_model", "independent"),
+            execution_model=execution_model,
             contract=contract,
             strategy=self._strategy,
             portfolio_risk=self._portfolio_risk,
@@ -1905,6 +2022,10 @@ class QuantCoordinator:
             ),
             trades_executed=self.config.get("trades_executed"),
         )
+        # Stamp scan Greek so option translation keys off the contract.
+        d = self._option_deltas.get(symbol)
+        if d is not None:
+            engine.set_option_delta(d, symbol=symbol)
         if advisor is not None:
             # Route advisor emissions through the engine's own bus exactly as
             # the previous in-constructor wiring did.
@@ -2023,13 +2144,16 @@ class QuantCoordinator:
                             f"ledger-mismatch:{position_id or symbol}"
                         )
                         continue
-                engine.restore_position(row_to_position(row))
-                break
+                engine.restore_position(row_to_position(row), stop_meta=row)
+                # Restore every open row for this symbol (no first-row break).
+                continue
+            # fallthrough when open_rows empty
 
         if _journal_dir:
             from quant.persistence import Journal
+            from quant.contracts.timezones import IST as _IST_TZ
 
-            day = _dt.now().strftime("%Y-%m-%d")
+            day = _dt.now(tz=_IST_TZ).strftime("%Y-%m-%d")
             safe = "".join(ch if ch.isalnum() or ch in " -" else "_" for ch in symbol)
             jdir = _Path(_journal_dir)
             jdir.mkdir(parents=True, exist_ok=True)
@@ -2038,6 +2162,7 @@ class QuantCoordinator:
         # Keep the guard live: reconciliation/ledger failures can be discovered
         # while this engine is being assembled, after its decision loop exists.
         engine._startup_issue_fn = lambda: bool(self._unresolved_startup)
+        engine._opportunity_auction = self._opportunity_auction
         # Publish ownership and submit the run loop atomically under one
         # lock: shutdown/health/option-underlying lookup must never observe an
         # engine whose run task is missing, nor a run task for a symbol the

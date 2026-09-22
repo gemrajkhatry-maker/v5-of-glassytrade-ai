@@ -101,26 +101,37 @@ def gate_session_phase(ctx: DecisionContext) -> GateResult:
                 ),
             )
 
-    # Bid-Ask spread filter: spread must be within a reasonable fraction of
-    # premium. Uses percentage-based threshold (consistent with scanner's 4%
-    # limit) rather than an absolute minimum — the old fixed 0.40 floor blocked
-    # every low-premium option (e.g. BANKNIFTY 56400 PUT @ ₹460 with ₹1.65
-    # spread = 0.36% was blocked by the 0.40 absolute minimum).
-    if ctx.ask > 0 and ctx.bid > 0 and ctx.ask >= ctx.bid:
-        spread = ctx.ask - ctx.bid
-        tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
-        close_px = float(getattr(ctx.bar, "close", 0) or 0) if ctx.bar is not None else 0.0
-        # Percentage-based threshold: 4% of premium, with tick-based minimum
-        # for high-priced instruments where 4% would be too wide.
-        pct_threshold = close_px * 0.04 if close_px > 0 else float("inf")
-        tick_floor = 2.0 * tick
-        max_spread = max(pct_threshold, tick_floor)
-        if spread > max_spread:
-            return GateResult(
-                gate=1,
-                passed=False,
-                reason=f"Wide spread ({spread:.2f} > {max_spread:.2f}, {spread/close_px*100:.1f}%) — slippage risk",
-            )
+    # Bid-Ask spread filter (playbook): spread ≤ max(2×tick, 0.1% of price, ₹0.40).
+    # Fail CLOSED when no book — admitting a wide/unknown book is the only
+    # slippage gate in the pipeline.
+    tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
+    if not (ctx.ask > 0 and ctx.bid > 0 and ctx.ask >= ctx.bid):
+        return GateResult(
+            gate=1,
+            passed=False,
+            reason="No bid/ask book — cannot verify spread",
+        )
+    from quant.contracts.instrument_registry import is_option_contract
+
+    spread = ctx.ask - ctx.bid
+    # Instrument price basis: mid of the book (option premium or futures LTP),
+    # not an underlying bar that may be attached on translated engines.
+    mid = (ctx.ask + ctx.bid) / 2.0
+    close_px = float(getattr(ctx.bar, "close", 0) or 0) if ctx.bar is not None else 0.0
+    px = mid if mid > 0 else close_px
+    if is_option_contract(ctx.symbol):
+        # Options: wider spread allowance for normal market liquidity (up to 1.5% of premium or 10 ticks, min ₹2.00)
+        max_spread = max(10.0 * tick, px * 0.015, 2.00)
+    else:
+        # Futures / Underlying: tight spread filter (2x tick, 0.1% of price, min ₹0.50)
+        max_spread = max(2.0 * tick, px * 0.001, 0.50)
+    if spread > max_spread:
+        pct = (spread / px * 100.0) if px > 0 else 0.0
+        return GateResult(
+            gate=1,
+            passed=False,
+            reason=f"Wide spread ({spread:.2f} > {max_spread:.2f}, {pct:.2f}%) — slippage risk",
+        )
 
     return GateResult(gate=1, passed=True)
 

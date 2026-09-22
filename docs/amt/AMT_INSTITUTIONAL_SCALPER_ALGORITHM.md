@@ -738,6 +738,28 @@ class AMTOrderFlowEngine:
 
 ---
 
+## 15b. Options Domain Policy (NSE/MCX)
+
+The core AMT playbook is written for futures/index auctions. Option scalping
+extends it with these hard rules:
+
+1. **Underlying-driven thesis.** Triple-A / LVN / squeeze detection runs on the
+   underlying futures (or index) tape. The option leg is a *translated* exposure
+   of that thesis — never an independent premium-tape CVD/VA story.
+2. **Buy-only.** Option engines may only emit LONG on the premium (debit).
+3. **Stop / RR on premium.** After delta translation, recompute
+   `rr = reward / (entry − sl)` from the emitted prices. Reject if `sl ≤ tick`,
+   `sl ≤ 0`, or `rr < 1.5`. Cap stop width at **30% of premium**.
+4. **Expiry authority.** Prefer broker `expiry_date`. Symbol parse must use an
+   explicit year group when present; never silently roll an expired date +1 year.
+5. **Spread.** Entry requires a live book; max spread =
+   `max(2×tick, 0.1% of mid, ₹0.40)`. Mid-trade blowout uses the same basis
+   (tighter on expiry day).
+6. **NPOC / prior levels.** Only underlying/futures engines write root NPOC and
+   dated prior levels. Option premium POCs must not poison the underlying store.
+
+---
+
 ## 16. Known Data Limitations
 
 ### Range Bars

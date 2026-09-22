@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from quant.contracts.value_objects import OHLC
 from quant.amt import compute as mc
 from quant.contracts.constants import CVD_SLOPE_EXTENDED_WINDOW, CVD_SLOPE_PERSISTENCE_BARS
+from quant.contracts.timezones import epoch_to_iso
 
 
 # ---------------------------------------------------------------------------
@@ -103,10 +104,14 @@ class CVDTracker:
         Automatically resets at session boundaries (detected by time going
         backwards, which indicates a new trading day/session).
         """
+        candle_time = epoch_to_iso(candle.time)
+        if candle_time == self._last_time:
+            return self.state()
+
         # Session boundary detection: time going backwards = new session
-        if self._last_time and candle.time < self._last_time:
+        if self._last_time and candle_time < self._last_time:
             self.reset()
-        self._last_time = candle.time
+        self._last_time = candle_time
 
         self._cvd += float(candle.delta)
         self._history.append(self._cvd)
@@ -118,7 +123,29 @@ class CVDTracker:
             self._history = self._history[trim:]
             self._price_history = self._price_history[trim:]
 
+        self._compute_slope(advance_persistence=True)
         return self.state()
+
+    def export_state(self) -> dict:
+        """Persistable snapshot of CVD rolling state for mid-session restart."""
+        return {
+            "cvd": self._cvd,
+            "history": list(self._history),
+            "price_history": list(self._price_history),
+            "last_time": self._last_time,
+            "slope_sign_history": list(self._slope_sign_history),
+            "last_emitted_slope": self._last_emitted_slope,
+        }
+
+    def import_state(self, data: dict | None) -> None:
+        if not data:
+            return
+        self._cvd = float(data.get("cvd") or 0.0)
+        self._history = [float(x) for x in (data.get("history") or [])]
+        self._price_history = [float(x) for x in (data.get("price_history") or [])]
+        self._last_time = str(data.get("last_time") or "")
+        self._slope_sign_history = [int(x) for x in (data.get("slope_sign_history") or [])]
+        self._last_emitted_slope = float(data.get("last_emitted_slope") or 0.0)
 
     def state(self) -> CVDState:
         """Return the current CVD state without consuming new data."""
@@ -138,13 +165,14 @@ class CVDTracker:
 
     # -- internals -----------------------------------------------------------
 
-    def _compute_slope(self) -> float:
+    def _compute_slope(self, *, advance_persistence: bool = False) -> float:
         """Linear-regression slope of recent CVD values with sign persistence filter.
 
         The raw slope is computed over the extended window (40 candles).
         The emitted slope only changes sign after the new sign persists for
         CVD_SLOPE_PERSISTENCE_BARS consecutive bars. This prevents rapid
-        flipping like +33k → +5k → -3k → -7k.
+        flipping like +33k → +5k → -3k → -7k. Persistence advances only
+        when explicitly requested by ``update()``.
         """
         window = self._history[-self._slope_window :]
         if len(window) < 3:
@@ -160,22 +188,27 @@ class CVDTracker:
         else:
             current_sign = 0
 
-        self._slope_sign_history.append(current_sign)
+        # When reading state() without advancing, evaluate persistence against a
+        # virtual sign history that includes the current sign — same result as
+        # update() would emit for this history without mutating.
+        sign_history = list(self._slope_sign_history)
+        if advance_persistence:
+            self._slope_sign_history.append(current_sign)
+            sign_history = list(self._slope_sign_history)
+        else:
+            sign_history = sign_history + [current_sign]
 
-        # Warm-start: before persistence buffer is full, emit raw slope
-        # so the UI shows directional info from the first candles instead of "—"
-        if len(self._slope_sign_history) < CVD_SLOPE_PERSISTENCE_BARS:
-            self._last_emitted_slope = raw_slope
+        if len(sign_history) < CVD_SLOPE_PERSISTENCE_BARS:
+            if advance_persistence:
+                self._last_emitted_slope = raw_slope
             return raw_slope
 
-        # Check if current sign has persisted for N bars
-        recent_signs = self._slope_sign_history[-CVD_SLOPE_PERSISTENCE_BARS:]
+        recent_signs = sign_history[-CVD_SLOPE_PERSISTENCE_BARS:]
         if all(s == current_sign for s in recent_signs):
-            # Sign is stable — emit raw slope
-            self._last_emitted_slope = raw_slope
+            if advance_persistence:
+                self._last_emitted_slope = raw_slope
             return raw_slope
 
-        # Sign not stable yet — return last stable slope
         return self._last_emitted_slope
 
     def _detect_divergence(self) -> tuple[str, float]:

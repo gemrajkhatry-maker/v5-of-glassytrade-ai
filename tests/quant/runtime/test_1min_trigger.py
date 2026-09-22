@@ -22,6 +22,7 @@ def test_1min_micro_trigger_evaluates_on_1min_close():
     
     # Pre-seed last_amt_dto so context exists
     eng._amt_engine._last_amt_dto = {
+            "time": "1699999800",
         "marketState": "BALANCED",
         "valueAreaHigh": 110.0,
         "valueAreaLow": 90.0,

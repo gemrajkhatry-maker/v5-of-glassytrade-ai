@@ -394,14 +394,10 @@ class TestLVNThresholdIsNotTheSpecs:
 # ---------------------------------------------------------------------------
 
 class TestH5StopPolarity:
-    """The spec says the stop belongs OUTSIDE the structural level, in every
-    formulation: section 9.1 gives ``SL = L_cluster - 2*TickSize`` (below the
-    cluster on a long), section 15:733 gives "Cluster Extreme +/- 2 ticks", and
-    section 11 says "behind the bubble, not at arbitrary candle wicks".
+    """Playbook §9.1 / §11.1: stop is BEHIND the cluster (outside the level).
 
-    The code returns ``anchor + 2*tick`` on a long — 2 ticks TOWARD entry, i.e.
-    inside the level. This test pins the arithmetic so the disagreement is a
-    number, not an interpretation.
+    LONG  → SL = L_cluster - 2*TickSize
+    SHORT → SL = H_cluster + 2*TickSize
     """
 
     @pytest.mark.parametrize("side,anchor,entry,tick", [
@@ -417,18 +413,12 @@ class TestH5StopPolarity:
         got = structural_stop(side, entry=entry, anchor=anchor, tick=tick)
         if side == "LONG":
             spec_9_1 = anchor - 2 * tick          # L_cluster - 2*TickSize
+            assert got == pytest.approx(spec_9_1)
+            assert got < anchor, "long stop sits BELOW the cluster (behind)"
         else:
             spec_9_1 = anchor + 2 * tick          # H_cluster + 2*TickSize
-        assert got != pytest.approx(spec_9_1), (
-            "the stop must disagree with spec 9.1's formula; if this passes, the "
-            "polarity was fixed and the H5 finding is closed"
-        )
-        # And it must sit on the *inside*, which is the direction the spec
-        # explicitly rejects ("not at arbitrary candle wicks").
-        if side == "LONG":
-            assert got > anchor, "code places the long stop ABOVE the level (inside)"
-        else:
-            assert got < anchor, "code places the short stop BELOW the level (inside)"
+            assert got == pytest.approx(spec_9_1)
+            assert got > anchor, "short stop sits ABOVE the cluster (behind)"
 
 
 # ---------------------------------------------------------------------------

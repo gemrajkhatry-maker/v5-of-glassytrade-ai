@@ -66,6 +66,7 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
     quantDecisionAnalysis: null,
     riskState: null,
     agentDecision: null,
+    layaDecision: null,
     llmHistory: [],
     overseerAction: '',
     overseerReason: '',
@@ -539,6 +540,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     }
                     if (state.riskState !== undefined) merged.riskState = { ...existing.riskState, ...state.riskState };
                     if (state.agentDecision !== undefined) merged.agentDecision = state.agentDecision;
+                    if (state.layaDecision !== undefined) {
+                        merged.layaDecision = state.layaDecision;
+                    } else if (state.agentDecision?.laya !== undefined) {
+                        merged.layaDecision = state.agentDecision.laya;
+                    }
                     if (state.depth !== undefined) merged.orderBook = state.depth;
                     if (state.ltp !== undefined) merged.ltp = state.ltp;
                     if (state.oi !== undefined) merged.oi = state.oi;
@@ -588,6 +594,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     ? (state.riskState ?? null)
                     : inst.riskState;
                 const newAgentDecision = state.agentDecision ?? inst.agentDecision;
+                const newLayaDecision = state.layaDecision ?? (state.agentDecision?.laya ?? inst.layaDecision);
                 let halfTrendSeries = inst.halfTrendSeries;
                 if (state.amt && state.amt !== null) {
                     const htPoint = halfTrendLivePoint(state.amt.halfTrend);
@@ -608,6 +615,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         llmHistory: mergeDecisionHistory(inst.llmHistory, state.quantDecision),
                         riskState: newRiskState,
                         agentDecision: newAgentDecision,
+                        layaDecision: newLayaDecision,
                         orderBook: state.depth ?? inst.orderBook,
                         halfTrendSeries,
                         ltp: state.ltp ?? inst.ltp,

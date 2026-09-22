@@ -103,15 +103,19 @@ class AcceptanceRejectionEngine:
         )
         velocity = calc_body_size / duration if duration > 0 else 0.0
 
-        # Time accumulation outside VA
+        # Time accumulation outside VA — mutually exclusive active side.
+        # Opposite side resets to zero on a flip (no half-decay residual).
         c_close = float(candle.close)
         if c_close > vah and vah > 0:
+            active_side = "above"
             self._time_above_vah += duration
-            self._time_below_val = max(0, self._time_below_val - duration * 0.5)
+            self._time_below_val = 0.0
         elif c_close < val and val > 0:
+            active_side = "below"
             self._time_below_val += duration
-            self._time_above_vah = max(0, self._time_above_vah - duration * 0.5)
+            self._time_above_vah = 0.0
         else:
+            active_side = ""
             self._time_above_vah = max(0, self._time_above_vah - duration * 0.5)
             self._time_below_val = max(0, self._time_below_val - duration * 0.5)
 
@@ -122,10 +126,14 @@ class AcceptanceRejectionEngine:
             else False
         )
         acceptance_above = (
-            self._time_above_vah >= self._acceptance_time_threshold and vol_ok
+            active_side == "above"
+            and self._time_above_vah >= self._acceptance_time_threshold
+            and vol_ok
         )
         acceptance_below = (
-            self._time_below_val >= self._acceptance_time_threshold and vol_ok
+            active_side == "below"
+            and self._time_below_val >= self._acceptance_time_threshold
+            and vol_ok
         )
 
         # Rejection / Liquidity sweep

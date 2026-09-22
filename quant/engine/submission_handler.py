@@ -86,11 +86,13 @@ class SubmissionHandler:
         self._execution_model = config.get("execution_model", ExecutionModel.LEGACY_TRANSLATED)
         self._contract = config.get("contract")
         self._execution_enabled: bool = config.get("execution_enabled", True)
+        self._tick_size: float = float(config.get("tick_size") or 0.05)
 
         # --- Dependencies ---
         self._risk = deps["risk"]
         self._oms = deps["oms"]
         self._get_portfolio_risk = deps.get("get_portfolio_risk", lambda: deps.get("portfolio_risk"))
+        self._get_opportunity_auction = deps.get("get_opportunity_auction", lambda: None)
         self._get_position_manager = deps["get_position_manager"]
         self._forecast_fn = deps.get("forecast_fn")
         self._trades_executed = deps.get("trades_executed")
@@ -191,7 +193,7 @@ class SubmissionHandler:
             self._latch_or_signal_block(signal, zero_reason, bar.time)
             return False
 
-        if not self._apply_risk_ceilings(signal, bar, quantity):
+        if not self._apply_risk_ceilings(signal, bar, quantity, amt_dto):
             return False
 
         try:
@@ -301,8 +303,6 @@ class SubmissionHandler:
             latch = self._get_latch()
             latch.pop((getattr(signal, "symbol", "") or self._symbol, str(signal.type)), None)
 
-        pm = self._get_position_manager()
-        pm.current_position = position
         self._emit(PositionOpened(symbol=self._symbol, time=bar.time, position=position))
 
         # Notify advisor of new open position
@@ -314,15 +314,71 @@ class SubmissionHandler:
     # Risk ceilings
     # ---------------------------------------------------------------------
 
-    def _apply_risk_ceilings(self, signal: Signal, bar: Any, quantity: float) -> bool:
+    def _apply_risk_ceilings(
+        self, signal: Signal, bar: Any, quantity: float, amt_dto: dict | None = None,
+    ) -> bool:
         """Cross-engine portfolio ceiling check + reservation.
 
-        Returns True when the trade may proceed; on refusal it latches a
-        SignalBlocked and returns False.
+        When an OpportunityAuction is wired, proposals are ranked by quality
+        score and only the winner receives a capital grant. Otherwise fall
+        back to direct can_accept/register_open (single-engine / tests).
         """
+        trade_risk = abs(float(signal.entry) - float(signal.sl)) * max(1.0, quantity)
+        auction = self._get_opportunity_auction() if callable(self._get_opportunity_auction) else None
+        if auction is not None:
+            from quant.execution.opportunity_auction import OpportunityProposal, score_opportunity
+            dto = amt_dto or {}
+            setup = str(getattr(signal, "model_label", "") or getattr(signal, "reason", "") or "")
+            # Spread quality from book when present (1.0 = unknown/neutral).
+            spread_q = 1.0
+            bid = float(dto.get("bid") or 0.0)
+            ask = float(dto.get("ask") or 0.0)
+            mid = float(getattr(signal, "entry", 0.0) or 0.0)
+            if bid > 0 and ask > bid and mid > 0:
+                spread_q = max(0.1, min(1.0, 1.0 - ((ask - bid) / mid)))
+            leg_lvn = float(dto.get("legLvn") or dto.get("nearestLegLvn") or 0.0)
+            lvn_ticks = None
+            tick = float(self._tick_size or 0.05)
+            if leg_lvn > 0 and mid > 0 and tick > 0:
+                lvn_ticks = abs(mid - leg_lvn) / tick
+            score = score_opportunity(
+                setup_key=setup,
+                rr=float(getattr(signal, "rr", 0.0) or 0.0),
+                absorption_vol_ratio=float(dto.get("absorptionVolRatio") or 0.0),
+                drive_entry_valid=bool(dto.get("driveEntryValid") or dto.get("isSecondDrive")),
+                spread_quality=spread_q,
+                lvn_ticks=lvn_ticks,
+                cvd_agrees=bool(dto.get("cvdAgrees")),
+            )
+            proposal = OpportunityProposal(
+                symbol=self._symbol,
+                side=str(signal.type),
+                score=score,
+                requested_risk_rupees=trade_risk,
+                signal=signal,
+                quantity=quantity,
+                reason=setup,
+            )
+            # Bar-cycle path: stage, then settle_bar (via await_grant) so
+            # competing engines can join the ranking window before capital
+            # is granted. Never call propose()'s private settle alone.
+            auction.submit(proposal)
+            ok, why = auction.await_grant(self._symbol)
+            if not ok:
+                # OUTRANKED is bar-cycle deferral — do not latch a session block.
+                if str(why).upper() == "OUTRANKED":
+                    if self._set_last_rejected_bar_index is not None:
+                        self._set_last_rejected_bar_index()
+                    return False
+                self._latch_or_signal_block(signal, why, bar.time)
+                if self._set_last_rejected_bar_index is not None:
+                    self._set_last_rejected_bar_index()
+                return False
+            self._set_open_trade_risk(trade_risk)
+            return True
+
         portfolio_risk = self._get_portfolio_risk()
         if portfolio_risk is not None:
-            trade_risk = abs(float(signal.entry) - float(signal.sl)) * max(1.0, quantity)
             ok, why = portfolio_risk.can_accept(trade_risk, symbol=self._symbol)
             if not ok:
                 self._latch_or_signal_block(signal, why, bar.time)

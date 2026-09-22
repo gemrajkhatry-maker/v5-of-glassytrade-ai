@@ -178,10 +178,14 @@ def _check_guards(ctx: DecisionContext) -> GateResult | None:
     if ms_val in (MarketState.DEAD.value, "DEAD", "DEAD_MARKET"):
         return GateResult(3, False, "Dead market — no edge")
     close_px = float(ctx.bar.close) if ctx.bar else 0.0
+    # vwap_std is σ in PRICE units; report true σ-multiples for the veto reason.
+    sigma_mult = 0.0
+    if ctx.vwap_std and ctx.vwap_std > 0 and ctx.session_vwap > 0:
+        sigma_mult = abs(close_px - ctx.session_vwap) / ctx.vwap_std
     if ctx.agent_direction == "LONG" and ctx.vwap_upper_2 > 0 and close_px > ctx.vwap_upper_2:
-        return GateResult(3, False, f"Anti-Climax: LONG rejected at +{abs(ctx.vwap_std):.1f}σ extension")
+        return GateResult(3, False, f"Anti-Climax: LONG rejected at +{sigma_mult:.1f}σ extension")
     if ctx.agent_direction == "SHORT" and ctx.vwap_lower_2 > 0 and close_px < ctx.vwap_lower_2:
-        return GateResult(3, False, f"Anti-Climax: SHORT rejected at -{abs(ctx.vwap_std):.1f}σ extension")
+        return GateResult(3, False, f"Anti-Climax: SHORT rejected at -{sigma_mult:.1f}σ extension")
     acceptance = _candle_acceptance(ctx)
     if acceptance:
         return acceptance
@@ -189,8 +193,9 @@ def _check_guards(ctx: DecisionContext) -> GateResult | None:
         return GateResult(3, False, f"Drive count exhausted ({ctx.drive_number})")
     cvd_slope = ctx.cvd_slope
     market = getattr(ctx, "market", "NSE")
-    cvd_block_neg = -0.3 if str(market).upper() == "MCX" else -0.5
-    cvd_block_pos = 0.3 if str(market).upper() == "MCX" else 0.5
+    # Doc: NSE tighter (−0.3), MCX looser (−0.5) — was inverted.
+    cvd_block_neg = -0.5 if str(market).upper() == "MCX" else -0.3
+    cvd_block_pos = 0.5 if str(market).upper() == "MCX" else 0.3
     if ctx.agent_direction == "LONG" and cvd_slope < cvd_block_neg:
         return GateResult(3, False, f"CVD slope aggressively negative ({cvd_slope:.2f}) conflicts with LONG")
     if ctx.agent_direction == "SHORT" and cvd_slope > cvd_block_pos:
@@ -213,13 +218,31 @@ def _pass(reason: str, setup_key: str = "") -> GateResult:
 
 
 def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | None:
-    """Check each setup path (evidence, Triple-A, drive, LVN, initiative)."""
+    """Check each setup path (evidence, Triple-A, drive, LVN, initiative).
+
+    When setup_evidence is present, is_complete() is the sole location/LVN/
+    breakout certificate — this gate only applies phase permissions.
+    """
+    price = float(ctx.bar.close) if ctx.bar else 0.0
+    tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
+    leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0
+    _LVN_PROXIMITY_TICKS = 5
+    vwap = getattr(ctx, "session_vwap", 0.0) or (float(ctx.bar.vwap) if ctx.bar and getattr(ctx.bar, "vwap", 0.0) else 0.0)
+
     if getattr(ctx, "setup_evidence", None) is not None:
         ev = ctx.setup_evidence
-        if ev.is_complete():
-            if ev.direction and ev.direction != ctx.agent_direction:
-                return GateResult(3, False, f"Evidence direction {ev.direction} conflicts with trade direction {ctx.agent_direction}")
-            return _pass(f"{ev.setup_type} confirmed", str(ev.setup_type or "").upper())
+        if not ev.is_complete():
+            return GateResult(3, False, ev.rejection_reason() or "Incomplete setup evidence")
+        if ev.direction and ev.direction != ctx.agent_direction:
+            return GateResult(3, False, f"Evidence direction {ev.direction} conflicts with trade direction {ctx.agent_direction}")
+
+        stype = str(ev.setup_type or "").upper()
+        if stype in ("TRIPLE_A", "LVN_SNIPER") and not getattr(ctx, "allow_trend", True):
+            return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
+        if stype in ("VA_FADE", "SECOND_DRIVE") and not getattr(ctx, "allow_reversion", True):
+            return GateResult(3, False, "Mean-reversion blocked in trend-only phase")
+        return _pass(f"{ev.setup_type} confirmed", stype)
+
     phase = getattr(ctx, "triple_a_phase", "") or ""
     tsignal = getattr(ctx, "triple_a_signal", "") or ""
     if phase == "AGGRESSION" and tsignal == ctx.agent_direction:

@@ -20,6 +20,9 @@ def _ctx(time_str: str, market: str = "NSE") -> DecisionContext:
         warmup_complete=True,
         market=market,
         time_str=time_str,
+        bid=99.95,
+        ask=100.05,
+        tick_size=0.05,
     )
 
 

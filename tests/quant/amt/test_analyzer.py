@@ -832,16 +832,19 @@ class TestSessionVsLegVABounds:
         # Run analysis
         result = analyzer.analyze(data)
 
-        # Session VA should encompass leg VA (session is wider or equal)
-        if result.value_area_high > 0 and result.leg_vah > 0:
-            assert result.value_area_high >= result.leg_vah - 0.01, (
-                f"Session VAH {result.value_area_high} should be >= Leg VAH {result.leg_vah}"
-            )
-
-        if result.value_area_low > 0 and result.leg_val > 0:
-            assert result.value_area_low <= result.leg_val + 0.01, (
-                f"Session VAL {result.value_area_low} should be <= Leg VAL {result.leg_val}"
-            )
+        # Session VA is the 70% CME value area (then recent-window clamped).
+        # A thin displacement leg can legitimately poke beyond that band —
+        # do NOT require session VA to encompass leg VA.
+        assert result.value_area_high > 0
+        assert result.value_area_low > 0
+        assert result.value_area_high >= result.value_area_low
+        if result.session_extreme_high > 0:
+            assert result.value_area_high <= result.session_extreme_high + 0.01
+        if result.session_extreme_low > 0:
+            assert result.value_area_low >= result.session_extreme_low - 0.01
+        # Leg VA is independently published when a displacement leg exists.
+        if result.leg_vah > 0:
+            assert result.leg_val <= result.leg_vah
 
 
 class TestVWAPSigmaBounds:
@@ -942,11 +945,18 @@ class TestVWAPSigmaBounds:
             f"session_vwap {result.session_vwap:.2f} must come from the recent "
             f"regime window, not the whole-session accumulator"
         )
-        # With price inside the recent VA, deviation cannot be extreme.
+        # With price inside the recent VA, deviation cannot be extreme (≥3σ).
+        # Honest (unclamped) σ may yield |σ| slightly above 1 on a quiet tape;
+        # the old 0.1%×vwap floor hid that by inflating the denominator.
         assert result.vwap_deviation_sigmas is not None
-        assert abs(result.vwap_deviation_sigmas) < 1.0, (
-            f"sigma {result.vwap_deviation_sigmas:.2f} must be small when price "
-            f"is inside the same-window VA"
+        assert abs(result.vwap_deviation_sigmas) < 3.0, (
+            f"sigma {result.vwap_deviation_sigmas:.2f} must not read EXTREME "
+            f"when price is inside the same-window VA"
+        )
+        # Band width (±1σ) is the published statistical σ (no ≥1.0 floor).
+        band_sigma = abs(result.vwap_upper_1 - result.session_vwap)
+        assert band_sigma < 1.0, (
+            f"published σ {band_sigma} must stay raw (not floored to ≥1.0)"
         )
 
 

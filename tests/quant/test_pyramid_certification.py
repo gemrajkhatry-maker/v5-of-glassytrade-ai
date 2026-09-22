@@ -116,9 +116,8 @@ def test_e10_base_sl_ratcheted_at_pyramid_fill():
 
     leg_lvn = 100.0
     tick = 0.05
-    # structural_stop places the stop inside_ticks (2) INSIDE anchor toward entry:
-    # LONG → sl = anchor + 2*tick = 100.10, clamped to stay strictly below entry 100.05
-    # → sl = anchor + 1*tick = 100.05... but must be < entry, so it lands at 100.0.
+    # structural_stop places the stop behind_ticks (2) BEHIND the anchor:
+    # LONG → sl = anchor - 2*tick = 99.90
     from quant.decision.stops import structural_stop
 
     new_sl = structural_stop("LONG", 100.05, leg_lvn, tick)

@@ -124,10 +124,8 @@ def _cluster_nodes(
 
     result = []
     for cluster in clusters:
-        if keep_highest:
-            result.append(max(cluster, key=lambda n: n.strength))
-        else:
-            result.append(min(cluster, key=lambda n: n.strength))
+        # Strength first; on ties keep the higher-priced node.
+        result.append(max(cluster, key=lambda n: (n.strength, n.price)))
 
     return sorted(result, key=lambda n: n.price)
 
@@ -218,7 +216,9 @@ def find_lvns(
     eff_separation = max(min_separation, 0.04 * price_range, 8.0 * tick_size)
 
     if eff_separation > 0 and len(lvns) > 1:
-        lvns = _cluster_nodes(lvns, eff_separation, keep_highest=False)
+        # LVN strength is trough depth (higher = better). Always keep the
+        # strongest node; price is the tie-break (higher price wins).
+        lvns = _cluster_nodes(lvns, eff_separation, keep_highest=True)
 
     # Return top max_nodes ranked by strength (lowest volume trough = highest strength)
     if max_nodes > 0 and len(lvns) > max_nodes:

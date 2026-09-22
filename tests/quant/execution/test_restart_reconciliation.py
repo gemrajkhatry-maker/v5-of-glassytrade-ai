@@ -162,7 +162,7 @@ def test_coordinator_start_restores_inflight_order_without_changing_startup_stat
 
         def load_inflight_orders(self):
             return [{
-                "symbol": "NIFTY 26 AUG 24000 CALL",
+                "symbol": "NIFTY 26 DEC 24000 CALL",
                 "order_id": "o1",
                 "quantity": 1,
             }]
@@ -177,9 +177,10 @@ def test_coordinator_start_restores_inflight_order_without_changing_startup_stat
             "underlyings": ["NIFTY"],
             "n": 1,
             "contracts_file": str(tmp_path / "contracts.json"),
+            "contract_expiries": {"NIFTY 26 DEC 24000 CALL": "2026-12-26"},
         },
     )
-    coordinator._scan = lambda: ["NIFTY 26 AUG 24000 CALL"]
+    coordinator._scan = lambda: ["NIFTY 26 DEC 24000 CALL"]
     coordinator._refresh_gex = lambda: None
     coordinator._start_eod_watchdog = lambda: None
     coordinator._start_engine_loop = lambda engine: None
@@ -188,7 +189,7 @@ def test_coordinator_start_restores_inflight_order_without_changing_startup_stat
         patch.setattr("quant.multi_engine.is_trading_day", lambda: True)
         coordinator.start()
 
-    engine = coordinator._engines["NIFTY 26 AUG 24000 CALL"]
+    engine = coordinator._engines["NIFTY 26 DEC 24000 CALL"]
     assert coordinator.started is True
     assert isinstance(coordinator._unresolved_startup, set)
     assert "o1" in coordinator.unresolved_startup_issues()

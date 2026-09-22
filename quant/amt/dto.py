@@ -15,39 +15,12 @@ from __future__ import annotations
 from quant.contracts.enums import MarketState
 from quant.state import _epoch_to_iso
 from quant.decision.data_quality import DataQuality, normalize_data_quality, normalize_evidence_provenance
+from quant.amt.snapshot import derive_stacked_imbalance
 
 
 def _derive_stacked_imbalance(footprints: dict) -> tuple[str, int, float, float]:
-    """Derive the strongest stacked-imbalance run from the latest footprint.
-
-    Mirrors ``_latest_stacked_imbalance`` in context_builder.py but reads the
-    raw AMTResult footprints (FootprintLevel objects) instead of the DTO dict.
-    Returns (direction, magnitude, price_low, price_high); ("", 0, 0.0, 0.0) when no qualifying run exists.
-    """
-    if not footprints:
-        return "", 0, 0.0, 0.0
-    latest_key = max(footprints.keys())
-    levels = footprints[latest_key].levels
-    best_dir, best_n = "", 0
-    best_prices: list[float] = []
-    run_dir, run_n, run_prices = "", 0, []
-    for lvl in levels:
-        if not lvl.stacked:
-            run_dir, run_n, run_prices = "", 0, []
-            continue
-        d = "BUY" if lvl.ask > lvl.bid else "SELL"
-        px = float(getattr(lvl, "price", 0.0))
-        if d != run_dir:
-            run_dir, run_n, run_prices = d, 1, [px]
-        else:
-            run_n += 1
-            run_prices.append(px)
-        if run_n > best_n:
-            best_dir, best_n = run_dir, run_n
-            best_prices = list(run_prices)
-    if best_n < 3 or not best_prices:
-        return "", 0, 0.0, 0.0
-    return best_dir, best_n, min(best_prices), max(best_prices)
+    """WS adapter wrapper — logic lives in ``derive_stacked_imbalance``."""
+    return derive_stacked_imbalance(footprints)
 
 
 class CVDStateDict(dict):
@@ -186,6 +159,7 @@ def amt_result_to_dto(r) -> dict:
         "profileShape": r.profile_shape,
         "profileType": r.profile_type,
         "sessionVwap": r.session_vwap,
+        "vwap": r.session_vwap,
         "vwapUpper1": r.vwap_upper_1,
         "vwapLower1": r.vwap_lower_1,
         "vwapUpper2": r.vwap_upper_2,
@@ -256,6 +230,9 @@ def amt_result_to_dto(r) -> dict:
         "pocVsPrice": r.poc_vs_price,
         "lvnPlay": r.lvn_play,
         "isSecondDrive": r.drive_entry_valid,
+        "driveEntryValid": bool(getattr(r, "drive_entry_valid", False)),
+        "departedAndReapproached": bool(getattr(r, "drive_entry_valid", False)),
+        "driveDepartedAndReapproached": bool(getattr(r, "drive_entry_valid", False)),
         # Phase 4: context_builder.py's drive-exhaustion guard reads
         # "driveNumber" but this key was never emitted here, so
         # gates_edge.py's "3+ drives -> exhausted" guard could never fire —

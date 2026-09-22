@@ -108,6 +108,7 @@ class DecisionLoop:
         # --- Dependencies ---
         self._risk = deps["risk"]
         self._get_portfolio_risk = deps.get("get_portfolio_risk", lambda: deps.get("portfolio_risk"))
+        self._get_opportunity_auction = deps.get("get_opportunity_auction", lambda: None)
         self._oms = deps["oms"]
         self._strategy = deps["strategy"]
         self._amt_engine = deps["amt_engine"]
@@ -119,6 +120,7 @@ class DecisionLoop:
         self._configured_live_mode = config.get("live_mode", deps.get("live_mode"))
         self._get_underlying_symbol = deps.get("get_underlying_symbol")
         self._trades_executed = deps.get("trades_executed")
+        self._greeks = deps.get("greeks")
 
         # --- Mutable state accessors/mutators ---
         self._get_bar_index = state["get_bar_index"]
@@ -168,6 +170,7 @@ class DecisionLoop:
             "risk": self._risk,
             "oms": self._oms,
             "get_portfolio_risk": self._get_portfolio_risk,
+            "get_opportunity_auction": self._get_opportunity_auction,
             "get_position_manager": self._get_position_manager,
             "forecast_fn": self._forecast_fn,
             "trades_executed": self._trades_executed,
@@ -243,7 +246,22 @@ class DecisionLoop:
         self._notify_advisor_decision(ctx, amt_dto, execution_bar, cooldown_remaining_sec, risk_st)
 
         if decision.approved and decision.signal is not None:
-            self._translate_and_submit(decision, bar, amt_dto, risk_st)
+            submitted = self._translate_and_submit(decision, bar, amt_dto, risk_st)
+            if not submitted:
+                # Sizing/OMS refused after gates — do not leave the UI on Approved.
+                demoted = _dc_replace(
+                    decision,
+                    approved=False,
+                    signal=None,
+                    reason="ENTRY_NOT_SUBMITTED",
+                    block_reasons=(
+                        "Gates passed but sizing/OMS did not open a position",
+                    ),
+                )
+                self._emit(DecisionProduced(
+                    symbol=self._symbol, time=bar.time, decision=demoted,
+                ))
+                return demoted
         else:
             # Market state changed — all open blocking episodes are stale.
             self._clear_latch()
@@ -404,16 +422,20 @@ class DecisionLoop:
             or not isinstance(capability, bool)
             or configured_live is True
         )
-        if safety_live and quality is not DataQuality.TICK_EXACT:
+        # Live entry requires honest tape. Dhan has no aggressor flag, so the
+        # best available grade is PRICE_DIRECTION_PROXY — accept that for live.
+        # UNAVAILABLE / candle-only grades still block live OMS.
+        _LIVE_OK = frozenset({DataQuality.TICK_EXACT, DataQuality.PRICE_DIRECTION_PROXY})
+        if safety_live and quality not in _LIVE_OK:
             decision = _dc_replace(
                 decision,
                 approved=False,
                 signal=None,
                 reason="PROXY_FLOW_BLOCKED",
-                block_reasons=("Live AMT entry requires TICK_EXACT evidence",),
+                block_reasons=("Live AMT entry requires TICK_EXACT or PRICE_DIRECTION_PROXY evidence",),
                 metadata={"data_quality": quality.value},
             )
-        elif quality is not DataQuality.TICK_EXACT:
+        elif quality not in _LIVE_OK:
             decision = _dc_replace(
                 decision,
                 metadata={**decision.metadata, "mode": "PROXY_MODE"},
@@ -441,9 +463,19 @@ class DecisionLoop:
             if self._underlying_gateway is not None and self._get_underlying_symbol
             else self._symbol
         )
+        # Greeks must key off the execution option contract, not the underlying
+        # eval symbol — otherwise option_delta is always None and translation
+        # refuses every entry with DATA_DEGRADED.
+        contract_symbol = (
+            self._symbol
+            if self._underlying_gateway is not None
+            else None
+        )
         pm = self._get_position_manager()
         active_pos = pm.current_position
-        return DecisionContextBuilder().build(
+        snap = getattr(self._amt_engine, "last_snapshot", None)
+        greeks = getattr(self, "_greeks", None)
+        return DecisionContextBuilder(greeks=greeks).build(
             bar=bar,
             symbol=eval_symbol,
             market=self._market,
@@ -454,10 +486,12 @@ class DecisionLoop:
             cooldown_remaining_sec=cooldown_remaining_sec,
             risk_state=self._risk.state(),
             amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
+            snapshot=snap,
             order_book=self._get_last_depth(),
             position=active_pos,
             entry_bar_index=self._get_entry_bar_index(),
             recent_decisions=list(self._get_recent_decisions()),
+            contract_symbol=contract_symbol,
         )
 
     def _translate_signal_for_option(
@@ -481,6 +515,14 @@ class DecisionLoop:
             return decision
 
         delta = getattr(ctx, "option_delta", None)
+        if delta is None:
+            return _dc_replace(
+                decision,
+                approved=False,
+                signal=None,
+                reason="DATA_DEGRADED",
+                block_reasons=("Option Greek delta unavailable — refusing to invent 0.50",),
+            )
         selector = OptionSelector()
         opt_signal = selector.translate_underlying_signal_to_option(
             signal=decision.signal,
@@ -505,15 +547,15 @@ class DecisionLoop:
 
     def _translate_and_submit(
         self, decision: QuantDecision, bar: Any, amt_dto: dict, risk_st: Any,
-    ) -> None:
-        """Delegate submission to the SubmissionHandler."""
-        self._submission_handler.submit(
+    ) -> bool:
+        """Delegate submission to the SubmissionHandler. True if OMS accepted."""
+        return bool(self._submission_handler.submit(
             signal=decision.signal,
             bar=bar,
             amt_dto=amt_dto,
             risk_st=risk_st,
             decision_reason=decision.reason,
-        )
+        ))
 
     # ---------------------------------------------------------------------
     # Latch / signal blocking
@@ -606,7 +648,8 @@ class DecisionLoop:
         try:
             # For option contracts, build context from the option AMT DTO
             if self._underlying_gateway is not None and execution_bar is not None:
-                advisor_ctx = DecisionContextBuilder().build(
+                snap = getattr(self._amt_engine, "last_snapshot", None)
+                advisor_ctx = DecisionContextBuilder(greeks=self._greeks).build(
                     bar=execution_bar,
                     symbol=self._symbol,
                     market=self._market,
@@ -617,10 +660,12 @@ class DecisionLoop:
                     cooldown_remaining_sec=cooldown_remaining_sec,
                     risk_state=risk_st,
                     amt_dto=amt_dto,
+                    snapshot=snap,
                     order_book=self._get_last_depth(),
                     position=None,
                     entry_bar_index=self._get_entry_bar_index(),
                     recent_decisions=list(self._get_recent_decisions()),
+                    contract_symbol=self._symbol,
                 )
                 self._advisor.on_context(advisor_ctx)
             else:
@@ -633,7 +678,8 @@ class DecisionLoop:
         if self._advisor is None:
             return
         try:
-            pos_ctx = DecisionContextBuilder().build(
+            snap = getattr(self._amt_engine, "last_snapshot", None)
+            pos_ctx = DecisionContextBuilder(greeks=self._greeks).build(
                 bar=bar,
                 symbol=self._symbol,
                 market=self._market,
@@ -644,10 +690,14 @@ class DecisionLoop:
                 cooldown_remaining_sec=0.0,
                 risk_state=self._risk.state(),
                 amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
+                snapshot=snap,
                 order_book=self._get_last_depth(),
                 position=position,
                 entry_bar_index=self._get_entry_bar_index(),
                 recent_decisions=list(self._get_recent_decisions()),
+                contract_symbol=(
+                    self._symbol if self._underlying_gateway is not None else None
+                ),
             )
             self._advisor.on_context(pos_ctx)
         except Exception as e:

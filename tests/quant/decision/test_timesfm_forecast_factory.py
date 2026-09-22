@@ -41,7 +41,9 @@ def test_rejects_a_quantile_count_it_does_not_understand():
 def test_degenerate_quantiles_fall_back_to_a_flat_path():
     fc = build_forecast(None, curr_price=100.0, horizon=4, lat_ms=1.0)
     assert np.allclose(fc.p50_path, 100.0)
-    assert fc.q_spread == 0.0
+    assert fc.source == "FALLBACK_BAND"
+    # Honest band width (not a fake zero-spread that looks native).
+    assert fc.q_spread == pytest.approx(0.4)
 
 
 def test_steps_are_flat_aware():

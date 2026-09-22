@@ -22,8 +22,8 @@ def _candle(close: float, volume: float = 100.0, delta: float = 0.0,
 class TestCVDTracker:
     def test_accumulates_delta(self):
         t = CVDTracker()
-        c1 = _candle(100, delta=10)
-        c2 = _candle(101, delta=-5)
+        c1 = _candle(100, delta=10, time="2025-01-01T12:00:00+00:00")
+        c2 = _candle(101, delta=-5, time="2025-01-01T12:01:00+00:00")
         t.update(c1)
         state = t.update(c2)
         assert state.value == 5.0  # 10 + (-5)
@@ -31,23 +31,29 @@ class TestCVDTracker:
     def test_slope_positive_for_rising_cvd(self):
         t = CVDTracker(slope_window=5)
         for i in range(10):
-            t.update(_candle(100, delta=10))
+            t.update(_candle(100, delta=10, time=f"2025-01-01T12:{i:02d}:00+00:00"))
         state = t.state()
         assert state.slope > 0
 
     def test_slope_negative_for_falling_cvd(self):
         t = CVDTracker(slope_window=5)
         for i in range(10):
-            t.update(_candle(100, delta=-10))
+            t.update(_candle(100, delta=-10, time=f"2025-01-01T12:{i:02d}:00+00:00"))
         state = t.state()
         assert state.slope < 0
 
     def test_divergence_bearish(self):
         t = CVDTracker(divergence_window=10)
         for i in range(5):
-            t.update(_candle(100 + i, delta=20 - i))
+            t.update(_candle(
+                100 + i, delta=20 - i,
+                time=f"2025-01-01T12:{i:02d}:00+00:00",
+            ))
         for i in range(5):
-            t.update(_candle(106 + i, delta=10 - i * 3))
+            t.update(_candle(
+                106 + i, delta=10 - i * 3,
+                time=f"2025-01-01T12:{i + 5:02d}:00+00:00",
+            ))
         state = t.state()
         assert isinstance(state.divergence_type, str)
         assert state.divergence_type in ("BEARISH_DIV", "BULLISH_DIV", "NONE")
@@ -62,6 +68,35 @@ class TestCVDTracker:
         t = CVDTracker()
         state = t.update(_candle(100, delta=5))
         assert isinstance(state, CVDState)
+
+    def test_equivalent_epoch_and_iso_timestamp_is_idempotent(self):
+        tracker = CVDTracker()
+        tracker.update(_candle(100, delta=10, time="1767225600"))
+
+        state = tracker.update(
+            _candle(101, delta=999, time="2026-01-01T05:30:00+05:30")
+        )
+
+        assert state.value == 10
+        assert tracker._history == [10]
+        assert tracker._price_history == [100]
+
+    def test_state_does_not_advance_slope_persistence(self):
+        tracker = CVDTracker(slope_window=5)
+        for i in range(5):
+            tracker.update(_candle(
+                100, delta=10,
+                time=f"2025-01-01T12:{i:02d}:00+00:00",
+            ))
+        signs = list(tracker._slope_sign_history)
+        emitted = tracker._last_emitted_slope
+
+        first = tracker.state()
+        second = tracker.state()
+
+        assert first == second
+        assert tracker._slope_sign_history == signs
+        assert tracker._last_emitted_slope == emitted
 
 
 class TestCVDSessionReset:

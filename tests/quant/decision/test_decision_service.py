@@ -14,6 +14,7 @@ def _bar(close=100.0):
 
 def _ctx(agent_direction="LONG", market_state="IMBALANCED", **kw):
     bar = kw.get("bar") or _bar(kw.get("close", 100.0))
+    close = float(bar.close)
     return DecisionContext(
         state=None,
         bar=bar,
@@ -34,6 +35,8 @@ def _ctx(agent_direction="LONG", market_state="IMBALANCED", **kw):
         triple_a_phase=kw.get("triple_a_phase", ""),
         triple_a_signal=kw.get("triple_a_signal", ""),
         allow_reversion=kw.get("allow_reversion", True),
+        bid=kw.get("bid", close - 0.05),
+        ask=kw.get("ask", close + 0.05),
     )
 
 

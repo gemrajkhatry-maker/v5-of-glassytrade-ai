@@ -44,15 +44,20 @@ def test_thin_stop_setup_is_rejected():
     # 0.1% noise band, so the builder must refuse rather than emit a noise stop.
     sb = SignalBuilder()
     ctx = _ctx(close=56000.0, val=55999.9, step=0.1, nearest=55999.8)
-    assert sb.build(ctx, _pass_results()) is None
+    assert sb.build(ctx, _pass_results(), model_label="Triple-A") is None
 
 
 def test_thin_nearest_anchor_reanchors_to_a_valid_level():
-    # entry 104.92, nearest VAL 104.919 is noise-thin, but the bar provides a
-    # deeper structural level, so the builder emits with a valid stop.
+    # entry 104.92, nearest VAL 104.919 is noise-thin under min-distance;
+    # a deeper VAL clears the floor so the builder emits.
     sb = SignalBuilder()
-    ctx = _ctx(close=104.92, val=104.919, step=0.01, nearest=104.9)
-    sig = sb.build(ctx, _pass_results())
+    bar = Bar(time="t", open=104.92, high=104.92, low=103.5, close=104.92, volume=100.0)
+    ctx = DecisionContext(
+        state=None, bar=bar, symbol="SYM", time_str="t",
+        agent_direction="LONG", agent_probability=0.7,
+        poc=104.92, vah=104.95, val=103.5, tick_size=0.05,
+    )
+    sig = sb.build(ctx, _pass_results(), model_label="Triple-A")
     assert sig is not None
     assert abs(sig.entry - sig.sl) >= min_stop_distance(sig.entry, ctx.tick_size)
 
@@ -64,19 +69,25 @@ def test_thin_stop_pure_function():
 
 
 def test_healthy_setup_still_builds():
-    # SL 1.9% away (100 -> 98.10) -> builds normally.
+    # SL behind VAL (100 -> 97.90) -> builds normally.
     sb = SignalBuilder()
     ctx = _ctx(close=100.0, val=98.0, step=1.0, nearest=98.0)
-    s = sb.build(ctx, _pass_results())
+    s = sb.build(ctx, _pass_results(), model_label="Triple-A")
     assert s is not None and s.type == "LONG"
-    assert s.sl == pytest.approx(98.10)
+    assert s.sl == pytest.approx(97.90)
 
 
 def test_override_min_stop_allows_thin_stop():
-    # Explicit override (min_stop_distance_pct=0) permits the thin stop.
+    # Explicit override (min_stop_distance_pct=0) permits a stop that the
+    # module-default 0.1% floor would otherwise reject at the builder.
     sb = SignalBuilder(min_stop_distance_pct=0.0)
-    ctx = _ctx(close=104.92, val=104.919, step=0.01, nearest=104.9)
-    assert sb.build(ctx, _pass_results()) is not None
+    bar = Bar(time="t", open=104.92, high=104.92, low=104.80, close=104.92, volume=100.0)
+    ctx = DecisionContext(
+        state=None, bar=bar, symbol="SYM", time_str="t",
+        agent_direction="LONG", agent_probability=0.7,
+        poc=104.92, vah=104.95, val=104.80, tick_size=0.05,
+    )
+    assert sb.build(ctx, _pass_results(), model_label="Triple-A") is not None
 
 
 def test_quantity_is_clamped_to_max():

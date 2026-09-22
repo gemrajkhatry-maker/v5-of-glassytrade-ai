@@ -1,9 +1,9 @@
 """Single structural stop. Gate 4, SignalBuilder, and pyramids must share it.
 
-Fabio live placement (spec §11 / Gap #13): 1–2 ticks *inside* the structural
-level, toward the market, so the stop fills before the liquidity cascade
-through the cluster. ``anchor - 2*tick`` on a long is the *outside* retail
-stop — that formula is forbidden here.
+Fabio playbook §11.1: stop is 1–2 ticks BEHIND the Big Executed Bubble
+cluster (outside the cluster, away from the market) — not at arbitrary
+candle wicks. The "1–2 ticks inside" convention (§11.2) applies to
+take-profit / exit shields only, never to protective stops.
 """
 
 from __future__ import annotations
@@ -25,15 +25,21 @@ def min_stop_distance(entry: float, tick: float, pct: float = MIN_STOP_DISTANCE_
 
 
 def _anchor_candidates(ctx, side: str, entry: float) -> list[float]:
-    """Structural levels in the trade direction, nearest-first (priority order)."""
+    """Structural levels in the trade direction, nearest-first (priority order).
+
+    Absorption bubble cluster is preferred over prints / LVN / VA / bar wick
+    (playbook §11.1).
+    """
     val = ctx.val if ctx.val and ctx.val > 0 else None
     vah = ctx.vah if ctx.vah and ctx.vah > 0 else None
     if val is not None and vah is not None and val > vah:
-        # malformed VA — the nearer edge is the only sane level
         return [val] if side == "LONG" else [vah]
 
     out: list[float] = []
     if side == "LONG":
+        cluster_low = float(getattr(ctx, "absorption_cluster_low", 0.0) or 0.0)
+        if cluster_low > 0 and entry > cluster_low:
+            out.append(cluster_low)
         buy = getattr(ctx, "nearest_buy_print_below", 0.0) or 0.0
         if buy > 0 and entry > buy:
             out.append(float(buy))
@@ -46,6 +52,9 @@ def _anchor_candidates(ctx, side: str, entry: float) -> list[float]:
         if ctx.bar is not None and float(ctx.bar.low) < entry:
             out.append(float(ctx.bar.low))
     else:
+        cluster_high = float(getattr(ctx, "absorption_cluster_high", 0.0) or 0.0)
+        if cluster_high > 0 and entry < cluster_high:
+            out.append(cluster_high)
         sell = getattr(ctx, "nearest_sell_print_above", 0.0) or 0.0
         if sell > 0 and entry < sell:
             out.append(float(sell))
@@ -60,15 +69,12 @@ def _anchor_candidates(ctx, side: str, entry: float) -> list[float]:
     return out
 
 
-def structural_anchor(ctx, direction: str) -> float:
-    """Nearest support/resistance whose stop is not spread-noise. Gate 4 must call this.
+def structural_anchor(ctx, direction: str) -> float | None:
+    """Nearest support/resistance whose stop is not spread-noise.
 
-    Walks the structural levels nearest-first and returns the first one that
-    produces a stop at least ``min_stop_distance`` from entry. When every
-    structural level sits inside the noise band, the stop is placed at the
-    minimum distance from entry. This keeps Gate 4's computed R:R identical to
-    the stop SignalBuilder will actually emit — a thin anchor used to make Gate 4
-    approve on a stop the builder then dropped as "thin stop".
+    Returns None when no structural level clears the min-distance floor —
+    callers must reject rather than fabricate a 5-tick synthetic that can
+    go ≤0 on cheap premiums.
     """
     entry = float(ctx.bar.close)
     tick = _tick(ctx)
@@ -76,9 +82,11 @@ def structural_anchor(ctx, direction: str) -> float:
     floor = min_stop_distance(entry, tick)
     for anchor in _anchor_candidates(ctx, side, entry):
         sl = structural_stop(side, entry, anchor, tick)
+        if sl <= 0:
+            continue
         if abs(entry - sl) >= floor:
             return anchor
-    return entry - 5.0 * tick if side == "LONG" else entry + 5.0 * tick
+    return None
 
 
 def structural_stop(
@@ -86,23 +94,21 @@ def structural_stop(
     entry: float,
     anchor: float,
     tick: float,
-    inside_ticks: int = 2,
+    behind_ticks: int = 2,
 ) -> float:
-    """Return the stop price ``inside_ticks`` inside ``anchor`` toward ``entry``.
+    """Return the stop price ``behind_ticks`` BEHIND ``anchor`` (away from entry).
 
-    LONG (support below):  sl = anchor + n*tick, still strictly below entry.
-    SHORT (resistance above): sl = anchor - n*tick, still strictly above entry.
+    LONG (support below):  sl = anchor - n*tick, still strictly below entry.
+    SHORT (resistance above): sl = anchor + n*tick, still strictly above entry.
     """
     step = tick if tick and tick > 0 else DEFAULT_TICK
-    offset = inside_ticks * step
+    offset = behind_ticks * step
     if str(side).upper() == "LONG":
-        sl = anchor + offset
+        sl = anchor - offset
         if sl >= entry:
-            # ponytail: when anchor is close to entry, place stop 1 tick
-            # inside the anchor (toward entry) instead of ignoring it.
-            sl = anchor + step if anchor + step < entry else entry - step
+            sl = entry - step
         return sl
-    sl = anchor - offset
+    sl = anchor + offset
     if sl <= entry:
-        sl = anchor - step if anchor - step > entry else entry + step
+        sl = entry + step
     return sl

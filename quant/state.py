@@ -40,6 +40,7 @@ class ViewState:
     depth: dict | None = None
     amt: dict | None = None
     agent_decision: dict | None = None
+    laya_decision: dict | None = None
 
 
 def project_state(state: EngineState) -> ViewState:

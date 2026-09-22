@@ -167,3 +167,11 @@ def test_pyramid_reads_leg_lvn_from_the_dto_key_that_exists():
     assert pm._resolve_leg_lvn({"legLvn": 100.0}, close_px=100.0) == 0.0
 
     assert pm._resolve_leg_lvn({}, close_px=100.0) == 0.0
+
+    from quant.contracts.value_objects import AMTResult
+
+    typed = AMTResult(
+        market_state="BALANCED", poc=100.0, value_area_high=101.0, value_area_low=99.0,
+        leg_lvns=(99.5, 101.25),
+    )
+    assert pm._resolve_leg_lvn(typed, close_px=101.0) == 101.25

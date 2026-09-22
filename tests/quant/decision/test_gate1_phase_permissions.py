@@ -88,6 +88,9 @@ def _ctx(bar_time: str, setup_type: str = "TRIPLE_A") -> DecisionContext:
         poc=24600.0,
         allow_trend=info.allow_trend,
         allow_reversion=info.allow_reversion,
+        bid=24699.0,
+        ask=24701.0,
+        tick_size=0.05,
     )
 
 

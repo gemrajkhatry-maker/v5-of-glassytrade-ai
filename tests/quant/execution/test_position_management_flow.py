@@ -22,6 +22,7 @@ class DummyPosition:
     size = 1.0
     current_stop = 95.0
     unrealized_r = 0.0
+    open_price = 100.0
     # ExitEngine keys trail/BE state by position._id (stable UUID), not id().
     _id = str(uuid.uuid4())
 

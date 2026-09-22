@@ -177,6 +177,7 @@ function App() {
                                         quantDecision={activeInstrument.quantDecisionAnalysis}
                                         decisionHistory={activeInstrument.llmHistory}
                                         agentDecision={activeInstrument.agentDecision}
+                                        layaDecision={activeInstrument.layaDecision}
                                         amtAnalysis={activeInstrument.amtAnalysis}
                                         halfTrendSeries={activeInstrument.halfTrendSeries}
                                         mode={chartMode}
@@ -199,6 +200,7 @@ function App() {
                                         quantDecision={activeInstrument.quantDecisionAnalysis}
                                         decisionHistory={activeInstrument.llmHistory}
                                         agentDecision={activeInstrument.agentDecision}
+                                        layaDecision={activeInstrument.layaDecision}
                                         amtAnalysis={activeInstrument.amtAnalysis}
                                         halfTrendSeries={activeInstrument.halfTrendSeries}
                                         mode={chartMode}
@@ -218,6 +220,7 @@ function App() {
                                 quantDecision={activeInstrument.quantDecisionAnalysis}
                                 decisionHistory={activeInstrument.llmHistory}
                                 agentDecision={activeInstrument.agentDecision}
+                                layaDecision={activeInstrument.layaDecision}
                                 amtAnalysis={activeInstrument.amtAnalysis}
                                 halfTrendSeries={activeInstrument.halfTrendSeries}
                                 mode={chartMode}
@@ -244,9 +247,9 @@ function App() {
                     <div className="flex-1 flex flex-col justify-between p-3 pointer-events-none min-h-0">
 
                     {/* Top Bar Area */}
-                    <div className="flex justify-between items-start pointer-events-auto">
+                    <div className="flex justify-between items-start pointer-events-none w-full">
                         {/* Left Toggle (Scanner) & Chart Controls */}
-                        <div className="flex flex-col gap-1.5 items-start max-w-[min(100%,52rem)]">
+                        <div className="flex flex-col gap-1.5 items-start max-w-[min(100%,52rem)] pointer-events-auto">
                             <div className="flex items-start gap-1.5 flex-wrap">
                             {!sidebarOpen && (
                                 <button onClick={() => setSidebarOpen(true)} className="p-2 bg-glassy-bg-elevated/50 backdrop-blur rounded-sm text-glassy-text-primary hover:bg-glassy-bg-hover transition-colors">
@@ -423,6 +426,7 @@ function App() {
                             portfolio={activeInstrument.portfolio}
                             riskState={activeInstrument.riskState}
                             agentDecision={activeInstrument.agentDecision}
+                            layaDecision={activeInstrument.layaDecision || activeInstrument.agentDecision?.laya}
                             llmHistory={activeInstrument.llmHistory}
                             orderBook={activeInstrument.orderBook}
                             overseerAction={activeInstrument.overseerAction}

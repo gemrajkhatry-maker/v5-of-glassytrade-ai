@@ -41,6 +41,9 @@ def evaluate_case(
     market_state=MarketState.IMBALANCED,
     outside_va=False,
 ):
+    price_loc = "ABOVE_VAH" if setup_type == "TRIPLE_A" else "IN_VA"
+    if setup_type == "VA_FADE" and outside_va:
+        price_loc = "IN_VA"  # reclaim inside after outside probe
     evidence = SetupEvidence(
         setup_type=setup_type,
         direction=direction,
@@ -54,6 +57,13 @@ def evaluate_case(
         d1_rejected=d1_rejected,
         cvd_agrees=cvd_agrees,
         evidence_age_bars=evidence_age_bars,
+        price_location=price_loc,
+        price=100.5,
+        tick_size=0.05,
+        session_vwap=100.0,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=bool(at_lvn and lvn_level > 0),
+        departed_and_reapproached=True,
     ) if setup_type is not None else None
 
     ctx = DecisionContext(
@@ -74,9 +84,14 @@ def evaluate_case(
         poc=97.0,
         vwap_upper_2=105.0,
         vwap_lower_2=90.0,
+        session_vwap=100.0,
         cvd_slope=1.0 if cvd_agrees else -1.0,
         allow_trend=True,
         allow_reversion=True,
+        bid=100.45,
+        ask=100.55,
+        tick_size=0.05,
+        leg_lvn=lvn_level if at_lvn else 0.0,
     )
     return DecisionService().evaluate(ctx)
 

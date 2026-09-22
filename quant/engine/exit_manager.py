@@ -181,6 +181,7 @@ class ExitManager:
         )
         self._underlying_gateway = deps.get("underlying_gateway")
         self._risk = deps.get("risk")
+        self._greeks = deps.get("greeks")
 
         # --- Mutable state accessors/mutators ---
         self._get_bar_index = state["get_bar_index"]
@@ -252,7 +253,11 @@ class ExitManager:
                 )
                 return current_pos  # Return original position on failure
 
-            pm.current_position = remaining
+            # Survive / SL-ratchet: no lifecycle replace event — keep the book
+            # on the returned survivor. Full close / partial: journal emit
+            # already adopted pm.current_position inside _emit.
+            if remaining is not None:
+                pm.current_position = remaining
             self._release_partial_reserves(pm, remaining)
             if was_open and remaining is None:
                 self._book_full_close()
@@ -298,11 +303,12 @@ class ExitManager:
                     self._symbol,
                 )
                 return
-            pm.current_position = remaining
+            # Survive / partial: adopt survivor when present. Full close is
+            # already cleared by PositionClosed inside _emit.
+            if remaining is not None:
+                pm.current_position = remaining
             self._release_partial_reserves(pm, remaining)
             if remaining is None:
-                if self._get_state().position is not None:
-                    self._set_state_with_position(None)
                 self._book_full_close()
 
     def check_thesis_flip(self, amt_dto: dict, bar: Any) -> None:
@@ -494,9 +500,13 @@ class ExitManager:
             if self._underlying_gateway is not None and self._get_underlying_symbol
             else self._symbol
         )
+        contract_symbol = (
+            self._symbol if self._underlying_gateway is not None else None
+        )
         pm = self._get_position_manager()
         active_pos = pm.current_position or self._get_state().position
-        return DecisionContextBuilder().build(
+        snap = getattr(self._amt_engine, "last_snapshot", None)
+        return DecisionContextBuilder(greeks=self._greeks).build(
             bar=bar,
             symbol=eval_symbol,
             market=self._market,
@@ -507,10 +517,12 @@ class ExitManager:
             cooldown_remaining_sec=cooldown_remaining_sec,
             risk_state=self._risk.state() if self._risk else None,
             amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
+            snapshot=snap,
             order_book=self._get_last_depth(),
             position=active_pos,
             entry_bar_index=self._get_entry_bar_index(),
             recent_decisions=list(self._get_recent_decisions()),
+            contract_symbol=contract_symbol,
         )
 
     # ---------------------------------------------------------------------
@@ -527,7 +539,7 @@ class ExitManager:
             option_amt_dto = self._get_option_amt_dto()
             last_underlying_bar = self._get_last_underlying_bar()
             if option_amt_dto is not None and last_underlying_bar is not None:
-                advisor_ctx = DecisionContextBuilder().build(
+                advisor_ctx = DecisionContextBuilder(greeks=self._greeks).build(
                     bar=bar,
                     symbol=self._symbol,
                     market=self._market,
@@ -542,10 +554,11 @@ class ExitManager:
                     position=active_pos,
                     entry_bar_index=self._get_entry_bar_index(),
                     recent_decisions=list(self._get_recent_decisions()),
+                    contract_symbol=self._symbol,
                 )
                 self._advisor.on_context(advisor_ctx)
             else:
-                advisor_ctx = DecisionContextBuilder().build(
+                advisor_ctx = DecisionContextBuilder(greeks=self._greeks).build(
                     bar=bar,
                     symbol=self._symbol,
                     market=self._market,
@@ -560,6 +573,9 @@ class ExitManager:
                     position=active_pos,
                     entry_bar_index=self._get_entry_bar_index(),
                     recent_decisions=list(self._get_recent_decisions()),
+                    contract_symbol=(
+                        self._symbol if self._underlying_gateway is not None else None
+                    ),
                 )
                 self._advisor.on_context(advisor_ctx)
         except Exception as e:

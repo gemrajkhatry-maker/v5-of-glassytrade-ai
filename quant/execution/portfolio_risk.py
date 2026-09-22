@@ -27,10 +27,11 @@ class PortfolioRiskAuthority:
         self,
         starting_equity: float = float(INITIAL_CAPITAL),
         max_portfolio_risk_pct: float = 0.25,   # max aggregate open risk: 25% of capital
-        max_portfolio_daily_loss_pct: float = 0.15,  # global kill: 15% realized daily loss
+        max_portfolio_daily_loss_pct: float = 0.02,  # global kill: 2% realized daily loss (MDL)
         separate_by: str = "root",  # "root" | "symbol" | "instrument_type"
         max_root_risk_pct: float | None = None,
         max_exchange_risk_pct: float | None = None,
+        max_concurrent_positions: int | None = None,
     ) -> None:
         self._starting_equity = starting_equity
         self._max_open_risk = starting_equity * max_portfolio_risk_pct
@@ -38,9 +39,13 @@ class PortfolioRiskAuthority:
         self._hard_notional_cap = starting_equity * 0.50
         self._open_notional = 0.0
         self._separate_by = separate_by
+        self._max_concurrent = (
+            int(max_concurrent_positions) if max_concurrent_positions else None
+        )
         self._lock = threading.RLock()
         self._open_risk = 0.0          # sum of (entry - sl) * qty for open positions
         self._realized_pnl = 0.0       # sum of closed-trade pnl across engines today
+        self._open_position_count = 0
         self._max_root_risk = (
             starting_equity * max_root_risk_pct
             if max_root_risk_pct is not None else None
@@ -113,6 +118,12 @@ class PortfolioRiskAuthority:
         with self._lock:
             if self._realized_pnl <= -self._max_daily_loss:
                 return False
+            if (
+                not is_pyramid
+                and self._max_concurrent is not None
+                and self._open_position_count >= self._max_concurrent
+            ):
+                return False
             if self._open_notional + max(0.0, risk_rupees) > self._hard_notional_cap:
                 return False
             if self._open_risk + max(0.0, risk_rupees) > self._max_open_risk:
@@ -125,6 +136,7 @@ class PortfolioRiskAuthority:
                     return False
                 if key:
                     self._active_roots[key] = symbol
+                self._open_position_count += 1
             self._open_risk += max(0.0, risk_rupees)
             self._open_notional += max(0.0, risk_rupees)
             self._add_budget(risk_rupees, symbol)
@@ -141,6 +153,7 @@ class PortfolioRiskAuthority:
                 key = self._lock_key(symbol)
                 if key and self._active_roots.get(key) == symbol:
                     self._active_roots.pop(key, None)
+                self._open_position_count = max(0, self._open_position_count - 1)
 
     def release(self, risk_rupees: float, symbol: str = "") -> None:
         """Unwind a reserved amount that never became an open position (C3).
@@ -175,6 +188,15 @@ class PortfolioRiskAuthority:
                 return False, (
                     f"portfolio daily-loss halt: {self._realized_pnl:.0f} "
                     f"<= -{self._max_daily_loss:.0f}"
+                )
+            if (
+                not is_pyramid
+                and self._max_concurrent is not None
+                and self._open_position_count >= self._max_concurrent
+            ):
+                return False, (
+                    f"max concurrent positions: {self._open_position_count} "
+                    f">= {self._max_concurrent}"
                 )
             if not self._budget_available(risk_rupees, symbol):
                 return False, "correlation or exchange risk budget exceeded"

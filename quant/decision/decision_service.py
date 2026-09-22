@@ -20,6 +20,7 @@ from quant.decision.context import DecisionContext
 from quant.decision.model_router import allows, select_model
 from quant.decision.pipeline import GatePipeline
 from quant.decision.result import GateResult
+from quant.decision.setup_labels import label_from_setup_key
 from quant.decision.signal_builder import Signal, SignalBuilder, is_min_stop_met
 from quant.decision.va_fade import detect_va_fade
 
@@ -47,13 +48,15 @@ def _block_reasons(results) -> tuple[str, ...]:
 
 
 def _label_from_gate_results(results) -> str:
-    """Identify which Gate 3 path fired to select the model_label."""
+    """Identify which Gate 3 path fired. Empty setup_key → unlabeled (never Triple-A)."""
     for r in results:
         if r.gate == 3 and r.passed:
-            reason = (r.reason or "").lower()
-            if "lvn sniper" in reason or "lvn_sniper" in reason:
-                return "LVN_Sniper"
-    return "Triple-A"
+            key = str(getattr(r, "setup_key", "") or "")
+            label = label_from_setup_key(key)
+            if label:
+                return label
+            return ""
+    return ""
 
 
 class DecisionService:
@@ -104,6 +107,11 @@ class DecisionService:
                 # fall through to the reversion fallback
             else:
                 label = _label_from_gate_results(results)
+                if not label:
+                    return QuantDecision(
+                        False, None, "GATE_REJECTED", "", results,
+                        blocked + ("LABEL: unlabeled setup",),
+                    )
                 sig, drop_why = SignalBuilder().build_or_reason(ctx, results, model_label=label)
                 if sig is not None:
                     return QuantDecision(
@@ -139,10 +147,27 @@ class DecisionService:
             import logging
             log = logging.getLogger(__name__)
         if fade and (ctx.agent_direction in (fade.direction, None)) and fade.rr >= self.min_rr:
-            # Option contracts are buy-only: never short naked options on VA-fade
+            # Option contracts are buy-only: never short naked options on VA-fade.
+            # A bearish certificate needs a long put via OptionChainPort — without
+            # one, refuse rather than invent a short or stay on a call.
             if is_option_contract(ctx.symbol) and fade.direction == "SHORT":
-                return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
+                return QuantDecision(
+                    False, None, "NO_EDGE", "", tuple(results),
+                    ("NEED_LONG_PUT: bearish certificate on option requires a put contract",),
+                )
             if not is_min_stop_met(fade.entry, fade.sl):
+                return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
+            if fade.sl <= 0:
+                return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
+            # Re-enforce Gate 4 max stop-width on the emitted fade plan.
+            tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
+            fade_risk = abs(fade.entry - fade.sl)
+            if is_option_contract(ctx.symbol):
+                cap_ticks = max(1.0, (fade.entry * 0.30) / tick)
+            else:
+                from quant.contracts.constants import MAX_STOP_DISTANCE_TICKS
+                cap_ticks = max(MAX_STOP_DISTANCE_TICKS, (fade.entry * 0.0075) / tick)
+            if fade_risk > cap_ticks * tick:
                 return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
             sig = Signal(
                 type=fade.direction, reason="Value-Area fade", entry=fade.entry,

@@ -204,9 +204,14 @@ class PaperOMS:
         (PositionManager.manage_exit, via check_pyramid) after this fills, so the combined bundle
         is guaranteed positive: SL is behind the new support level.
         """
-        size = snap_to_lot(abs(size), self._lot_size)
+        from quant.execution.lots import snap_to_lot_floor
+        requested = abs(size)
+        size = snap_to_lot_floor(requested, self._lot_size)
         if size <= 0:
-            raise ValueError(f"Pyramid size {size} is too small (< 1 lot)")
+            # Sub-lot add-on: skip rather than snap UP (audit §4.1).
+            raise ValueError(
+                f"Pyramid size {requested} floors below 1 lot — skip"
+            )
 
         base_signal = base.order.signal
         long = base.size > 0
@@ -222,7 +227,7 @@ class PaperOMS:
             sl=new_sl,
             tp=base_signal.tp,    # same structural target
             rr=abs(base_signal.tp - entry_price) / max(abs(entry_price - new_sl), 0.01),
-            model_label=getattr(base_signal, "model_label", "Triple-A"),
+            model_label=getattr(base_signal, "model_label", "") or "",
             symbol=base_signal.symbol,
             timestamp=time,
         )
@@ -256,7 +261,11 @@ class PaperOMS:
         closed_size = position.size * fraction
         if self._simulator is not None:
             lots = int(abs(position.size) / self._lot_size)
-            close_lots = max(1, round(lots * fraction))
+            # Floor fraction so 2-lot 50% leaves a 1-lot runner; never round UP.
+            # A 1-lot "partial" becomes a full close (close_lots == lots).
+            close_lots = int(lots * fraction)
+            if close_lots < 1:
+                close_lots = lots if lots <= 1 else 1
             close_lots = min(lots, close_lots)
             closed_size = (1 if position.size > 0 else -1) * close_lots * self._lot_size
         remaining_size = position.size * (1.0 - fraction)
@@ -287,6 +296,8 @@ class PaperOMS:
         else:
             partial_pnl = (price - position.open_price) * closed_size
 
+        # Stamp fill row with residual's id so the ledger reconstructs under
+        # the same position_id (audit §5.1).
         fill_position = Position(
             order=position.order,
             open_price=position.open_price,
@@ -296,6 +307,7 @@ class PaperOMS:
             entry_costs=entry_costs if self._simulator is not None else None,
             pyramid_level=position.pyramid_level,
             is_pyramid=position.is_pyramid,
+            _id=position._id,
         )
         fill = Fill(
             position=fill_position,

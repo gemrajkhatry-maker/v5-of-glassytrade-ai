@@ -341,7 +341,7 @@ class OptionScannerService:
         if timesfm_forecast is not None:
             return timesfm_forecast
         tfm_enabled = (
-            os.getenv("TIMESFM_CONTRACT_SELECTION", "true").strip().lower() in ("1", "true", "yes")
+            os.getenv("TIMESFM_CONTRACT_SELECTION", "false").strip().lower() in ("1", "true", "yes")
             or os.getenv("TIMESFM_ADVISOR_ENABLED", "false").strip().lower() in ("1", "true", "yes")
         )
         if not tfm_enabled:
@@ -708,15 +708,21 @@ class OptionScannerService:
     def _detect_momentum(self, chain, atm, interval, timesfm_forecast=None):
         """Momentum from TimesFM forecast when available, else near-ATM volume."""
         if timesfm_forecast is not None:
-            pct = getattr(timesfm_forecast, "pct_change", 0.0)
-            steps = getattr(timesfm_forecast, "forecast_steps", [])
-            long_steps = sum(1 for s in steps if s == "LONG")
-            short_steps = sum(1 for s in steps if s == "SHORT")
-            total_steps = len(steps) or 1
-            if pct > 0.0005 or (pct > 0.0002 and (long_steps / total_steps) >= 0.60):
-                return "BULLISH", 4, f"TimesFM upward drift {pct * 100:.2f}%"
-            elif pct < -0.0005 or (pct < -0.0002 and (short_steps / total_steps) >= 0.60):
-                return "BEARISH", 4, f"TimesFM downward drift {pct * 100:.2f}%"
+            src = str(getattr(timesfm_forecast, "source", "") or "")
+            asof = getattr(timesfm_forecast, "asof_bar", -1)
+            asof = -1 if asof is None else int(asof)
+            # Only native, stamped forecasts may hard-filter contract direction.
+            # Note: asof_bar=0 is valid (first bar) — never use `asof or -1`.
+            if src != "FALLBACK_BAND" and asof >= 0:
+                pct = getattr(timesfm_forecast, "pct_change", 0.0)
+                steps = getattr(timesfm_forecast, "forecast_steps", [])
+                long_steps = sum(1 for s in steps if s == "LONG")
+                short_steps = sum(1 for s in steps if s == "SHORT")
+                total_steps = len(steps) or 1
+                if pct > 0.0005 or (pct > 0.0002 and (long_steps / total_steps) >= 0.60):
+                    return "BULLISH", 4, f"TimesFM upward drift {pct * 100:.2f}%"
+                elif pct < -0.0005 or (pct < -0.0002 and (short_steps / total_steps) >= 0.60):
+                    return "BEARISH", 4, f"TimesFM downward drift {pct * 100:.2f}%"
 
         interval = interval or 50
         near = {s for s in chain.calls if abs(s - atm) <= 2 * interval} | {

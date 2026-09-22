@@ -456,6 +456,50 @@ def load_prior_profile(storage, symbol: str) -> dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
+# Mid-session kernel snapshot (CVD / VWAP / IB / warmth)
+# ---------------------------------------------------------------------------
+
+
+KERNEL_STATE_KEY_PREFIX = "kernel_state"
+
+
+def kernel_state_key(symbol: str) -> str:
+    return f"{KERNEL_STATE_KEY_PREFIX}:{symbol}"
+
+
+def persist_kernel_state(storage, symbol: str, state: dict) -> None:
+    """Persist SessionKernel export_state() for mid-session restart."""
+    kv_set = getattr(storage, "kv_set", None)
+    if kv_set is None or not state:
+        return
+    ensure_sync_adapter_result(
+        "storage.kv_set",
+        kv_set,
+        kernel_state_key(symbol),
+        dict(state),
+    )
+
+
+def load_kernel_state(storage, symbol: str) -> dict:
+    """Load a previously persisted kernel snapshot (empty dict if absent)."""
+    kv_get = getattr(storage, "kv_get", None)
+    if kv_get is None:
+        return {}
+    raw = ensure_sync_adapter_result(
+        "storage.kv_get", kv_get, kernel_state_key(symbol)
+    )
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    return dict(data) if isinstance(data, dict) else {}
+
+
+# ---------------------------------------------------------------------------
 # Session-Aware Time Stop Helpers
 # ---------------------------------------------------------------------------
 

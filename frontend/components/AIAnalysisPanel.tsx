@@ -1,10 +1,11 @@
 import React, { useMemo } from 'react';
-import { AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook, QuantDecisionAnalysis, AuctionAnalysis } from '../types';
+import { AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, LayaDecision, OrderBook, QuantDecisionAnalysis, AuctionAnalysis } from '../types';
 import { Zap } from 'lucide-react';
 import {
     EquityPanel,
     RiskStateDisplay,
     QuantDecisionCard,
+    LayaDecisionCard,
     MarketStateCard,
     LocationCard,
     AggressionCard,
@@ -28,6 +29,7 @@ interface AIAnalysisPanelProps {
     portfolio: Portfolio;
     riskState?: RiskState | null;
     agentDecision?: AgentDecision | null;
+    layaDecision?: LayaDecision | null;
     llmHistory?: LLMHistoryEntry[];
     orderBook?: OrderBook | null;
     overseerAction?: string;
@@ -39,7 +41,7 @@ interface AIAnalysisPanelProps {
 }
 
 const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
-    amtResult, portfolio, riskState, agentDecision,
+    amtResult, portfolio, riskState, agentDecision, layaDecision,
     orderBook, overseerAction, overseerReason, quantDecision, auction, symbol, data = []
 }) => {
     const currentLtp = React.useMemo(() => {
@@ -128,6 +130,14 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
 
             {/* ── Scrollable body ── */}
             <div className="flex-1 overflow-y-auto overscroll-contain px-3 py-3 space-y-3">
+                {/* Laya-MLX Neural Edge Decision Card */}
+                <LayaDecisionCard
+                    layaDecision={layaDecision || agentDecision?.laya}
+                    quantDecision={quantDecision}
+                    portfolio={portfolio}
+                    collapsible={true}
+                    defaultExpanded={true}
+                />
                 <QuantDecisionCard quantDecision={quantDecision} riskState={riskState} />
                 
                 {/* Section 01–02: 5m Macro Context */}

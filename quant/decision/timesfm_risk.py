@@ -171,10 +171,12 @@ class TimesFMRiskAuthority:
                 is_risk_free=True,
             )
 
-        # 3. Model Velocity Decay / Stagnation Stop
-        # In Fabio AMT scalping, positions need time to work to the structural POC (15-45 mins).
-        # Only exit for stagnation after at least 20 bars if completely dead.
-        if bars_held >= max(tau_star + 5, 20) and rr_achieved < 0.2 and abs(forecast.pct_change) < 0.0002:
+        # 3. Model Velocity Decay / Stagnation Stop — native forecasts only.
+        # Fallback bands have pct_change==0 by construction and must not force-exit.
+        src = str(getattr(forecast, "source", "") or "")
+        if src == "FALLBACK_BAND":
+            pass  # advisory only — degrade to deterministic time stop
+        elif bars_held >= max(tau_star + 5, 20) and rr_achieved < 0.2 and abs(forecast.pct_change) < 0.0002:
             self.record_forecast_outcome(
                 float(forecast.p50_path[-1]), float(current_price), float(entry))
             return ModelExitEvaluation(

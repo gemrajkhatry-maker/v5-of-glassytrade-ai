@@ -101,10 +101,12 @@ class SignalBuilder:
         self,
         ctx: DecisionContext,
         pipeline_results: list[GateResult],
-        model_label: str = "Triple-A",
+        model_label: str = "",
     ) -> tuple[Signal | None, str]:
         if any(not r.passed for r in pipeline_results):
             return None, "gates failed"
+        if not model_label:
+            return None, "unlabeled setup"
 
         direction = ctx.agent_direction
         if direction not in ("LONG", "SHORT"):
@@ -119,7 +121,11 @@ class SignalBuilder:
         entry = float(ctx.bar.close)
         tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else TICK_SIZE_NSE_OPTIONS
         anchor = structural_anchor(ctx, direction)
+        if anchor is None:
+            return None, "no structural anchor"
         sl = structural_stop(direction, entry, anchor, tick)
+        if sl <= 0:
+            return None, f"stop at/below zero ({sl})"
         if direction == "LONG":
             if sl >= entry:
                 sl = entry - max(tick * 2, abs(entry) * (self.min_stop_distance_pct / 100.0))
@@ -164,7 +170,7 @@ class SignalBuilder:
         self,
         ctx: DecisionContext,
         pipeline_results: list[GateResult],
-        model_label: str = "Triple-A",
+        model_label: str = "",
     ) -> Signal | None:
         """Back-compat wrapper — prefer build_or_reason for auditability."""
         sig, _why = self.build_or_reason(ctx, pipeline_results, model_label)

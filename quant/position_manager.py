@@ -42,6 +42,7 @@ class PositionManager:
     - tick_size: Minimum price increment
     - get_depth: Callable returning current order book
     - get_amt_dto: Callable returning current AMT DTO
+    - get_snapshot: Callable returning current AnalysisSnapshot (preferred on exit path)
     - portfolio_risk: Optional PortfolioRiskAuthority for cross-engine aggregate risk ceiling (E11)
     """
 
@@ -57,6 +58,7 @@ class PositionManager:
         tick_size: float,
         get_depth: Callable[[], object | None] = lambda: None,
         get_amt_dto: Callable[[], dict | None] = lambda: None,
+        get_snapshot: Callable[[], object | None] = lambda: None,
         portfolio_risk=None,  # PortfolioRiskAuthority or None (paper mode may omit)
     ) -> None:
         self._oms: IOMS = oms
@@ -69,6 +71,7 @@ class PositionManager:
         self._tick_size = tick_size
         self._get_depth = get_depth
         self._get_amt_dto = get_amt_dto
+        self._get_snapshot = get_snapshot
         # E11: cross-engine aggregate risk ceiling for pyramid add-ons.
         self._portfolio_risk = portfolio_risk
 
@@ -140,6 +143,7 @@ class PositionManager:
         entry_bar_index: int,
         entry_time_epoch: float,
         timesfm_forecast: object | None = None,
+        snapshot=None,
     ):
         """Evaluate exit conditions for an open position.
 
@@ -158,6 +162,9 @@ class PositionManager:
             return None
         # Consume-and-clear any ratcheted base from the previous bar's pyramid fill.
         self.base_override = None
+        if snapshot is None:
+            snapshot = self._get_snapshot()
+        amt_dto = amt_dto or self._get_amt_dto() or {}
         held_bars = bar_index - entry_bar_index
         if session_force_exit(
             bar.time, market=self._market, contract_expiry=self._contract_expiry
@@ -168,7 +175,11 @@ class PositionManager:
             best_bid = float(book.bids[0].price) if book and book.bids else None
             best_ask = float(book.asks[0].price) if book and book.asks else None
             ist_dt = _ist_dt(bar.time)
-            raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
+            r = snapshot.result if snapshot is not None else None
+            if r is not None and getattr(r, "market_state", None):
+                raw_ms = str(r.market_state).upper()
+            else:
+                raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
             if raw_ms == "IMBALANCED":
                 market_state = MarketState.IMBALANCED
             elif raw_ms == "DEAD":
@@ -186,7 +197,10 @@ class PositionManager:
                 now_epoch = ist_dt.timestamp()
             else:
                 session_phase, is_expiry, time_to_close, now_epoch = "", False, 0.0, 0.0
-            session_vwap = float(amt_dto.get("sessionVwap") or 0.0)
+            if r is not None:
+                session_vwap = float(getattr(r, "session_vwap", 0) or 0)
+            else:
+                session_vwap = float(amt_dto.get("sessionVwap") or 0.0)
 
             # Capture stop state before evaluation so any change (BE arm,
             # trail ratchet) is audited via StopMoved — silent stop moves are
@@ -204,6 +218,7 @@ class PositionManager:
                 bar_close=bar.close,
                 session_vwap=session_vwap,
                 timesfm_forecast=timesfm_forecast,
+                snapshot=snapshot,
             )
 
             # Emit StopMoved for any stop-level change detected this bar.
@@ -223,6 +238,12 @@ class PositionManager:
                     position, exit_dec.partial_fraction, exit_dec.close_price,
                     bar.time, exit_dec.reason,
                 )
+                # Remaining below one lot → treat as full close (no ghost size-0).
+                if abs(remaining.size) < float(getattr(self._oms, "lot_size", 1.0) or 1.0) * 0.5:
+                    self._exits.apply_pending_tp(position, exit_dec)
+                    self._execute_full_close(position, exit_dec, bar.time)
+                    return None
+                self._exits.apply_pending_tp(position, exit_dec)
                 self._emit(PositionReduced(
                     symbol=self.symbol,
                     time=bar.time,
@@ -246,12 +267,15 @@ class PositionManager:
             # _execute_full_close now returns the closing Fill (or None on a
             # guarded skip); manage_exit's contract is the SURVIVING position,
             # so a full close must still report None to the caller.
+            self._exits.apply_pending_tp(position, exit_dec)
             self._execute_full_close(position, exit_dec, bar.time)
             return None
         else:
             # Position survived this bar. Check if we can add a pyramid.
-            if position is not None and self._exits.is_risk_free(position):
-                self.check_pyramid(amt_dto, bar, position, bar_index)
+            if position is not None and self._exits.is_risk_free(
+                position, mark=float(bar.close),
+            ):
+                self.check_pyramid(amt_dto, bar, position, bar_index, snapshot=snapshot)
             # Consume-and-clear the ratcheted base produced by check_pyramid.
             survived = self.base_override if self.base_override is not None else position
             self.base_override = None
@@ -355,169 +379,64 @@ class PositionManager:
         return fill
 
     def manage_tick_exit(self, position, tick_price: float, tick_time: str):
-        """Tick-level fast stop-loss and take-profit breach check."""
+        """Tick-level exit — routes through ExitEngine.evaluate_price_event."""
         if position is None:
             return None
-        be_floor, trail_stop = self._exits.stop_state(position)
-        sig_sl = float(position.order.signal.sl) if position.order and position.order.signal else 0.0
-        sig_tp = float(position.order.signal.tp) if position.order and position.order.signal and position.order.signal.tp else 0.0
-        
-        is_long = position.size > 0
-        from quant.execution.protective_stop import resolve_protective_stop
-        effective_sl, effective_reason = resolve_protective_stop(
-            sig_sl, be_floor, trail_stop, "LONG" if is_long else "SHORT",
+        px = float(tick_price)
+        exit_dec = self._exits.evaluate_price_event(
+            position, last=px, high=px, low=px, source="tick",
+        )
+        if not exit_dec.should_exit:
+            return position
+
+        # Live fill at the tick print; reason comes from the shared resolver.
+        fill_dec = ExitDecision(
+            True,
+            exit_dec.reason,
+            px,
+            partial_fraction=exit_dec.partial_fraction,
+            pending_tp_tier=exit_dec.pending_tp_tier,
+            pending_breakeven=exit_dec.pending_breakeven,
+            trail_stop=exit_dec.trail_stop,
         )
 
-        # Tier-aware tick targets: T1 tags at sig_tp; tier==1 waits for TP2
-        # via the shared Rule-4 geometry (exit_checks.tp2_level); tier>=2 has
-        # no tick-level profit exits left at all.
-        tp2_target = 0.0
-        if sig_tp > 0:
-            entry_px = (
-                float(position.order.signal.entry)
-                if position.order and position.order.signal else 0.0
-            )
-            if entry_px > 0:
-                tp2_target = tp2_level(entry_px, sig_tp)
-
-        reason = None
-        terminal_tp = sig_tp > 0 and is_terminal_tp_only(position)
-        if is_long:
-            if effective_sl > 0 and tick_price <= effective_sl:
-                reason = effective_reason
-            elif sig_tp > 0 and tick_price >= sig_tp:
-                if terminal_tp:
-                    # VA_FADE regime: first TP touch = terminal full close
-                    # (no tier arming, no partials) — replaces _tick_tp_touch.
-                    self._execute_full_close(
-                        position, ExitDecision(True, "TP", float(tick_price)),
-                        tick_time,
-                    )
-                    return None
-                tier = self._exits._tp_tier.get(position._id, 0)
-                if tier >= 1:
-                    # Strict bar parity with Rule 4: tiers stop at 2. The
-                    # final TP2 touch books a partial (below); at tier>=2 raw
-                    # profit ticks do nothing to the runner.
-                    if tier == 1 and tp2_target > 0 and tick_price >= tp2_target:
-                        if self._get_lots(position) >= 2:
-                            return self._book_tick_tp2_partial(
-                                position, float(tick_price), tick_time,
-                            )
-                        self._execute_full_close(
-                            position, ExitDecision(True, "TP2", float(tick_price)), tick_time,
-                        )
-                        return None
-                    return position          # runner keeps running
-                return self._tick_tp_touch(position, float(tick_price), tick_time)
-        else:
-            if effective_sl > 0 and tick_price >= effective_sl:
-                reason = effective_reason
-            elif sig_tp > 0 and tick_price <= sig_tp:
-                if terminal_tp:
-                    # Short mirror: fade terminal full close at first TP tag.
-                    self._execute_full_close(
-                        position, ExitDecision(True, "TP", float(tick_price)),
-                        tick_time,
-                    )
-                    return None
-                tier = self._exits._tp_tier.get(position._id, 0)
-                if tier >= 1:
-                    # Short mirror of the long-side TP2/tier>=2 handling above.
-                    if tier == 1 and tp2_target > 0 and tick_price <= tp2_target:
-                        if self._get_lots(position) >= 2:
-                            return self._book_tick_tp2_partial(
-                                position, float(tick_price), tick_time,
-                            )
-                        self._execute_full_close(
-                            position, ExitDecision(True, "TP2", float(tick_price)), tick_time,
-                        )
-                        return None
-                    return position          # runner keeps running
-                return self._tick_tp_touch(position, float(tick_price), tick_time)
-
-        if reason is not None:
-            exit_dec = ExitDecision(True, reason, float(tick_price))
-            self._execute_full_close(position, exit_dec, tick_time)
-            return None
-        return position
-
-    def _tick_tp_touch(self, position, px: float, ts: str):
-        """Bar-parity TP handling on the tick path for a fresh position
-        (tier 0): an intrabar touch of sig_tp books half + arms BE — mirrors
-        ExitEngine Rule 4. Tier>=1 touches never reach here; the runner is
-        handled by _book_tick_tp2_partial / ignored outright at tier>=2.
-        Falls through to a full close only for the size<2 degenerate case."""
-        tier = self._exits._tp_tier.get(position._id, 0)
-        entry = float(position.order.signal.entry)
-        if tier == 0 and self._get_lots(position) >= 2:
-            dec = ExitDecision(True, "TP1", px)
+        if exit_dec.partial_fraction and exit_dec.partial_fraction < 1.0:
+            if self._get_lots(position) < 2:
+                # Small size: collapse to a full close (matches prior tick path).
+                reason = "TP" if exit_dec.reason == "TP1" else exit_dec.reason
+                self._execute_full_close(
+                    position, ExitDecision(True, reason, px), tick_time,
+                )
+                return None
             partial_fill, remaining = self._oms.close_partial(
-                position, 0.5, px, ts, dec.reason,
+                position, float(exit_dec.partial_fraction), px, tick_time, exit_dec.reason,
             )
-            # Bar-path bookkeeping parity (see manage_exit partial branch):
-            # the partial P&L feeds daily_pnl which drives the cushion/halt
-            # risk core — dropping it understates risk for tick-path scalps.
             self._emit(PositionReduced(
                 symbol=self.symbol,
-                time=ts,
+                time=tick_time,
                 fill=partial_fill,
                 remaining=remaining,
             ))
             risk = self._risk.record_trade(partial_fill.pnl, count_as_trade=False)
-            logger.info(
-                "🎯 [TIERED TP] %s reason=%s closed=%.0f remaining=%.0f pnl=₹%.2f",
-                self.symbol, dec.reason, abs(partial_fill.position.size),
-                abs(remaining.size), partial_fill.pnl,
-            )
-            self._emit(RiskUpdated(symbol=self.symbol, time=ts, risk=risk))
+            self._emit(RiskUpdated(symbol=self.symbol, time=tick_time, risk=risk))
             self.last_partial_fill = partial_fill
-            self._exits._tp_tier[position._id] = 1
-            self._exits._breakeven[position._id] = entry   # same effect as exits.py:160-161
+            survivor = remaining if remaining is not None else position
+            self._exits.apply_pending_tp(survivor, exit_dec)
             return remaining
-        self._execute_full_close(position, ExitDecision(True, "TP", px), ts)
+
+        self._exits.apply_pending_tp(position, fill_dec)
+        self._execute_full_close(position, fill_dec, tick_time)
         return None
 
-    def _book_tick_tp2_partial(self, position, px: float, ts: str):
-        """Final tick-path tier, strict bar parity with Rule 4 (tiers stop at
-        2): book 50%-of-remainder at the TP2 touch, arm tier=2 and keep the
-        quarter runner alive. Bookkeeping mirrors _tick_tp_touch's T1 block /
-        manage_exit's partial branch; unlike TP1 this does NOT re-arm BE (the
-        bar path only arms BE at TP1, and tier==1 implies BE already armed).
-        The survivor thereafter has no tick-level profit exits at all."""
-        if self._get_lots(position) < 2:
-            self._execute_full_close(position, ExitDecision(True, "TP2", px), ts)
-            return None
-        dec = ExitDecision(True, "TP2", px)
-        partial_fill, remaining = self._oms.close_partial(
-            position, 0.5, px, ts, dec.reason,
-        )
-        # Full partial-exit parity with the T1 block above: PositionReduced,
-        # risk-recorded (non-trade) P&L, RiskUpdated, last_partial_fill.
-        self._emit(PositionReduced(
-            symbol=self.symbol,
-            time=ts,
-            fill=partial_fill,
-            remaining=remaining,
-        ))
-        risk = self._risk.record_trade(partial_fill.pnl, count_as_trade=False)
-        logger.info(
-            "🎯 [TIERED TP] %s reason=%s closed=%.0f remaining=%.0f pnl=₹%.2f",
-            self.symbol, dec.reason, abs(partial_fill.position.size),
-            abs(remaining.size), partial_fill.pnl,
-        )
-        self._emit(RiskUpdated(symbol=self.symbol, time=ts, risk=risk))
-        self.last_partial_fill = partial_fill
-        self._exits._tp_tier[position._id] = 2
-        return remaining
-
     @staticmethod
-    def _resolve_leg_lvn(amt_dto: dict, close_px: float) -> float:
+    def _resolve_leg_lvn(src, close_px: float) -> float:
         """Compatibility wrapper around the canonical LVN resolver."""
         from quant.amt.profile.leg_lvn import resolve_leg_lvn
-        return resolve_leg_lvn(amt_dto, close_px).level
+        return resolve_leg_lvn(src, close_px).level
 
-    def check_pyramid(self, amt_dto: dict, bar, position, bar_index: int) -> None:
+    def check_pyramid(
+        self, amt_dto: dict, bar, position, bar_index: int, *, snapshot=None,
+    ) -> None:
         """Spec §13.2 pyramid engine: add-on positions at Impulse Leg LVN retest.
 
         Authorization gates (all must pass):
@@ -541,10 +460,10 @@ class PositionManager:
         if self.pyramid_count >= 2:
             return  # Max 2 add-ons reached
 
-        # Gate 1 (spec §13.2): base trade must be risk-free (SL at breakeven
-        # or better). Enforced HERE, not just in the manage_exit caller —
-        # certification found the add-on path was unguarded against any
-        # future/direct invocation pyramiding a losing base.
+        # Gate 1 (spec §13.2): base trade must be risk-free (protective stop at
+        # or better than fill). Do not pass the retest mark — an LVN pullback
+        # is often below entry while BE is locked; mark-aware is_risk_free is
+        # for explicit profit checks (exit parity contract), not pyramid auth.
         if not self._exits.is_risk_free(position):
             return
 
@@ -562,7 +481,8 @@ class PositionManager:
         # Need the Impulse Leg LVN from the AMT DTO — use the caller-passed
         # payload (event purity), not a fresh read of mutable state.
         amt_dto = amt_dto or self._get_amt_dto() or {}
-        leg_lvn = self._resolve_leg_lvn(amt_dto, float(bar.close))
+        leg_src = snapshot if snapshot is not None else amt_dto
+        leg_lvn = self._resolve_leg_lvn(leg_src, float(bar.close))
         if leg_lvn <= 0:
             return  # No Layer 3 LVN available yet
 
@@ -603,10 +523,20 @@ class PositionManager:
         if not long and float(bar.close) > float(bar.open):
             return  # Bullish candle at LVN for a short — skip
 
-        # Size: 50% of base for P1, 25% for P2
+        # Size: 50% of base for P1, 25% for P2 — floor to lots; skip if sub-lot.
         base_size = abs(position.size)
         fraction = 0.50 if self.pyramid_count == 0 else 0.25
         pyramid_size = base_size * fraction
+        lot = float(getattr(self._oms, "lot_size", 1.0) or 1.0)
+        from quant.execution.lots import snap_to_lot_floor
+        snapped = snap_to_lot_floor(pyramid_size, lot)
+        if snapped <= 0:
+            logger.info(
+                "🛑 [PYRAMID SKIP] %s P%d: size %.2f < 1 lot — not upsizing",
+                self.symbol, self.pyramid_count + 1, pyramid_size,
+            )
+            return
+        pyramid_size = snapped
 
         # New SL behind the LVN shelf
         new_sl = structural_stop("LONG" if long else "SHORT", price, leg_lvn, tick)

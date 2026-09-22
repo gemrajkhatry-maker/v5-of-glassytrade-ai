@@ -145,14 +145,9 @@ class SessionVWAP:
             return 0.0, 0.0
         vwap = tot_quote / tot_vol
         variance = max(0.0, tot_sq / tot_vol - (vwap - shift) ** 2)
+        # Raw statistical σ — never floor/cap here. Publishing a clamped band
+        # as vwap_std lied to anti-climax / journals (audit §1.7).
         vwap_std = math.sqrt(variance)
-        # Proportional clamp bounds (0.1% floor, 3% cap)
-        min_std = max(1.0, vwap * 0.001)
-        if vwap_std < min_std:
-            vwap_std = min_std
-        max_std = vwap * 0.03
-        if vwap_std > max_std:
-            vwap_std = max_std
         return vwap, vwap_std
 
     @staticmethod

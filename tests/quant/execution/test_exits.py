@@ -36,6 +36,7 @@ def test_tp2_hit_after_tp1_on_same_position_id():
     pos = _position()
     d1 = engine.evaluate(pos, bar_close=102.0, bar_index=5)
     assert d1.reason == "TP1"
+    engine.apply_pending_tp(pos, d1)
     # Same position._id (as close_partial preserves it) reaching 2x the R distance -> TP2.
     d2 = engine.evaluate(pos, bar_close=104.5, bar_index=6, bar_high=105.0)
     assert d2.should_exit and d2.reason == "TP2" and d2.partial_fraction == 0.5
@@ -44,7 +45,8 @@ def test_tp2_hit_after_tp1_on_same_position_id():
 def test_runner_survives_between_tp1_and_tp2():
     engine = ExitEngine()
     pos = _position()
-    engine.evaluate(pos, bar_close=102.0, bar_index=5)  # TP1 fires, tier=1
+    d1 = engine.evaluate(pos, bar_close=102.0, bar_index=5)  # TP1 fires
+    engine.apply_pending_tp(pos, d1)
     d = engine.evaluate(pos, bar_close=102.5, bar_index=6)  # short of TP2 (104.0)
     assert not d.should_exit
 
@@ -188,13 +190,15 @@ def test_stop_state_returns_none_before_any_move():
 
 
 def test_breakeven_arm_is_reported_by_stop_state():
-    """TP1 arms the BE floor at entry; stop_state reflects it."""
+    """TP1 arms the BE floor at entry after OMS commits via apply_pending_tp."""
     engine = ExitEngine()
     pos = _position(entry=100.0, sl=98.0, tp=102.0)  # risk = 2.0
     d = engine.evaluate(pos, bar_close=102.0, bar_index=5, bar_high=102.0)
     assert d.should_exit and d.reason == "TP1"
+    assert engine.stop_state(pos)[0] is None  # not armed until OMS succeeds
+    engine.apply_pending_tp(pos, d)
     be_floor, trail_stop = engine.stop_state(pos)
-    assert be_floor == 100.0          # BE floor armed at entry price (TP1 path)
+    assert be_floor == 100.0
     assert trail_stop is None
 
 
@@ -257,7 +261,8 @@ def test_stop_state_survives_tp_tier_transition():
     engine = ExitEngine()
     pos = _position(entry=100.0, sl=98.0, tp=104.0)  # risk = 2.0; TP2 = 108.0
     d1 = engine.evaluate(pos, bar_close=104.0, bar_index=5, bar_high=104.0)
-    assert d1.should_exit and d1.reason == "TP1"     # BE armed, trail untouched
+    assert d1.should_exit and d1.reason == "TP1"
+    engine.apply_pending_tp(pos, d1)  # BE armed only after OMS commit
     assert engine.stop_state(pos) == (100.0, None)
     # Runner survives; trailing arms at 104.5 - 0.20 * 4.5 = 103.6.
     d2 = engine.evaluate(pos, bar_close=104.5, bar_index=6)
@@ -393,3 +398,43 @@ def test_manage_exit_emits_short_trail_ratchet():
     assert moved[1].reason == "TRAIL_RATCHET"
     assert moved[1].old_sl == 102.0 and moved[1].new_sl == 98.0  # prev None -> sig sl
     assert moved[1].new_sl < moved[1].old_sl
+
+
+def test_stacked_imbalance_tighten_reads_snapshot_fields():
+    from quant.amt.snapshot import AnalysisSnapshot
+    from quant.contracts.value_objects import AMTResult
+    from quant.execution.exit_checks import check_stacked_imbalance_tighten
+
+    snap = AnalysisSnapshot(
+        result=AMTResult(
+            market_state="BALANCED", poc=100.0, value_area_high=101.0, value_area_low=99.0,
+        ),
+        asof_time="t",
+        stacked_imbalance_direction="SELL",
+        stacked_imbalance_magnitude=3,
+    )
+    assert check_stacked_imbalance_tighten(_position(), snap) is True
+    assert check_stacked_imbalance_tighten(_position(), {}) is False
+
+
+def test_evaluate_stacked_imbalance_tighten_from_snapshot():
+    from quant.amt.snapshot import AnalysisSnapshot
+    from quant.contracts.value_objects import AMTResult
+
+    snap = AnalysisSnapshot(
+        result=AMTResult(
+            market_state="BALANCED", poc=100.0, value_area_high=101.0, value_area_low=99.0,
+        ),
+        asof_time="t",
+        stacked_imbalance_direction="SELL",
+        stacked_imbalance_magnitude=4,
+    )
+    eng = ExitEngine()
+    pos = _position()
+    d = eng.evaluate(
+        pos, bar_close=100.5, bar_index=5, bar_low=100.4, bar_high=100.6,
+        amt_dto={}, snapshot=snap,
+    )
+    assert not d.should_exit
+    assert eng.last_exit_source == "DETERMINISTIC:STACKED_IMBALANCE_TIGHTEN"
+    assert eng.is_risk_free(pos)

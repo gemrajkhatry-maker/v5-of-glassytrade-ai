@@ -31,8 +31,10 @@ def test_model_label_maps_to_setup_type():
     assert to_broker_signal(_engine_signal(model_label="Triple-A")).setup == SetupType.TREND_MODEL
 
 
-def test_unknown_model_label_defaults_to_trend_model():
-    assert to_broker_signal(_engine_signal(model_label="Unknown")).setup == SetupType.TREND_MODEL
+def test_unknown_model_label_does_not_become_trend_model():
+    # Unrecognized labels are not silently TREND_MODEL (stage-labels contract).
+    assert to_broker_signal(_engine_signal(model_label="Unknown")).setup == SetupType.MEAN_REVERSION
+    assert to_broker_signal(_engine_signal(model_label="")).setup == SetupType.MEAN_REVERSION
 
 
 # ---------------------------------------------------------------------------

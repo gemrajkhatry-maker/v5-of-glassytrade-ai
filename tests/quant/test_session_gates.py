@@ -63,24 +63,31 @@ class TestIstDt:
 
 
 class TestParseContractExpiry:
-    def test_valid_mcx_symbol(self):
-        result = parse_contract_expiry("CRUDEOIL 17 AUG 7450 CALL")
+    def test_valid_mcx_symbol_future_month(self):
+        today = datetime.now(tz=_IST).date()
+        # Pick a day/month that is still ahead this calendar year.
+        future = today + timedelta(days=45)
+        mon = future.strftime("%b").upper()
+        result = parse_contract_expiry(f"CRUDEOIL {future.day:02d} {mon} 7450 CALL")
         assert result is not None
-        assert result.month == 8
-        assert result.day == 17
+        assert result.month == future.month
+        assert result.day == future.day
+        assert result.year == future.year
 
     def test_no_month_token_returns_none(self):
         assert parse_contract_expiry("SYM") is None
         assert parse_contract_expiry("SYM 100 CALL") is None
         assert parse_contract_expiry("CRUDEOIL") is None
 
-    def test_past_date_rolls_to_next_year(self):
+    def test_past_date_without_year_refuses_to_roll(self):
+        """Expired MDY without an explicit year must not invent +1 year."""
         today = datetime.now(tz=_IST).date()
-        # January contract when it's past January
+        # January contract when it's past January → refused (None).
         result = parse_contract_expiry("CRUDEOIL 10 JAN 7450 CALL")
         if today.month > 1 or (today.month == 1 and today.day > 10):
-            assert result.year == today.year + 1
+            assert result is None
         else:
+            assert result is not None
             assert result.year == today.year
 
 

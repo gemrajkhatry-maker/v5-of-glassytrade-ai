@@ -56,3 +56,15 @@ def epoch_to_iso(time_str: str | float | int | None) -> str:
         return text
     return datetime.fromtimestamp(epoch, tz=IST).isoformat()
 
+
+def parse_bar_time(time_str: str | float | int | None) -> datetime | None:
+    """Parse a real bar timestamp into an aware IST datetime."""
+    normalized = epoch_to_iso(time_str)
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=IST)
+    return parsed.astimezone(IST)
+

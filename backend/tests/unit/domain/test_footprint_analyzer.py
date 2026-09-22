@@ -3,6 +3,7 @@
 import pytest
 from quant.contracts.value_objects import OHLC
 from quant.amt.orderflow.footprint import FootprintAnalyzer
+from quant.contracts.timezones import epoch_to_iso
 from tests.helpers.market_data import generate_market_data
 
 
@@ -20,8 +21,9 @@ class TestFootprintAnalyzer:
             volume=1000, vwap=102, taker_buy_volume=600, delta=200,
         )
         result = self.analyzer.generate([candle])
-        assert "2026-01-01" in result
-        fc = result["2026-01-01"]
+        key = epoch_to_iso(candle.time)
+        assert key in result
+        fc = result[key]
         assert len(fc.levels) > 0
         assert fc.total_delta == 200
 

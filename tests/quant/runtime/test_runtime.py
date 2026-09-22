@@ -255,30 +255,27 @@ def test_mcx_session_gate_is_exchange_aware():
 
 
 def test_parse_contract_expiry():
-    """MCX option symbols embed the expiry day+month; year is inferred from
-    the current IST date (past dates roll to next year)."""
+    """MCX option symbols embed the expiry day+month. Expired dates without
+    an explicit future year fail closed (None) — never silent +1y roll."""
     from datetime import date
     from quant.session_gates import parse_contract_expiry
 
-    assert parse_contract_expiry("CRUDEOIL 17 AUG 7450 CALL").month == 8
-    assert parse_contract_expiry("GOLDM 28 AUG 150500 CALL").day == 28
-    assert parse_contract_expiry("NATURALGAS 24 AUG 245 CALL") is not None
+    today = date(2026, 8, 1)  # before the Aug contracts below
+    assert parse_contract_expiry("CRUDEOIL 17 AUG 7450 CALL", today=today).month == 8
+    assert parse_contract_expiry("GOLDM 28 AUG 150500 CALL", today=today).day == 28
+    assert parse_contract_expiry("NATURALGAS 24 AUG 245 CALL", today=today) is not None
     # No month token -> None (synthetic/test symbols, futures, unknown).
     assert parse_contract_expiry("SYM") is None
     assert parse_contract_expiry("SYM 100 CALL") is None
     assert parse_contract_expiry("CRUDEOIL") is None
-    # Parsed date is never in the past: a January contract while it is
-    # December must be next year's.
-    from datetime import datetime as dt, timedelta, timezone
-
-    # Use a fixed "today" (2026-08-10 IST) via monkeypatching-free check:
-    # any parsed date < today is bumped to next year.
-    today = dt.now(timezone(timedelta(hours=5, minutes=30))).date()
-    parsed = parse_contract_expiry("CRUDEOIL 10 JAN 7450 CALL")
-    if today.month > 1 or (today.month == 1 and today.day > 10):
-        assert parsed.year == today.year + 1
-    else:
-        assert parsed.year == today.year
+    # Strike must not be parsed as a year (7450 ≠ 7450 AD).
+    assert parse_contract_expiry("CRUDEOIL 17 AUG 7450 CALL", today=today).year == 2026
+    # Past date without year → None (fail closed, no +1y roll).
+    assert parse_contract_expiry("CRUDEOIL 10 JAN 7450 CALL", today=date(2026, 8, 10)) is None
+    # Explicit year in the past → None.
+    assert parse_contract_expiry("CRUDEOIL 10 JAN 2025 CALL", today=date(2026, 8, 10)) is None
+    # Explicit future year is accepted.
+    assert parse_contract_expiry("CRUDEOIL 10 JAN 2027 CALL", today=date(2026, 8, 10)) == date(2027, 1, 10)
 
 
 def test_mcx_contract_expiry_day_gates_entries():
@@ -381,12 +378,12 @@ def test_engine_wires_nse_contract_expiry_from_symbol():
     """An NSE engine derives its contract expiry from its symbol too."""
     from datetime import date
 
-    eng = QuantEngine(SyntheticGateway([]), "NIFTY 11 AUG 24600 CALL",
+    eng = QuantEngine(SyntheticGateway([]), "NIFTY 11 DEC 24600 CALL",
                       interval_seconds=1, market="NSE")
     assert eng._market == "NSE"
     expiry = eng._contract_expiry
     assert expiry is not None
-    assert expiry.month == 8 and expiry.day == 11
+    assert expiry.month == 12 and expiry.day == 11
 
 
 def test_engine_wires_contract_expiry_from_symbol():
@@ -394,12 +391,12 @@ def test_engine_wires_contract_expiry_from_symbol():
     into the session gates."""
     from datetime import date
 
-    eng = QuantEngine(SyntheticGateway([]), "CRUDEOIL 11 AUG 7450 CALL",
+    eng = QuantEngine(SyntheticGateway([]), "CRUDEOIL 11 DEC 7450 CALL",
                       interval_seconds=1, market="MCX")
     assert eng._market == "MCX"
     expiry = eng._contract_expiry
     assert expiry is not None
-    assert expiry.month == 8 and expiry.day == 11
+    assert expiry.month == 12 and expiry.day == 11
 
 
 def test_engine_session_gate_uses_its_own_market():
@@ -502,14 +499,13 @@ def test_runtime_leaves_healthy_stop_quantity_unclamped():
 
 def test_engine_rolls_prior_session_levels_on_date_change():
     """Crossing a session date persists the previous session's POC/VAH/VAL and
-    feeds them back as prior levels, so the analyzer and the Triple-A TP can
-    target the previous balance area (Fabio's rule). Synthetic "tN" times must
-    NOT roll — only real dates do."""
+    feeds them back as prior levels. Options engines do not write underlying
+    NPOC (Wave 5) — use a futures symbol so the magnet is recorded."""
     from quant.bars import Bar
     from quant.session_levels import SessionLevelStore
 
     store = SessionLevelStore()  # memory-only
-    eng = QuantEngine(SyntheticGateway([]), "NIFTY 11 AUG 24600 CALL",
+    eng = QuantEngine(SyntheticGateway([]), "NIFTY",
                       interval_seconds=1, session_levels=store)
     # Simulate a completed session: the last DTO of 2026-08-10 is in hand.
     eng._amt_engine._session_date = "2026-08-10"
@@ -520,7 +516,7 @@ def test_engine_rolls_prior_session_levels_on_date_change():
     day2 = _ist_epoch(9, 20)  # 2026-08-11 09:20 IST
     eng._amt_engine.analyze(Bar(time=str(day2), open=24500.0, high=24510.0,
                          low=24490.0, close=24505.0, volume=100.0))
-    rec = store.load_levels("NIFTY 11 AUG 24600 CALL")
+    rec = store.load_levels("NIFTY")
     assert rec["date"] == "2026-08-10"
     assert rec["poc"] == 24600.0
     assert rec["vah"] == 24680.0 and rec["val"] == 24520.0

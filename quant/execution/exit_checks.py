@@ -32,27 +32,35 @@ def check_cvd_kill(position: Position, dto: dict, cvd_kill_threshold: float) -> 
     return None
 
 
+def _si_fields(src) -> tuple[str, int]:
+    if hasattr(src, "stacked_imbalance_direction"):
+        return (
+            str(getattr(src, "stacked_imbalance_direction", "") or ""),
+            int(getattr(src, "stacked_imbalance_magnitude", 0) or 0),
+        )
+    dto = src if isinstance(src, dict) else {}
+    return (
+        str(dto.get("stackedImbalanceDirection") or dto.get("stacked_imbalance_direction") or ""),
+        int(dto.get("stackedImbalanceMagnitude") or dto.get("stacked_imbalance_magnitude") or 0),
+    )
+
+
 def check_stacked_imbalance_tighten(
-    position: Position, dto: dict,
-) -> ExitDecision | None:
-    """Rule 2b: Opposing stacked footprint imbalance — tighten SL.
+    position: Position, src,
+) -> bool:
+    """Rule 2b: Opposing stacked footprint imbalance — tighten SL to BE.
 
     Fabio Gap #2: when the latest footprint shows stacked imbalance
     opposing the held position, the institutional side is overpowering
-    us. Tighten by moving SL to entry (breakeven) instead of full exit.
-    Returns ExitDecision ONLY when the stacked imbalance is strong
-    enough (magnitude >= 3 consecutive 3:1 levels) and directly
-    opposing.
+    us. Returns True when the ExitEngine should move SL to fill/entry
+    (breakeven) — never a full exit at price 0.0.
     """
-    si_dir = str(dto.get("stackedImbalanceDirection") or dto.get("stacked_imbalance_direction", ""))
-    si_mag = int(dto.get("stackedImbalanceMagnitude") or dto.get("stacked_imbalance_magnitude", 0))
+    si_dir, si_mag = _si_fields(src)
     if not si_dir or si_mag < 3:
-        return None
+        return False
     long = position.size > 0
     opposing = (long and si_dir == "SELL") or (not long and si_dir == "BUY")
-    if not opposing:
-        return None
-    return ExitDecision(True, "STACKED_IMBALANCE_TIGHTEN", 0.0)
+    return bool(opposing)
 
 
 def tp2_level(entry: float, tp: float) -> float:
@@ -68,15 +76,17 @@ def tp2_level(entry: float, tp: float) -> float:
 
 
 def is_terminal_tp_only(position: Position) -> bool:
-    """Regime gate (wave 4): VA_FADE (mean-reversion) trades exit TERMINAL
-    at the FIRST take-profit touch — no T1/T2 tiering. Derived from the
-    signal's canonical model_label (DecisionService builds fades with
-    "VA_Fade"); every other/legacy label keeps the ladder."""
+    """Regime gate: VA_FADE exits TERMINAL at first TP — no T1/T2 ladder.
+
+    Reads canonical SetupType via setup_labels so display spelling
+    (VA_Fade / VA_FADE) cannot diverge from exit routing.
+    """
+    from quant.decision.setup_labels import is_terminal_setup
+
     sig = position.order.signal if position.order else None
-    return bool(
-        sig is not None
-        and str(getattr(sig, "model_label", "") or "").upper() == "VA_FADE"
-    )
+    if sig is None:
+        return False
+    return is_terminal_setup(str(getattr(sig, "model_label", "") or ""))
 
 
 def check_take_profit_tiers(

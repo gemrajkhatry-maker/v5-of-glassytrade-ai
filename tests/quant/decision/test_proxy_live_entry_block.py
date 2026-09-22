@@ -139,16 +139,23 @@ def test_live_unavailable_entry_is_blocked_before_oms_submission():
     [
         DataQuality.CANDLE_DISTRIBUTED,
         DataQuality.CANDLE_GAUSSIAN,
-        DataQuality.PRICE_DIRECTION_PROXY,
         DataQuality.UNAVAILABLE,
     ],
 )
-def test_live_blocks_every_non_exact_quality(quality):
+def test_live_blocks_candle_and_unavailable_quality(quality):
+    """Candle-only / unavailable grades still block live OMS. PROXY is
+    accepted because Dhan has no aggressor flag (honest tape ceiling)."""
     oms = LiveOMS(broker=_Broker(), portfolio=object())
     decision = _loop(oms, _context(quality)).evaluate({}, _bar())
 
     assert decision.approved is False
     assert decision.reason == "PROXY_FLOW_BLOCKED"
+
+
+def test_live_accepts_price_direction_proxy():
+    oms = LiveOMS(broker=_Broker(), portfolio=object())
+    decision = _loop(oms, _context(DataQuality.PRICE_DIRECTION_PROXY)).evaluate({}, _bar())
+    assert decision.approved is True
 
 
 def test_live_tick_exact_entry_passes_to_live_oms():

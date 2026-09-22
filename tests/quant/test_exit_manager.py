@@ -894,6 +894,27 @@ class TestAdvisorNotifications:
 class TestBuildContext:
     """Tests for ExitManager._build_context()."""
 
+    def test_build_context_passes_engine_last_snapshot(self, monkeypatch):
+        snap = object()
+        pm = FakePositionManager()
+        pm.current_position = FakePosition()
+        mgr = _make_exit_manager(position_manager=pm)
+        mgr._amt_engine.last_snapshot = snap
+        captured: dict[str, Any] = {}
+
+        def capture_build(self, **kwargs):
+            captured.update(kwargs)
+            return MagicMock()
+
+        monkeypatch.setattr(
+            "quant.engine.exit_manager.DecisionContextBuilder.build",
+            capture_build,
+        )
+        mgr._build_context(FakeBar(), {"poc": 100.0}, 0.0)
+
+        assert captured.get("snapshot") is snap
+        assert captured.get("amt_dto") == {"poc": 100.0}
+
     def test_builds_context_with_position(self):
         """Context is built with the active position."""
         pm = FakePositionManager()

@@ -50,6 +50,10 @@ from quant.contracts.timezones import IST as _IST
 logger = logging.getLogger(__name__)
 
 _IST_OFFSET_SECONDS = float(_IST.utcoffset(None).total_seconds())
+# Bound per-symbol queues so a stalled consumer cannot retain hours of ticks.
+_QUEUE_MAXSIZE = 4096
+# Depth cache older than this is treated as dead; fall back to in-line book.
+_DEPTH_CACHE_TTL_SEC = 2.0
 
 
 class MultiplexedMarketFeed:
@@ -117,9 +121,8 @@ class MultiplexedMarketFeed:
         * First packet for a symbol establishes the baseline (delta 0).
         * Only ``vol`` going *backwards* means a session reset — re-baseline,
           drop the spike.
-        * A delta larger than 5% of the baseline (or 10k) is treated as a
-          stale/session-reset artifact and capped — mirrors the legacy
-          ``candle_aggregator`` ``vol_cap``.
+        * Deltas are never capped — AMT profile/CVD/absorption require the
+          full exchange-traded volume (playbook Σ V). Silent vol_cap deleted.
 
         The returned ``dbuy``/``dsell`` are the raw order-book-total diffs
         (legacy callers only); ``MultiplexedMarketFeed._convert`` IGNORES them
@@ -137,9 +140,6 @@ class MultiplexedMarketFeed:
         dvol = max(0.0, vol - pvol)
         dbuy = max(0.0, buy - pbuy)
         dsell = max(0.0, sell - psell)
-        cap = max(10000.0, pvol * 0.05) if pvol > 0 else 10000.0
-        if dvol > cap:
-            dvol = cap
         return (vol, buy, sell), (dvol, dbuy, dsell)
 
     @staticmethod
@@ -178,7 +178,7 @@ class MultiplexedMarketFeed:
         with self._lock:
             before = set(self._queues.keys())
             for sym in symbols:
-                self._queues.setdefault(sym, queue.Queue())
+                self._queues.setdefault(sym, queue.Queue(maxsize=_QUEUE_MAXSIZE))
             changed = set(symbols) != before
         self._kick(changed=changed)
 
@@ -186,7 +186,7 @@ class MultiplexedMarketFeed:
         """Register one symbol (idempotent). Resyncs only if it is new."""
         with self._lock:
             fresh = symbol not in self._queues
-            self._queues.setdefault(symbol, queue.Queue())
+            self._queues.setdefault(symbol, queue.Queue(maxsize=_QUEUE_MAXSIZE))
         self._kick(changed=fresh)
 
     def unsubscribe(self, symbol: str) -> None:
@@ -221,7 +221,7 @@ class MultiplexedMarketFeed:
 
     def add_reader(self, symbol: str) -> queue.Queue:
         """Return a non-consuming copy stream for a second engine."""
-        reader = queue.Queue()
+        reader = queue.Queue(maxsize=_QUEUE_MAXSIZE)
         with self._lock:
             self._readers.setdefault(symbol, set()).add(reader)
         return reader
@@ -365,6 +365,9 @@ class MultiplexedMarketFeed:
                         except (StopAsyncIteration, Exception) as depth_err:
                             if not isinstance(depth_err, StopAsyncIteration):
                                 logger.debug("stream_depth ended (using stream_full 5-depth): %s", depth_err)
+                            # Depth stream dead — drop cached 20-level books so
+                            # ticks fall back to in-line 5-level depth.
+                            self._depth_cache.clear()
                             stream_depth = None
                             anext_depth = None
                             
@@ -405,7 +408,7 @@ class MultiplexedMarketFeed:
             return
             
         if symbol not in self._depth_cache:
-            self._depth_cache[symbol] = {"bids": [], "asks": []}
+            self._depth_cache[symbol] = {"bids": [], "asks": [], "ts": 0.0}
             
         parsed_levels = [
             {"price": float(getattr(lvl, "price", 0)), "quantity": float(getattr(lvl, "quantity", 0))}
@@ -416,6 +419,21 @@ class MultiplexedMarketFeed:
             self._depth_cache[symbol]["bids"] = parsed_levels
         elif side == "ask":
             self._depth_cache[symbol]["asks"] = parsed_levels
+        self._depth_cache[symbol]["ts"] = time.time()
+
+    def _put_tick(self, q: queue.Queue, tick: Tick) -> None:
+        """Enqueue with drop-oldest when the bounded queue is full."""
+        try:
+            q.put_nowait(tick)
+        except queue.Full:
+            try:
+                q.get_nowait()
+            except queue.Empty:  # silent-except - race: queue drained between Full and get
+                pass
+            try:
+                q.put_nowait(tick)
+            except queue.Full:  # silent-except - still full after drop; drop this tick
+                pass
 
     def _route(self, pkt: dict) -> None:
         symbol = pkt.get("symbol") or pkt.get("_symbol")
@@ -426,9 +444,9 @@ class MultiplexedMarketFeed:
             return
         q = self._queues.get(symbol)
         if q is not None:
-            q.put(tick)
+            self._put_tick(q, tick)
         for reader in tuple(self._readers.get(symbol, ())):
-            reader.put(tick)
+            self._put_tick(reader, tick)
 
     def _normalize_dhan_packet(self, pkt: dict, symbol: str) -> dict:
         """Translate Dhan-specific WebSocket packet fields to canonical names.
@@ -436,6 +454,9 @@ class MultiplexedMarketFeed:
         This is the broker adapter layer within the multiplexer. All
         Dhan-proprietary field names and data transformations (cumulative →
         delta) are isolated here. _convert() reads only canonical fields.
+
+        Baseline is NOT committed here — only after the packet survives
+        validation in ``_convert`` (positive LTP, not late).
         """
         raw_vol = float(pkt.get("volume") or 0)
         raw_buy = float(pkt.get("total_buy_qty") or 0)
@@ -443,13 +464,13 @@ class MultiplexedMarketFeed:
         baseline, (delta_vol, delta_buy, delta_sell) = self._cum_to_delta(
             self._prev_cum.get(symbol), raw_vol, raw_buy, raw_sell
         )
-        self._prev_cum[symbol] = baseline
         return {
             "ltp": float(pkt.get("last_trade_price") or pkt.get("ltp") or pkt.get("LTP") or 0),
             "ltq": float(pkt.get("last_trade_quantity") or pkt.get("LTQ") or 0),
             "delta_volume": delta_vol,
             "bid_qty": delta_buy,
             "ask_qty": delta_sell,
+            "_pending_baseline": baseline,
             "timestamp": (
                 # Audit D-TIME-06: exchange event time (LTT epoch) is the truth
                 # for bar windows. WSMessage.timestamp is datetime.now() on the
@@ -497,22 +518,31 @@ class MultiplexedMarketFeed:
                 except (ValueError, TypeError):
                     ts = 0.0
 
+            used_arrival_clock = False
             if ts <= 0:
                 # ponytail: poll-fallback packets carry ISO strings float()
                 # rejects; ts=0 freezes bar windows so no bar closes and open
                 # positions lose exit management. Arrival time keeps bars moving.
                 ts = time.time()
+                used_arrival_clock = True
             elif ts > time.time() + 10000:
                 # Dhan binary protocol sends LTT pre-shifted by +IST (IST epoch).
                 # Subtract one IST offset so ts is standard UTC epoch.
                 ts -= _IST_OFFSET_SECONDS
 
-            # Monotonic timestamp guard — discard out-of-order/late ticks silently
+            # Monotonic timestamp guard — discard out-of-order/late ticks silently.
+            # Skip when using arrival clock so poll-fallback packets after a
+            # real LTT packet are not all rejected as "late".
             prev_ts = self._prev_ts.get(symbol, 0.0)
-            if ts > 0 and ts < prev_ts:
+            if not used_arrival_clock and ts > 0 and ts < prev_ts:
                 logger.debug('Late tick discarded symbol=%s ts=%.3f prev=%.3f', symbol, ts, prev_ts)
                 return None
-            if ts > 0:
+
+            # Commit baselines only for packets that survive validation.
+            pending = norm_pkt.get("_pending_baseline")
+            if pending is not None:
+                self._prev_cum[symbol] = pending
+            if not used_arrival_clock and ts > 0:
                 self._prev_ts[symbol] = ts
 
             dvol = norm_pkt["delta_volume"]
@@ -524,13 +554,17 @@ class MultiplexedMarketFeed:
             dbuy, dsell = self._attr_delta(prev_price, ltp, dvol)
             
             cached_depth = self._depth_cache.get(symbol)
-            if cached_depth and (cached_depth["bids"] or cached_depth["asks"]):
-                depth = {
-                    "bids": cached_depth["bids"],
-                    "asks": cached_depth["asks"],
-                }
-            else:
-                depth = None
+            depth = None
+            if cached_depth and (cached_depth.get("bids") or cached_depth.get("asks")):
+                age = time.time() - float(cached_depth.get("ts") or 0.0)
+                if age <= _DEPTH_CACHE_TTL_SEC:
+                    depth = {
+                        "bids": cached_depth["bids"],
+                        "asks": cached_depth["asks"],
+                    }
+                else:
+                    self._depth_cache.pop(symbol, None)
+            if depth is None:
                 db = norm_pkt["depth_bids"]
                 da = norm_pkt["depth_asks"]
                 if db or da:

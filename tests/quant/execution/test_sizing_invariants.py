@@ -54,19 +54,17 @@ def test_house_money_protocol_tiers():
     assert authority.effective_risk_pct() == pytest.approx(0.0025)
     assert not authority.is_pyramiding_unlocked()
 
-    # Banked profit +1.5R: CUSHION_TIER_1 (0.35% + 20% profit, capped at 0.50%)
+    # Banked profit +1.5R: CUSHION_TIER_1
+    # base 0.25% + min(40%, 30%) of profit/E0 = 0.0025 + 0.00225 = 0.00475
     authority.record_trade(pnl=750.0)
     assert authority.session_r_multiple() == pytest.approx(1.5)
-    # risk = 0.0035 + 750*0.20/100000 = 0.0050, profit cap = 750*0.30/100000 = 0.00225
-    assert authority.effective_risk_pct() == pytest.approx(0.00225)
+    assert authority.effective_risk_pct() == pytest.approx(0.00475)
     assert not authority.is_pyramiding_unlocked()
 
-    # Banked profit +3.0R with 2 consecutive wins -> MOMENTUM (0.40%)
+    # Banked profit +3.0R with 2 consecutive wins -> MOMENTUM (0.40% flat)
     authority.record_trade(pnl=750.0)  # total pnl = 1500.0
     assert authority.session_r_multiple() == pytest.approx(3.0)
-    # MOMENTUM risk = 0.0040, profit cap = 1500*0.30/100000 = 0.0045 -> 0.0040
     assert authority.effective_risk_pct() == pytest.approx(0.0040)
-    # Pyramiding unlock requires CUSHION_TIER_2 which is not a current tier
     assert not authority.is_pyramiding_unlocked()
 
 
@@ -74,10 +72,8 @@ def test_retracement_veto_drops_to_base_tier():
     """Verify >= 50% drop from session peak PnL drops risk back to base 0.25%."""
     authority = SessionRiskAuthority(starting_equity=100000.0, base_risk_pct=0.005)
 
-    # Build peak PnL to +2000 INR -> CUSHION_TIER_1
+    # Build peak PnL to +2000 INR -> CUSHION_TIER_1 at 0.50% ceiling
     authority.record_trade(pnl=2000.0)
-    # risk = 0.0035 + 2000*0.20/100000 = 0.0075, capped at 0.0050
-    # profit cap: 2000*0.30/100000 = 0.006 -> min(0.0050, 0.006) = 0.0050
     assert authority.effective_risk_pct() == pytest.approx(0.0050)
 
     # Retrace by 1100 INR (peak was 2000, current PnL is 900, drop is 1100/2000 = 55% >= 50%)

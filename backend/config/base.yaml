@@ -9,7 +9,7 @@ system:
   tick_history_depth: 500
   db_path: "glassytrade.db"
   log_level: "INFO"
-  capital: 1000000.0
+  capital: 5000000.0
 
 # ── Operator Environment Variables ──
 # These env vars override config values at runtime (no code changes needed):

@@ -11,7 +11,7 @@ import {
   IPriceLine,
   SeriesMarker,
 } from 'lightweight-charts';
-import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, ChartMode, AggressivePrint, HalfTrendPoint, QuantDecisionAnalysis, LLMHistoryEntry, Portfolio } from '../types';
+import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, LayaDecision, ChartMode, AggressivePrint, HalfTrendPoint, QuantDecisionAnalysis, LLMHistoryEntry, Portfolio } from '../types';
 import { IST_OFFSET_SECONDS } from '../constants';
 import AIAdvisorCard from './ai/AIAdvisorCard';
 
@@ -47,6 +47,7 @@ interface ChartSceneProps {
   quantDecision?: QuantDecisionAnalysis | null;
   decisionHistory?: LLMHistoryEntry[];
   agentDecision?: AgentDecision | null;
+  layaDecision?: LayaDecision | null;
   amtAnalysis?: AMTAnalysis | null;
   halfTrendSeries?: HalfTrendPoint[];
   mode?: ChartMode;
@@ -98,6 +99,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   quantDecision,
   decisionHistory = [],
   agentDecision,
+  layaDecision,
   amtAnalysis,
   halfTrendSeries = [],
   mode = 'STANDARD',
@@ -1529,9 +1531,14 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           </div>
         )}
 
-        {/* AI Market Thesis (replacing legacy Current Decision Card) */}
-        {(agentDecision?.direction || agentDecision?.rationale || agentDecision?.source || agentDecision?.forecastSteps) && (
-          <div className="absolute top-3 right-3 z-40 w-80 sm:w-[350px] max-h-[calc(100%-1.5rem)] flex flex-col pointer-events-auto">
+        {/* AI Market Thesis Panel (TimesFM) */}
+        {Boolean(
+          agentDecision?.direction ||
+          agentDecision?.rationale ||
+          agentDecision?.source ||
+          agentDecision?.forecastSteps
+        ) && (
+          <div className="absolute top-3 right-3 z-40 w-80 sm:w-[355px] max-h-[calc(100%-1.5rem)] flex flex-col pointer-events-auto">
             <AIAdvisorCard
               agentDecision={agentDecision}
               quantDecision={quantDecision}
@@ -1626,6 +1633,7 @@ function chartSceneAreEqual(prev: ChartSceneProps, next: ChartSceneProps): boole
     if (prev.quantDecision !== next.quantDecision) return false;
     if ((prev.decisionHistory?.length ?? 0) !== (next.decisionHistory?.length ?? 0)) return false;
     if (prev.agentDecision !== next.agentDecision) return false;
+    if (prev.layaDecision !== next.layaDecision) return false;
     if (prev.portfolio !== next.portfolio) return false;
     if (prev.amtAnalysis !== next.amtAnalysis) return false;
     // HalfTrend is fed as its own prop (not part of amtAnalysis) — the

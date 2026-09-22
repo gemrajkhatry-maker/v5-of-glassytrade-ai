@@ -64,6 +64,9 @@ def parse_contract_expiry(symbol: str, today: date | None = None) -> date | None
     and hyphenated ``NIFTY-27FEB-25500-CE``. Returns None when no day+month
     is embedded (bare underlyings, month-only futures).
 
+    Never silently rolls an expired date into next year (audit §7.6) — returns
+    None so expiry-day protections fail closed rather than trading a ghost.
+
     ``today``: injected clock for replay/cert paths; defaults to IST now() so
     live behavior is unchanged while deterministic runs can pin the date.
     """
@@ -73,28 +76,43 @@ def parse_contract_expiry(symbol: str, today: date | None = None) -> date | None
     }
     text = str(symbol or "").upper()
     tokens = text.split()
-    day = month = None
+    day = month = year = None
     if len(tokens) >= 3 and tokens[1].isdigit():
         month = months.get(tokens[2])
         if month is not None:
             day = int(tokens[1])
+        # Optional year after month (e.g. "17 AUG 2026"). Never treat a
+        # strike (7450, 150500) as a year — only 20xx or a bare 2-digit year.
+        if len(tokens) >= 4 and re.fullmatch(r"(?:20\d{2}|\d{2})", tokens[3]):
+            year = int(tokens[3])
+            if year < 100:
+                year += 2000
     if day is None:
         compact = re.search(
-            r"(\d{1,2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2,4})?",
+            r"(\d{1,2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)"
+            r"(?:(20\d{2}|\d{2})(?!\d))?",
             text,
         )
         if compact:
             day = int(compact.group(1))
             month = months[compact.group(2)]
+            if compact.group(3):
+                year = int(compact.group(3))
+                if year < 100:
+                    year += 2000
     if day is None or month is None:
         return None
     today = today or datetime.now(tz=_IST).date()
     try:
-        parsed = date(today.year, month, day)
+        if year is not None:
+            parsed = date(year, month, day)
+        else:
+            parsed = date(today.year, month, day)
     except ValueError:
         return None
+    # Expired without an explicit year → refuse (do not roll +1 year).
     if parsed < today:
-        parsed = date(today.year + 1, month, day)
+        return None
     return parsed
 
 

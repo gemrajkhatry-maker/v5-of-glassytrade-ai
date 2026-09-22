@@ -52,6 +52,7 @@ class TimesFMForecast:
     lat_ms: float               # inference latency in milliseconds
     asof_bar: int = -1          # bar index the forecast was computed at (-1 = unknown)
     observation: object | None = None  # ForecastObservationIdentity when available
+    source: str = "TIMESFM_3.0_NATIVE"  # or FALLBACK_BAND / etc.
 
 
 def _format_scanning_rationale(

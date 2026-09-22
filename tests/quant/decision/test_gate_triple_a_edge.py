@@ -166,51 +166,60 @@ def test_gate3_rejects_when_triple_a_signal_conflicts_with_agent_direction():
 
 
 def test_mcx_cvd_slope_conflict_guard():
-    """In MCX, CVD slope < -0.3 blocks LONG and > 0.3 blocks SHORT."""
-    # -0.25 is allowed for LONG in MCX
+    """In MCX, CVD slope < -0.5 blocks LONG and > 0.5 blocks SHORT (doc)."""
+    # -0.40 is allowed for LONG in MCX
     r_allowed = gate_triple_a_edge(_ctx(
         market="MCX", agent_direction="LONG",
         triple_a_phase="AGGRESSION", triple_a_signal="LONG",
-        cvd_slope=-0.25, leg_lvn=100.0,
+        cvd_slope=-0.40, leg_lvn=100.0,
     ))
     assert r_allowed.passed
 
-    # -0.35 is blocked for LONG in MCX
+    # -0.55 is blocked for LONG in MCX
     r_blocked = gate_triple_a_edge(_ctx(
         market="MCX", agent_direction="LONG",
         triple_a_phase="AGGRESSION", triple_a_signal="LONG",
-        cvd_slope=-0.35,
+        cvd_slope=-0.55, leg_lvn=100.0,
     ))
     assert not r_blocked.passed
     assert "CVD slope aggressively negative" in r_blocked.reason
 
-    # +0.25 is allowed for SHORT in MCX
+    # +0.40 is allowed for SHORT in MCX
     r_short_allowed = gate_triple_a_edge(_ctx(
         market="MCX", agent_direction="SHORT",
         triple_a_phase="AGGRESSION", triple_a_signal="SHORT",
-        cvd_slope=0.25, leg_lvn=100.0,
+        cvd_slope=0.40, leg_lvn=100.0,
     ))
     assert r_short_allowed.passed
 
-    # +0.35 is blocked for SHORT in MCX
+    # +0.55 is blocked for SHORT in MCX
     r_short_blocked = gate_triple_a_edge(_ctx(
         market="MCX", agent_direction="SHORT",
         triple_a_phase="AGGRESSION", triple_a_signal="SHORT",
-        cvd_slope=0.35,
+        cvd_slope=0.55, leg_lvn=100.0,
     ))
     assert not r_short_blocked.passed
     assert "CVD slope aggressively positive" in r_short_blocked.reason
 
 
 def test_nse_cvd_slope_conflict_guard():
-    """In NSE, CVD slope threshold is ±0.5."""
-    # -0.40 is allowed for LONG in NSE
+    """In NSE, CVD slope threshold is ±0.3 (tighter than MCX)."""
+    # -0.25 is allowed for LONG in NSE
     r_allowed = gate_triple_a_edge(_ctx(
+        market="NSE", agent_direction="LONG",
+        triple_a_phase="AGGRESSION", triple_a_signal="LONG",
+        cvd_slope=-0.25, leg_lvn=100.0,
+    ))
+    assert r_allowed.passed
+
+    # -0.40 is blocked for LONG in NSE
+    r_blocked = gate_triple_a_edge(_ctx(
         market="NSE", agent_direction="LONG",
         triple_a_phase="AGGRESSION", triple_a_signal="LONG",
         cvd_slope=-0.40, leg_lvn=100.0,
     ))
-    assert r_allowed.passed
+    assert not r_blocked.passed
+    assert "CVD slope aggressively negative" in r_blocked.reason
 
     # -0.55 is blocked for LONG in NSE
     r_blocked = gate_triple_a_edge(_ctx(

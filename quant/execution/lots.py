@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 
-__all__ = ["clamp_to_freeze", "snap_to_lot"]
+__all__ = ["clamp_to_freeze", "snap_to_lot", "snap_to_lot_floor"]
 
 
 def snap_to_lot(quantity: float, lot_size: float) -> float:
@@ -18,9 +18,19 @@ def snap_to_lot(quantity: float, lot_size: float) -> float:
     return num_lots * lot_size
 
 
+def snap_to_lot_floor(quantity: float, lot_size: float) -> float:
+    """Floor to whole lots; return 0 when quantity is below one lot.
+
+    Used for pyramid add-ons: never snap UP a 0.5-lot request to 1 lot.
+    """
+    if lot_size is None or lot_size <= 0 or quantity <= 0:
+        return 0.0
+    num_lots = int(quantity // lot_size)
+    return float(num_lots * lot_size)
+
+
 def clamp_to_freeze(quantity: float, freeze_limit: float | None) -> float:
     """Clamp quantity to exchange order freeze limit if configured."""
     if freeze_limit is not None and freeze_limit > 0 and quantity > freeze_limit:
         return float(freeze_limit)
     return float(quantity)
-

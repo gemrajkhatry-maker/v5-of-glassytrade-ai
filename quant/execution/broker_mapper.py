@@ -17,12 +17,16 @@ from typing import Any
 from quant.contracts.decimal_utils import to_decimal
 from quant.contracts.entities import Signal as BrokerSignal
 from quant.contracts.enums import SetupType, SignalType, Source
+from quant.decision.setup_labels import canonical_setup_type
 from quant.decision.signal_builder import Signal as EngineSignal
 
-_SETUP_BY_MODEL_LABEL: dict[str, SetupType] = {
-    "Triple-A": SetupType.TREND_MODEL,
-    "LVN_Sniper": SetupType.MEAN_REVERSION,
-    "VA_Fade": SetupType.RESPONSIVE_FADE,
+_SETUP_BY_CANONICAL: dict[str, SetupType] = {
+    "TRIPLE_A": SetupType.TREND_MODEL,
+    "LVN_SNIPER": SetupType.MEAN_REVERSION,
+    "VA_FADE": SetupType.RESPONSIVE_FADE,
+    "SECOND_DRIVE": SetupType.MEAN_REVERSION,
+    "INITIATIVE": SetupType.TREND_MODEL,
+    "SQUEEZE": SetupType.TREND_MODEL,
 }
 
 
@@ -41,6 +45,9 @@ def to_broker_signal(signal: EngineSignal, quantity: float | None = None) -> Bro
     }
     if quantity is not None and quantity > 0:
         metadata["order_quantity"] = float(quantity)
+    canon = canonical_setup_type(signal.model_label)
+    # Unlabeled signals must not silently become TREND_MODEL.
+    setup = _SETUP_BY_CANONICAL.get(canon, SetupType.TREND_MODEL) if canon else SetupType.MEAN_REVERSION
     return BrokerSignal.create(
         type=SignalType.BUY if signal.type == "LONG" else SignalType.SELL,
         price=to_decimal(signal.entry),
@@ -48,7 +55,7 @@ def to_broker_signal(signal: EngineSignal, quantity: float | None = None) -> Bro
         stop_loss=to_decimal(signal.sl),
         take_profit=to_decimal(signal.tp),
         timestamp=signal.timestamp,
-        setup=_SETUP_BY_MODEL_LABEL.get(signal.model_label, SetupType.TREND_MODEL),
+        setup=setup,
         source=Source.AMT,
         metadata=metadata,
         signal_id=signal.signal_id,

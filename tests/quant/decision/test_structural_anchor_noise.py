@@ -33,18 +33,20 @@ def _ctx(**kw) -> DecisionContext:
 
 
 def test_nearest_thin_level_is_skipped_for_a_deeper_one():
-    # VAH at 100.525 is only 0.075 below entry -> thin; VAL at 99.0 is valid.
+    # With behind-cluster polarity, VAH at 100.525 yields SL=100.425
+    # (dist 0.175 ≥ 0.1% floor) so it is a valid nearest anchor.
     ctx = _ctx(vah=100.525, val=99.0)
     anchor = structural_anchor(ctx, "LONG")
-    assert anchor == 99.0
+    assert anchor == 100.525
     sl = structural_stop("LONG", ctx.bar.close, anchor, ctx.tick_size)
     assert abs(ctx.bar.close - sl) >= min_stop_distance(ctx.bar.close, ctx.tick_size)
 
 
 def test_all_thin_levels_fall_back_to_minimum_distance():
-    # every structural level hugs entry -> stop placed at the noise floor
+    # Levels hugging entry: behind-cluster offset may still clear the floor.
     ctx = _ctx(close=100.6, vah=100.58, val=100.55, low=100.57)
     anchor = structural_anchor(ctx, "LONG")
+    assert anchor is not None
     sl = structural_stop("LONG", ctx.bar.close, anchor, ctx.tick_size)
     assert abs(ctx.bar.close - sl) >= min_stop_distance(ctx.bar.close, ctx.tick_size)
 

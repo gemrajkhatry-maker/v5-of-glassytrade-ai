@@ -119,7 +119,6 @@ def compute_value_area(
                 up_pair += profile[up_idx + k].volume
                 up_count += 1
 
-        # Sum the next TWO rows below
         down_pair = 0.0
         down_count = 0
         for k in range(1, 3):
@@ -129,45 +128,75 @@ def compute_value_area(
 
         can_go_up = up_count > 0
         can_go_down = down_count > 0
-
         if not can_go_up and not can_go_down:
             break
 
-        # Gap guard: don't expand across a volume desert. A row pair that adds
-        # no meaningful volume (e.g. a zero-volume band left by an intraday
-        # regime collapse) must not let the VA leap to a far stale tail — the
-        # live CRUDEOIL case: premium collapsed 195 -> 102, gap 106-159, and
-        # the old loop crossed it to VAH ~167. Stop expanding on that side
-        # when the next pair is negligible (<1% of the POC bin).
-        poc_vol = profile[poc_index].volume
-        min_pair_vol = poc_vol * 0.01 if poc_vol > 0 else 0.0
-        if can_go_up and up_pair < min_pair_vol:
-            can_go_up = False
-        if can_go_down and down_pair < min_pair_vol:
-            can_go_down = False
+        # Expand through volume deserts: jump to the next non-zero bucket when
+        # the price gap is within 20% of profile width (floor = one CME two-row
+        # skip of empty buckets). Beyond the cap, stop — a stale far tail must
+        # not inflate VA even if total-volume coverage is still short.
+        price_width = abs(float(profile[-1].price) - float(profile[0].price))
+        step = (
+            abs(float(profile[1].price) - float(profile[0].price))
+            if len(profile) > 1
+            else 0.0
+        )
+        max_price_jump = (
+            max(price_width * 0.20, 3.0 * step) if price_width > 0 else float("inf")
+        )
+
+        def _next_nonzero(idx: int, direction: int) -> int | None:
+            probe = idx
+            while True:
+                nxt = probe + direction
+                if nxt < 0 or nxt >= len(profile):
+                    return None
+                probe = nxt
+                if profile[probe].volume > 0:
+                    return probe
+
+        if can_go_up and up_pair <= 0.0:
+            landed = _next_nonzero(up_idx, +1)
+            if landed is None:
+                can_go_up = False
+            else:
+                dist = abs(float(profile[landed].price) - float(profile[up_idx].price))
+                if dist > max_price_jump:
+                    can_go_up = False
+                else:
+                    up_idx = landed
+                    current_volume += profile[up_idx].volume
+                    continue
+        if can_go_down and down_pair <= 0.0:
+            landed = _next_nonzero(down_idx, -1)
+            if landed is None:
+                can_go_down = False
+            else:
+                dist = abs(float(profile[landed].price) - float(profile[down_idx].price))
+                if dist > max_price_jump:
+                    can_go_down = False
+                else:
+                    down_idx = landed
+                    current_volume += profile[down_idx].volume
+                    continue
 
         if not can_go_up and not can_go_down:
-            # Both sides gated (volume desert on each) and target unmet —
-            # nothing left to expand into; stop rather than loop forever.
             break
 
         up_avg = up_pair / up_count if up_count else 0.0
         down_avg = down_pair / down_count if down_count else 0.0
 
         if can_go_up and (not can_go_down or up_avg >= down_avg):
-            # Expand upward by up to 2 rows
             for k in range(1, up_count + 1):
                 if up_idx + 1 < len(profile):
                     up_idx += 1
                     current_volume += profile[up_idx].volume
         elif can_go_down:
-            # Expand downward by up to 2 rows
             for k in range(1, down_count + 1):
                 if down_idx - 1 >= 0:
                     down_idx -= 1
                     current_volume += profile[down_idx].volume
 
-    # VAH = upper edge of top VA bin, VAL = lower edge of bottom VA bin
     step = profile[1].price - profile[0].price if len(profile) > 1 else 0
     half_step = step / 2
     vah = profile[up_idx].price + half_step
@@ -382,14 +411,26 @@ class IncrementalVolumeProfile:
             self._buckets = compute_optimal_buckets(price_range, tick_size)
 
         if price_range == 0:
-            if self._buckets <= 0:
-                self._buckets = 1
-            total_vol = sum(float(d.volume) for d in self._candles)
-            vol_per = total_vol / self._buckets
-            self._volumes = [
-                [vol_per, vol_per * 0.5, vol_per * 0.5] for _ in range(self._buckets)
-            ]
-            self._step = 1.0
+            # Flat tape: one bucket holds all volume — never invent N empty
+            # neighbors with a forced 50/50 buy/sell split (audit §1.7).
+            self._buckets = 1
+            total_vol = 0.0
+            total_buy = 0.0
+            for d in self._candles:
+                v = float(d.volume)
+                if v <= 0:
+                    continue
+                total_vol += v
+                if hasattr(d, "taker_buy_volume") and float(d.taker_buy_volume) > 0:
+                    total_buy += float(d.taker_buy_volume)
+                else:
+                    total_buy += 0.5 * v
+            total_buy = min(total_buy, total_vol)
+            self._volumes = [[total_vol, total_buy, max(0.0, total_vol - total_buy)]]
+            tick = self._tick_size if self._tick_size > 0 else 1.0
+            self._step = tick
+            self._min_price = float(self._candles[-1].close) - tick / 2.0
+            self._max_price = self._min_price + tick
             self._initialized = True
             return
 

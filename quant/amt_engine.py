@@ -18,6 +18,8 @@ from typing import Any, Callable
 
 from quant.amt.analyzer import AMTAnalyzer
 from quant.amt.dto import amt_result_to_dto
+from quant.amt.snapshot import AnalysisSnapshot, analysis_snapshot_from_result
+from quant.amt.session_kernel import SessionKernel
 from quant.amt.profile.volume_profile import IncrementalVolumeProfile
 from quant.amt.orderflow.footprint import TickFootprintAccumulator
 from quant.amt.session.npoc import NPOCTracker
@@ -154,6 +156,9 @@ class AMTEngine:
         self._amt_lock = threading.Lock()
         self._amt_incremental: IncrementalVolumeProfile | None = None
         self._footprint = TickFootprintAccumulator()
+        self._kernel = SessionKernel(
+            self._amt_analyzer, footprint_accumulator=self._footprint,
+        )
         
         # Session tracking
         self._session_date: str | None = None
@@ -162,6 +167,7 @@ class AMTEngine:
         self._npoc.load_from_storage(self._underlying())
         
         # State for engine integration
+        self._last_snapshot: AnalysisSnapshot | None = None
         self._last_amt_dto: dict | None = None
         self._last_underlying_close: float = 0.0
         self._warm_bars: int = 0
@@ -368,9 +374,13 @@ class AMTEngine:
             for c in ohlcs:
                 inc.update(c)
             self._amt_incremental = inc
-            # ponytail: warm_bars tracks available history depth (>= 15) so Phase 2 morning entries (09:30+) aren't blocked by cold-session warmup lock
-            self._warm_bars = len(candles)
+            # ponytail: warm_bars = candles fully processed by every tracker.
+            self._warm_bars = 0
             if ohlcs:
+                # Replay the complete seed through each idempotent session tracker.
+                self._amt_analyzer.warmup_candles(ohlcs)
+                self._kernel.warm_bars = len(ohlcs)
+                self._warm_bars = self._kernel.warm_bars
                 last_ohlc = ohlcs[-1]
                 iso_date = session_date_key(last_ohlc.time)
                 if iso_date:
@@ -394,7 +404,12 @@ class AMTEngine:
                         gex=self._gex,
                         cvd_source=self._cvd_source,
                     )
-                    self._last_amt_dto = amt_result_to_dto(result)
+                    iso_time = _epoch_to_iso(last_ohlc.time)
+                    snap = analysis_snapshot_from_result(result, asof_time=iso_time)
+                    dto = amt_result_to_dto(result)
+                    dto["time"] = iso_time
+                    self._last_snapshot = snap
+                    self._last_amt_dto = dto
                     self._last_underlying_close = float(last_ohlc.close)
                 except Exception:
                     logger.warning("Initial AMT analyze after seed failed for %s", self.symbol, exc_info=True)
@@ -430,7 +445,7 @@ class AMTEngine:
         exactly one candle per call.
         """
         # Session rollover: when the bar's date changes, the previous session
-        # is complete. Persist its levels and reload the prior levels.
+        # is complete. Persist its levels, reset rolling state, and reload prior levels.
         iso_now = _epoch_to_iso(bar.time)
         iso_date = session_date_key(iso_now)
         if iso_date and self._session_date and iso_date != self._session_date:
@@ -445,10 +460,21 @@ class AMTEngine:
                     float(prev.get("valueAreaLow") or 0.0),
                     close=self._last_underlying_close,
                 )
-                self._npoc.add_session_poc(
-                    self._underlying(), self._session_date, prev_poc
-                )
+                # Options engines must not write underlying NPOC (audit §5.5).
+                from quant.contracts.instrument_registry import is_option_contract
+                if not is_option_contract(self.symbol):
+                    self._npoc.add_session_poc(
+                        self._underlying(), self._session_date, prev_poc
+                    )
             self._prior = self._session_levels.load_levels(self.symbol)
+            # Reset candle ring, incremental profile, and ALL session trackers
+            with self._amt_lock:
+                self._amt_candles = []
+                self._amt_incremental = IncrementalVolumeProfile()
+                self._last_snapshot = None
+                self._last_amt_dto = None
+            self._kernel.reset()
+            self._warm_bars = 0
         if iso_date:
             self._session_date = iso_date
         try:
@@ -464,13 +490,24 @@ class AMTEngine:
             return self._last_amt_dto or {}
         if ohlc is not None:
             with self._amt_lock:
-                self._amt_candles.append(ohlc)
-                oldest: FloatOHLC | None = None
-                if len(self._amt_candles) > 1000:
-                    oldest = self._amt_candles[0]
-                    self._amt_candles = self._amt_candles[-1000:]
-                if self._amt_incremental is not None:
-                    self._amt_incremental.update(ohlc, oldest)
+                if self._amt_candles and self._amt_candles[-1].time == ohlc.time:
+                    # Duplicate timestamp re-feed: update all trackers, not just profile.
+                    self._amt_candles[-1] = ohlc
+                    inc = IncrementalVolumeProfile()
+                    for c in self._amt_candles:
+                        inc.update(c)
+                    self._amt_incremental = inc
+                    self._kernel.allow_duplicate_refeed()
+                else:
+                    self._amt_candles.append(ohlc)
+                    oldest: FloatOHLC | None = None
+                    if len(self._amt_candles) > 1000:
+                        oldest = self._amt_candles[0]
+                        self._amt_candles = self._amt_candles[-1000:]
+                    if self._amt_incremental is not None:
+                        self._amt_incremental.update(ohlc, oldest)
+                    self._kernel.record_warm_bar()
+                    self._warm_bars = self._kernel.warm_bars
         try:
             with self._amt_lock:
                 candles = list(self._amt_candles)
@@ -501,8 +538,11 @@ class AMTEngine:
                 )
                 self._amt_fail_logged = True
             return self._last_amt_dto or {}
+        snap = analysis_snapshot_from_result(result, asof_time=iso_now)
         dto = amt_result_to_dto(result)
+        dto["time"] = iso_now
         with self._amt_lock:
+            self._last_snapshot = snap
             self._last_amt_dto = dto
             self._last_underlying_close = float(ohlc.close)
         return dto
@@ -511,10 +551,23 @@ class AMTEngine:
     def warm_bars(self) -> int:
         return self._warm_bars
 
+    def export_kernel_state(self) -> dict:
+        """Order-flow warmth snapshot for mid-session restart."""
+        return self._kernel.export_state()
+
+    def import_kernel_state(self, data: dict | None) -> None:
+        self._kernel.import_state(data)
+        self._warm_bars = self._kernel.warm_bars
+
     @property
     def last_amt_dto(self) -> dict | None:
         with self._amt_lock:
             return self._last_amt_dto
+
+    @property
+    def last_snapshot(self) -> AnalysisSnapshot | None:
+        with self._amt_lock:
+            return self._last_snapshot
 
     @property
     def last_bar(self) -> Bar | None:
@@ -539,3 +592,25 @@ class AMTEngine:
         }
         if close > 0:
             self._last_underlying_close = float(close)
+
+    def persist_session_levels(self) -> None:
+        """Write current session POC/VA/close — call on EOD / engine stop.
+
+        Ensures prior levels survive restart-between-sessions (audit §5.4).
+        """
+        prev = self._last_amt_dto or {}
+        prev_poc = float(prev.get("poc") or 0.0)
+        date = self._session_date
+        if prev_poc <= 0 or not date:
+            return
+        self._session_levels.save_levels(
+            self.symbol,
+            date,
+            prev_poc,
+            float(prev.get("valueAreaHigh") or 0.0),
+            float(prev.get("valueAreaLow") or 0.0),
+            close=self._last_underlying_close,
+        )
+        from quant.contracts.instrument_registry import is_option_contract
+        if not is_option_contract(self.symbol):
+            self._npoc.add_session_poc(self._underlying(), date, prev_poc)

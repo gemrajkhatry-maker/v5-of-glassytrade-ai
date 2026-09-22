@@ -4,8 +4,8 @@ from quant.execution.risk import SessionRisk
 def test_initial_state():
     r = SessionRisk()
     assert r.state().halted is False
-    # Aggressive mode (base_risk_pct >= 5%): risk_per_trade_pct returns base_risk_pct
-    assert r.state().risk_per_trade_pct == 0.05
+    # House Money Protocol conservative tier: 0.25% of equity
+    assert r.state().risk_per_trade_pct == 0.0025
     assert r.state().cushion_tier == "CONSERVATIVE"
 
 def test_losses_shrink_risk():
@@ -13,8 +13,8 @@ def test_losses_shrink_risk():
     r.record_trade(-200.0)
     r.record_trade(-300.0)
     assert r.state().consecutive_losses == 2
-    # Aggressive mode: risk_per_trade_pct stays at base_risk_pct (5%)
-    assert r.state().risk_per_trade_pct == 0.05
+    # Still in CONSERVATIVE HMP tier after losses (no aggressive 5% branch)
+    assert r.state().risk_per_trade_pct == 0.0025
 
 def test_win_resets_streak():
     r = SessionRisk()

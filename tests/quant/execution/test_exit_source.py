@@ -9,6 +9,34 @@ def _position(size=10, sl=99.0, tp=102.0, entry=100.0):
     return Position(order=Order(sig, abs(size)), open_price=entry, open_time="t0", size=size)
 
 
+def test_manage_exit_prefers_snapshot_market_state_and_vwap():
+    from quant.amt.snapshot import AnalysisSnapshot
+    from quant.contracts.value_objects import AMTResult
+
+    pm = _mk_pm()
+    pos = _position()
+    pm.current_position = pos
+    snap = AnalysisSnapshot(
+        result=AMTResult(
+            market_state="DEAD", poc=100.0, value_area_high=101.0, value_area_low=99.0,
+            session_vwap=100.0,
+        ),
+        asof_time="t",
+    )
+    bar = type("Bar", (), {"time": "2026-08-24T10:01:00+05:30", "close": 100.0, "high": 100.5, "low": 99.5, "open": 100.0})()
+    remaining = pm.manage_exit(
+        {"marketState": "BALANCED", "sessionVwap": 0.0},
+        bar,
+        pos,
+        bar_index=2,
+        entry_bar_index=1,
+        entry_time_epoch=0.0,
+        snapshot=snap,
+    )
+    assert remaining is None
+    assert pm._exits.last_exit_source == "DETERMINISTIC:DEAD_MARKET"
+
+
 def test_exit_source_initially_empty():
     eng = ExitEngine()
     assert eng.last_exit_source == ""
@@ -61,10 +89,8 @@ def test_full_close_preserves_engine_sourced_label():
     assert pm._exits.last_exit_source == "TIMESFM_RISK_AUTHORITY:VAR_STOP"
 
 
-def test_model_risk_failure_is_logged_and_counted(caplog):
-    """D-2: a raising TimesFMRiskAuthority must not vanish silently."""
-    import logging
-
+def test_timesfm_risk_failure_never_consulted_on_exit_path():
+    """Wave 6: TimesFM is advisory-only — corrupt risk module must not run."""
     from quant.decision.timesfm_agents import TimesFMForecast
     import numpy as np
 
@@ -91,18 +117,11 @@ def test_model_risk_failure_is_logged_and_counted(caplog):
 
     eng._timesfm_risk = _Boom()
     before = exits_mod.MODEL_RISK_FAILURES
-    with caplog.at_level(logging.WARNING, logger="quant.execution.exits"):
-        # bar_close=100.5 alone never touches the sl=99.0 stop, so supply the
-        # bar low that genuinely trips it — proving the engine ran the
-        # deterministic rules after the model authority raised.
-        decision = eng.evaluate(pos, bar_close=100.5, bar_low=98.5, bar_index=2, timesfm_forecast=fc)
+    decision = eng.evaluate(pos, bar_close=100.5, bar_low=98.5, bar_index=2, timesfm_forecast=fc)
 
-    # The engine still falls back to deterministic rules (behaviour preserved)...
     assert decision.should_exit is True
     assert eng.last_exit_source == "DETERMINISTIC:SL"
-    # ...but the failure is now counted and logged, not swallowed.
-    assert exits_mod.MODEL_RISK_FAILURES == before + 1
-    assert any("TimesFM risk authority failed" in r.message for r in caplog.records)
+    assert exits_mod.MODEL_RISK_FAILURES == before
 
 
 def test_displayed_stop_is_the_enforced_stop_after_a_ratchet():

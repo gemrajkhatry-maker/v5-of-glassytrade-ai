@@ -78,6 +78,49 @@ export interface AgentDecision {
   } | null;
   dynamicTrailStop?: number | null;
   isAdvisory?: boolean;
+  laya?: LayaDecision | null;
+}
+
+export interface LayaDecision {
+  role?: 'SCANNING' | 'POSITION_MANAGEMENT' | string;
+  action: 'ENTER_LONG' | 'ENTER_SHORT' | 'FLAT' | 'HOLD' | 'TIGHTEN_SL' | 'TAKE_PROFIT' | 'EXIT' | string;
+  setup?: 'TRIPLE_A' | 'VA_FADE' | 'SECOND_DRIVE' | 'LVN_SNIPER' | 'NO_EDGE' | 'POSITION_MGMT' | string;
+  position_verdict?: string;
+  active_position?: {
+    side: string;
+    entryPrice: number;
+    currentPrice: number;
+    pnl: number;
+    stopLoss?: number;
+    takeProfit?: number;
+    barsHeld?: number;
+    isRiskFree?: boolean;
+  };
+  probabilities?: {
+    ENTER_LONG?: number;
+    ENTER_SHORT?: number;
+    FLAT?: number;
+    HOLD?: number;
+    TIGHTEN_SL?: number;
+    TAKE_PROFIT?: number;
+    EXIT?: number;
+    BUY?: number;
+    SELL?: number;
+    [key: string]: number | undefined;
+  };
+  confidence?: number;
+  conviction_score?: number;
+  score_max?: number;
+  score_percent?: number;
+  trade_permitted_p?: number;
+  execution_gate?: 'PERMITTED' | 'BLOCKED' | string;
+  thesis?: string;
+  setup_probabilities?: Record<string, number>;
+  latency_ms?: number;
+  source?: string;
+  model?: string;
+  status?: string;
+  timestamp?: number;
 }
 
 export interface RiskState {
@@ -161,6 +204,7 @@ export interface InstrumentState {
   quantDecisionAnalysis: QuantDecisionAnalysis | null;
   riskState: RiskState | null;
   agentDecision: AgentDecision | null;
+  layaDecision?: LayaDecision | null;
   llmHistory: LLMHistoryEntry[];
   overseerAction: string;
   overseerReason: string;

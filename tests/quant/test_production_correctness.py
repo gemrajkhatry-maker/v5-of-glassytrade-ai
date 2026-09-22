@@ -149,16 +149,13 @@ def test_naive_iso_is_ist_not_utc():
 
 
 def test_expiry_is_the_contract_date_not_every_tuesday():
-    # "28 AUG" must resolve to the real calendar date (next future occurrence
-    # of Aug 28 from today) — never snapped to an arbitrary weekday.
-    today = date.today()
-    expected = date(today.year, 8, 28)
-    if expected < today:
-        expected = date(today.year + 1, 8, 28)
-    assert parse_contract_expiry("CRUDEOIL 28 AUG 7450 CALL") == expected
-    compact = parse_contract_expiry("NIFTY23FEB18000CE")
+    # Without an explicit year, past MDY refuses (no silent +1y roll).
+    # Future MDY in the current calendar year resolves to that year.
+    assert parse_contract_expiry("CRUDEOIL 28 AUG 7450 CALL", today=date(2026, 8, 10)) == date(2026, 8, 28)
+    assert parse_contract_expiry("CRUDEOIL 28 AUG 7450 CALL", today=date(2026, 9, 1)) is None
+    compact = parse_contract_expiry("NIFTY23FEB18000CE", today=date(2026, 2, 1))
     assert compact is not None and compact.month == 2 and compact.day == 23
-    hyphen = parse_contract_expiry("NIFTY-27FEB-25500-CE")
+    hyphen = parse_contract_expiry("NIFTY-27FEB-25500-CE", today=date(2026, 2, 1))
     assert hyphen is not None and hyphen.month == 2 and hyphen.day == 27
     # BANKNIFTY monthly: a random Tuesday in the month is not expiry.
     assert is_expiry_day(date(2026, 2, 10), symbol="BANKNIFTY") is False
@@ -168,18 +165,18 @@ def test_expiry_is_the_contract_date_not_every_tuesday():
 # ---- SL semantics --------------------------------------------------------
 
 
-def test_long_stop_is_inside_the_level_not_outside():
-    # Support at 102, entry 110, tick 0.05 → inside = 102.10, outside = 101.90
+def test_long_stop_is_behind_the_level_not_inside():
+    # Support at 102, entry 110, tick 0.05 → behind = 101.90
     sl = structural_stop("LONG", entry=110.0, anchor=102.0, tick=0.05)
-    assert sl == pytest.approx(102.10)
-    assert sl > 102.0
+    assert sl == pytest.approx(101.90)
+    assert sl < 102.0
     assert sl < 110.0
 
 
-def test_short_stop_is_inside_the_level_not_outside():
+def test_short_stop_is_behind_the_level_not_inside():
     sl = structural_stop("SHORT", entry=90.0, anchor=98.0, tick=0.05)
-    assert sl == pytest.approx(97.90)
-    assert sl < 98.0
+    assert sl == pytest.approx(98.10)
+    assert sl > 98.0
     assert sl > 90.0
 
 
@@ -188,8 +185,8 @@ def test_signal_builder_and_gate4_share_the_same_stop():
     sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
     g4 = gate_risk_reward(ctx)
     assert sig is not None
-    assert "102.10" in (g4.extra or g4.reason)
-    assert sig.sl == pytest.approx(102.10)
+    assert "101.90" in (g4.extra or g4.reason)
+    assert sig.sl == pytest.approx(101.90)
 
 
 def test_imbalanced_alone_is_not_an_entry():

@@ -104,17 +104,20 @@ class TestTickHandlerFuturesPath:
         """Ensure micro-bar close triggers decide callback when flat."""
         micro_agg = MagicMock()
         micro_bar = Mock()
+        micro_bar.time = "2026-09-16T10:01:00+05:30"
         micro_agg.add_tick.return_value = micro_bar  # Micro-bar closed
         
         amt_engine = MagicMock()
-        amt_dto = {"poc": 20000.0}
+        amt_dto = {"poc": 20000.0, "time": "2026-09-16T10:00:00+05:30"}
         amt_engine.last_amt_dto = amt_dto
         
         decide = MagicMock()
+        macro_agg = MagicMock()
+        macro_agg.interval_seconds = 300
         
         handler = TickHandler(
             symbol="NIFTY24SEPFUT",
-            macro_aggregator=MagicMock(),
+            macro_aggregator=macro_agg,
             micro_aggregator=micro_agg,
             amt_engine=amt_engine,
             state_getter=lambda: MagicMock(position=None),  # Flat
@@ -163,6 +166,45 @@ class TestTickHandlerFuturesPath:
         
         # Verify decide was NOT called
         decide.assert_not_called()
+
+    def test_macro_fresh_decide_uses_snapshot_asof_time_without_dto_time(self):
+        """Freshness can use last_snapshot.asof_time when dto omits time."""
+        micro_agg = MagicMock()
+        micro_bar = Mock()
+        micro_bar.time = "2026-09-16T10:01:00+05:30"
+        micro_agg.add_tick.return_value = micro_bar
+
+        amt_engine = MagicMock()
+        snap = Mock()
+        snap.asof_time = "2026-09-16T10:00:00+05:30"
+        amt_engine.last_snapshot = snap
+        amt_dto = {"poc": 20000.0}
+        amt_engine.last_amt_dto = amt_dto
+
+        decide = MagicMock()
+        macro_agg = MagicMock()
+        macro_agg.interval_seconds = 300
+
+        handler = TickHandler(
+            symbol="NIFTY24SEPFUT",
+            macro_aggregator=macro_agg,
+            micro_aggregator=micro_agg,
+            amt_engine=amt_engine,
+            state_getter=lambda: MagicMock(position=None),
+            manage_tick_exit_callback=MagicMock(),
+            decide_callback=decide,
+            on_bar_closed_callback=MagicMock(),
+            manage_exit_callback=MagicMock(),
+        )
+
+        tick = Mock()
+        tick.price = 20000.0
+        tick.time = "2026-09-16T10:01:00"
+        tick.depth = None
+
+        handler.process_tick(tick)
+
+        decide.assert_called_once_with(amt_dto, micro_bar, None)
 
 
 class TestTickHandlerPositioned:

@@ -159,10 +159,10 @@ def test_print_wall_anchors_sl_for_long():
         val=98.0, vah=102.0, poc=100.0, tick_size=0.05,
         nearest_buy_print_below=99.4,  # big BUY print at 99.4
     )
-    sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
+    sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)], model_label="Triple-A")
     assert sig is not None
-    # SL = 2 ticks inside the print wall: 99.4 + 0.10
-    assert sig.sl == pytest.approx(99.50)
+    # SL = 2 ticks behind the print wall: 99.4 - 0.10
+    assert sig.sl == pytest.approx(99.30)
 
 
 def test_print_wall_anchors_sl_for_short():
@@ -178,9 +178,9 @@ def test_print_wall_anchors_sl_for_short():
         val=98.0, vah=102.0, poc=100.0, tick_size=0.05,
         nearest_sell_print_above=100.8,
     )
-    sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
+    sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)], model_label="Triple-A")
     assert sig is not None
-    assert sig.sl == pytest.approx(100.70)
+    assert sig.sl == pytest.approx(100.90)
 
 
 def test_contested_bubble_zone_blocks_entry():
@@ -214,7 +214,7 @@ def test_short_sl_anchors_to_broken_val_not_session_vah():
         bar=bar, symbol="S", agent_direction="SHORT",
         val=101.0, vah=105.0, poc=103.0, tick_size=0.05,
     )
-    sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
+    sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)], model_label="Triple-A")
     assert sig is not None
-    # SL = 2 ticks inside broken VAL: 101.0 - 0.10
-    assert sig.sl == pytest.approx(100.90), f"SL {sig.sl} anchored wrong"
+    # SL = 2 ticks behind broken VAL: 101.0 + 0.10
+    assert sig.sl == pytest.approx(101.10), f"SL {sig.sl} anchored wrong"

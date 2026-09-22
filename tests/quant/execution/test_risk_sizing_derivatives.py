@@ -4,24 +4,44 @@ from quant.execution.risk import SessionRisk
 
 
 def test_futures_sizing_does_not_zero_when_risk_fits_budget():
-    """BANKNIFTY @ 56430, lot=30, equity=10L, deployment=50%.
+    """BANKNIFTY-like futures: HMP stop-distance sizing + optional deployment cap.
 
-    Notional = 56430 * 30 = 16.93L (exceeds 5L deployment capital).
-    But stop-loss risk = (56430 - 56300) * 30 = 3900 (fits 5000 risk budget).
-    System must allocate at least 1 lot.
+    Conservative HMP (0.25% of 10L = ₹2500) with an 80pt stop and lot=30
+    risks ₹2400/lot — fits the budget. Deployment cap must not zero a
+    stop-distance-viable 1-lot setup.
     """
     risk = SessionRisk(
         starting_equity=1_000_000,
-        base_risk_pct=0.05,  # 5% triggers aggressive margin-aware path
-        capital_deployment_pct=0.50,  # 50% = 500000
+        capital_deployment_pct=0.50,
         day_of_week=1,  # mid-week: no defensive halving
     )
     qty = risk.position_size(
         entry=56430.0,
-        sl=56300.0,  # 130 points risk
+        sl=56350.0,  # 80 points → ₹2400/lot under ₹2500 HMP budget
         lot_size=30,
     )
     assert qty >= 30.0, f"Expected >= 1 lot (30), got {qty}"
+
+
+def test_configured_capital_funds_wide_initiative_stop():
+    """YAML capital (₹50L) must fund a typical BANKNIFTY Initiative stop.
+
+    Reproduction: SHORT @ 56275 / SL 56652 ≈ 377pts × lot 30 = ₹11.3k risk.
+    At ₹10L HMP (₹2.5k) this sized to 0 and the UI still said Approved.
+    At ₹50L HMP (₹12.5k) it must clear 1 lot.
+    """
+    risk = SessionRisk(
+        starting_equity=5_000_000.0,
+        capital_deployment_pct=0.95,
+        day_of_week=1,
+    )
+    qty = risk.position_size(
+        entry=56275.0,
+        sl=56651.94,
+        lot_size=30.0,
+        max_lots=10,
+    )
+    assert qty >= 30.0, f"Expected >= 1 lot, got {qty}"
 
 
 def test_futures_sizing_respects_risk_budget_cap():

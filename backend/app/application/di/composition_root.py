@@ -260,12 +260,46 @@ def _coordinator_risk_config(config: "Configuration") -> dict:
     These are the exact values the loader + validator settled on — the values
     are read, never re-defaulted. A missing field aborts coordinator startup.
     """
-    return {
+    risk = getattr(config, "system_config", None)
+    risk = getattr(risk, "risk", None) if risk is not None else None
+    if risk is None:
+        risk = getattr(config, "risk", None)
+
+    # SystemConfig.capital is the sole paper/live book size. Engines previously
+    # fell back to INITIAL_CAPITAL (₹10L) and ignored YAML — index-futures HMP
+    # then sized to 0 lots on stops the configured capital could afford.
+    capital = getattr(config, "capital", None)
+    if capital is None:
+        raise ValueError(
+            "Refusing to start engines: required 'config.capital' is missing/None. "
+            "Declare system.capital in backend/config/base.yaml."
+        )
+    out = {
+        "starting_equity": float(capital),
         "max_trades_per_session": int(_require_risk_value(config, "max_trades_per_session")),
         "risk_per_trade_pct": float(_require_risk_value(config, "risk_per_trade_pct")),
-        "capital_deployment_pct": float(config.paper.capital_deployment_pct),
         "max_daily_loss_pct": float(_require_risk_value(config, "max_daily_loss_pct")),
         "max_consecutive_losses": int(_require_risk_value(config, "max_consecutive_losses")),
+        "max_concurrent_positions": int(_require_risk_value(config, "max_concurrent_positions")),
     }
+    # Paper / non-live: apply notional deployment ceiling. Live margin is
+    # broker-side — do not inject paper's 95% deployment into live engines.
+    is_live = bool(getattr(config, "is_live", lambda: False)())
+    if not is_live:
+        is_live = str(getattr(config, "broker_mode", "") or "").lower() == "live"
+    if not is_live:
+        paper = getattr(config, "paper", None)
+        if paper is not None and getattr(paper, "capital_deployment_pct", None) is not None:
+            out["capital_deployment_pct"] = float(paper.capital_deployment_pct)
+
+    # Optional portfolio ceilings (defaults live in PortfolioRiskAuthority).
+    if risk is not None:
+        mdl = getattr(risk, "max_portfolio_daily_loss_pct", None)
+        if mdl is not None:
+            out["max_portfolio_daily_loss_pct"] = float(mdl)
+        mpr = getattr(risk, "max_portfolio_risk_pct", None)
+        if mpr is not None:
+            out["max_portfolio_risk_pct"] = float(mpr)
+    return out
 
 

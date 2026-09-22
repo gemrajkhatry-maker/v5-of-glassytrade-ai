@@ -6,17 +6,20 @@ runs on different dates.
 """
 from __future__ import annotations
 
-import pytest
 from datetime import date
 
 from quant.session_gates import parse_contract_expiry
 
 
 def test_parse_contract_expiry_accepts_injected_today():
-    """'26 DEC' resolved from 2026-12-31 must land in 2027."""
+    """Expired MDY without year refuses — never invents +1 year."""
     got = parse_contract_expiry("NIFTY 26 DEC 25000 CE", today=date(2026, 12, 31))
-    assert got == date(2027, 12, 26)
+    assert got is None
 
-    # Past month/day within the injected year resolves to that year.
+    # Same calendar year, still ahead of injected today → that year.
     got2 = parse_contract_expiry("CRUDEOIL 17 AUG 7450 CALL", today=date(2026, 8, 1))
     assert got2 == date(2026, 8, 17)
+
+    # Explicit future year is accepted; past explicit year still refuses.
+    assert parse_contract_expiry("NIFTY 26 DEC 2025 CE", today=date(2026, 12, 31)) is None
+    assert parse_contract_expiry("NIFTY 26 DEC 2027 CE", today=date(2026, 12, 31)) == date(2027, 12, 26)

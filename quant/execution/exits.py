@@ -37,6 +37,10 @@ class ExitDecision:
     # Fraction of the CURRENT position size to close. None (or 1.0) means a
     # full close. < 1.0 means a tiered take-profit partial (spec §13.3).
     partial_fraction: float | None = None
+    # Applied by PositionManager only AFTER a successful OMS fill so a failed
+    # close cannot burn the tier / arm BE on an unfilled order.
+    pending_tp_tier: int | None = None
+    pending_breakeven: float | None = None
 
 
 @dataclass
@@ -105,15 +109,75 @@ class ExitEngine:
         tr = self._trail.get(position._id)
         return self._breakeven.get(position._id), (tr.stop if tr and tr.active else None)
 
-    def is_risk_free(self, position: Position) -> bool:
-        """Return True when this position has reached the 0.8R breakeven floor.
+    def is_risk_free(self, position: Position, mark: float | None = None) -> bool:
+        """True when BE is armed AND the mark is at or better than the fill.
 
-        Used by the pyramid engine to authorize add-ons: per spec §13.2 the
-        base trade must be risk-free (SL at entry or better) before any
-        pyramid entry is permitted.
+        Spec §13.2: pyramiding requires the base trade to be risk-free. A
+        CVD-armed BE floor on a still-losing mark does not qualify.
         """
         be_floor = self._breakeven.get(position._id)
-        return be_floor is not None
+        if be_floor is None:
+            return False
+        fill = float(getattr(position, "open_price", 0) or 0)
+        if fill <= 0:
+            fill = float(position.order.signal.entry) if position.order and position.order.signal else 0.0
+        if fill <= 0:
+            return False
+        long = position.size > 0
+        # Protective floor must itself be at/better than fill.
+        if long and float(be_floor) < fill - 1e-9:
+            return False
+        if (not long) and float(be_floor) > fill + 1e-9:
+            return False
+        px = float(mark) if mark is not None else fill
+        if long:
+            return px >= fill - 1e-9
+        return px <= fill + 1e-9
+
+    def evaluate_price_event(
+        self,
+        position: Position,
+        *,
+        last: float,
+        high: float,
+        low: float,
+        source: str = "tick",
+        amt_dto: dict | None = None,
+        **kwargs,
+    ):
+        """Canonical exit evaluation for tick or bar — same prices, same reason."""
+        return self.evaluate(
+            position,
+            bar_close=last,
+            bar_high=high,
+            bar_low=low,
+            amt_dto=amt_dto,
+            **kwargs,
+        )
+
+    def apply_pending_tp(self, position: Position, decision: ExitDecision) -> None:
+        """Commit TP tier / BE only after a successful OMS fill."""
+        if decision.pending_tp_tier is not None:
+            self._tp_tier[position._id] = int(decision.pending_tp_tier)
+        if decision.pending_breakeven is not None:
+            self._breakeven[position._id] = float(decision.pending_breakeven)
+
+    def restore_stop_state(
+        self,
+        position: Position,
+        *,
+        breakeven: float | None = None,
+        trail_stop: float | None = None,
+        tp_tier: int = 0,
+    ) -> None:
+        """Rehydrate ExitEngine stop state after process restart."""
+        if breakeven is not None and float(breakeven) > 0:
+            self._breakeven[position._id] = float(breakeven)
+        if trail_stop is not None and float(trail_stop) > 0:
+            tr = _Trail(active=True, stop=float(trail_stop))
+            self._trail[position._id] = tr
+        if tp_tier:
+            self._tp_tier[position._id] = int(tp_tier)
 
     def session_budget_multiplier(self) -> float:
         if self._timesfm_risk is None:
@@ -134,6 +198,7 @@ class ExitEngine:
         bar_low: float | None = None,
         *,
         amt_dto: dict | None = None,
+        snapshot=None,
         best_bid: float | None = None,
         best_ask: float | None = None,
         market_state: MarketState = MarketState.BALANCED,
@@ -172,7 +237,9 @@ class ExitEngine:
         long = position.size > 0
         side = "LONG" if long else "SHORT"
         sl = float(position.order.signal.sl)
-        entry = float(position.order.signal.entry)
+        # BE / R / risk-free use the actual fill, not the signal quote.
+        fill = float(getattr(position, "open_price", 0) or 0)
+        entry = fill if fill > 0 else float(position.order.signal.entry)
         low = close if bar_low is None else bar_low
         high = close if bar_high is None else bar_high
         risk = abs(entry - sl)
@@ -183,58 +250,9 @@ class ExitEngine:
             self.last_exit_source = f"DETERMINISTIC:{r.reason}"
             return r
 
-        # TimesFM Dynamic Risk & Monotonic Quantile Trailing Stop Evaluation
-        if timesfm_forecast is not None:
-            try:
-                if self._timesfm_risk is None:
-                    from quant.decision.timesfm_risk import TimesFMRiskAuthority
-                    self._timesfm_risk = TimesFMRiskAuthority()
-
-                side = "LONG" if long else "SHORT"
-                tr = self._trail.get(position._id)
-                current_active_sl = tr.stop if (tr and tr.active and tr.stop is not None) else sl
-
-                eval_res = self._timesfm_risk.evaluate_exit(
-                    position_id=position._id,
-                    side=side,
-                    entry=entry,
-                    current_price=close,
-                    bars_held=bar_index,
-                    forecast=timesfm_forecast,
-                    active_sl=current_active_sl,
-                )
-
-                # Monotonic quantile ratchet
-                if eval_res.new_stop is not None:
-                    if tr is None:
-                        tr = _Trail()
-                        self._trail[position._id] = tr
-                    tr.active = True
-                    tr.stop = eval_res.new_stop
-                    if eval_res.is_risk_free:
-                        self._breakeven[position._id] = eval_res.new_stop
-
-                if eval_res.should_exit:
-                    self.last_exit_source = f"TIMESFM_RISK_AUTHORITY:{eval_res.reason or eval_res.action}"
-                    return ExitDecision(True, eval_res.reason, close, trail_stop=eval_res.new_stop)
-            except Exception as exc:
-                # Degrade to deterministic rules — but LOUDLY. Silently
-                # swallowing this disables the dynamic VaR stop, the trajectory
-                # take-profit, the velocity-decay exit and the quantile stop
-                # ratchet for the whole bar with no signal to ops.
-                logger.warning(
-                    "TimesFM risk authority failed for %s (%s) — falling back to "
-                    "deterministic exits for this bar (failure count now at least: %d)",
-                    position._id, exc, MODEL_RISK_FAILURES + 1,
-                    exc_info=True,
-                )
-                MODEL_RISK_FAILURES += 1
-
-        # Rule 2b: Opposing stacked imbalance — tighten SL
-        r = check_stacked_imbalance_tighten(position, dto)
-        if r:
-            self.last_exit_source = f"DETERMINISTIC:{r.reason}"
-            return r
+        # TimesFM is advisory only — never write stop state or force exits
+        # from forecasts (Wave 6). Forecasts may still be inspected for UI
+        # elsewhere; the bar path stays deterministic.
 
         # Rule 2: protective stop — the TIGHTEST of raw SL, breakeven floor and
         # active trail. The bar path previously checked the raw frozen SL first,
@@ -270,21 +288,34 @@ class ExitEngine:
             self.last_exit_source = "DETERMINISTIC:SL"
             return ExitDecision(True, "SL", float(sl))
 
+        # Rule 2b: Opposing stacked imbalance — tighten SL to BE (never exit).
+        # Runs AFTER protective stop so a real SL breach still books first.
+        si_src = snapshot if snapshot is not None else dto
+        if check_stacked_imbalance_tighten(position, si_src):
+            self._breakeven[position._id] = entry
+            self.last_exit_source = "DETERMINISTIC:STACKED_IMBALANCE_TIGHTEN"
+
         # Rule 3: CVD kill
         r = check_cvd_kill(position, dto, self.cvd_kill_threshold)
         if r:
             self.last_exit_source = f"DETERMINISTIC:{r.reason}"
             return ExitDecision(True, r.reason, close)
 
-        # Rule 4: Take-profit tiers
+        # Rule 4: Take-profit tiers — do NOT mutate tier/BE until OMS succeeds
+        # (PositionManager calls apply_pending_tp after a successful fill).
         tier = self._tp_tier.get(position._id, 0)
         r, new_tier = check_take_profit_tiers(position, high, low, tier, entry)
         if r:
-            self._tp_tier[position._id] = new_tier
-            if r.reason == "TP1":
-                self._breakeven[position._id] = entry
+            pending_be = entry if r.reason == "TP1" else None
             self.last_exit_source = f"DETERMINISTIC:{r.reason}"
-            return r
+            return ExitDecision(
+                True, r.reason, r.close_price,
+                partial_fraction=r.partial_fraction,
+                pending_tp_tier=new_tier,
+                pending_breakeven=pending_be,
+            )
+        # Advance expected tier cursor only when no exit fired this bar
+        # (same as prior behaviour for non-exit path).
         self._tp_tier[position._id] = new_tier
 
         # Rule 4b: advance the trailing/breakeven stores for the NEXT bar.
@@ -306,13 +337,8 @@ class ExitEngine:
                     tr = _Trail()
                     self._trail[position._id] = tr
                 elif tr.active and tr.stop is not None:
-                    # Single trail authority (D-16). The TimesFM quantile
-                    # ratchet (Rule 2) already owns the stop for this bar; this
-                    # deterministic advance may only tighten what the authority
-                    # wrote, never loosen it. check_trailing_stop ratchets
-                    # against the same value today, but the contract is enforced
-                    # here, at the write site, so a future helper that stops
-                    # ratcheting cannot silently widen a live stop.
+                    # Single trail authority (D-16). Deterministic advance may
+                    # only tighten what is already written, never loosen it.
                     trail_stop = (
                         max(float(trail_stop), float(tr.stop)) if long
                         else min(float(trail_stop), float(tr.stop))

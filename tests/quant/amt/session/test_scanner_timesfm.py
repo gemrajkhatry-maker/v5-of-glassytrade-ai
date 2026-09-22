@@ -58,6 +58,7 @@ def _make_forecast(curr_price=24500.0, target_drift=60.0, direction="LONG"):
         forecast_steps=[direction] * horizon,
         curr_price=curr_price,
         lat_ms=10.0,
+        asof_bar=0,  # stamped; 0 is a valid first-bar index (must not be treated as missing)
     )
 
 

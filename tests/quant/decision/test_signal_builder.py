@@ -20,20 +20,24 @@ def test_build_returns_none_when_a_gate_fails():
     sb = SignalBuilder()
     results = _pass_results()
     results[3] = GateResult(4, False, "No direction")
-    assert sb.build(_ctx(), results) is None
+    assert sb.build(_ctx(), results, model_label="Triple-A") is None
+
+def test_build_returns_none_when_unlabeled():
+    sb = SignalBuilder()
+    assert sb.build(_ctx(), _pass_results(), model_label="") is None
 
 def test_build_returns_long_signal():
     sb = SignalBuilder()
-    s = sb.build(_ctx(), _pass_results())
+    s = sb.build(_ctx(), _pass_results(), model_label="Triple-A")
     assert s is not None and s.type == "LONG"
-    # SL two ticks INSIDE VAL: val=98 -> 98.10
-    assert s.sl == pytest.approx(98.0 + 0.10)
+    # SL two ticks BEHIND VAL: val=98 -> 97.90
+    assert s.sl == pytest.approx(98.0 - 0.10)
     assert s.sl < s.entry < s.tp
     assert s.rr >= 1.0
 
 def test_build_tp_is_r_multiple():
     sb = SignalBuilder(tp_multiplier=2.0)
-    s = sb.build(_ctx(), _pass_results())
+    s = sb.build(_ctx(), _pass_results(), model_label="Triple-A")
     expected_tp = s.entry + (s.entry - s.sl) * 2.0
     assert s.tp == pytest.approx(expected_tp)
 
@@ -45,18 +49,18 @@ def test_model_label_populated():
 
 def test_malformed_va_falls_back_to_a_valid_stop_below_entry():
     # val > vah is a malformed value area: no structural support sits below
-    # entry, so the anchor falls back to the minimum-distance stop. The signal
-    # must still be well-formed (sl < entry < tp), never inverted.
+    # entry, so SignalBuilder rejects (no fabricated 5-tick stop).
     sb = SignalBuilder()
-    s = sb.build(_ctx(poc=100, vah=102, val=110), _pass_results())
-    assert s is not None and s.sl < s.entry < s.tp
+    s = sb.build(_ctx(poc=100, vah=102, val=110), _pass_results(), model_label="Triple-A")
+    assert s is None
+
 
 def test_build_emits_short_with_sl_above_entry():
     sb = SignalBuilder()
-    # SHORT: entry 100 < vah 102 -> SL = vah - 2 ticks = 101.90 (inside, above entry)
+    # SHORT: entry 100 < vah 102 -> SL = vah + 2 ticks = 102.10 (behind)
     ctx = _ctx(direction="SHORT", close=100.0, poc=98, vah=102, val=99)
     results = _pass_results()
-    s = sb.build(ctx, results)
+    s = sb.build(ctx, results, model_label="Triple-A")
     assert s is not None and s.type == "SHORT"
     assert s.sl > s.entry > s.tp
-    assert s.sl == pytest.approx(102.0 - 0.10)
+    assert s.sl == pytest.approx(102.0 + 0.10)
