@@ -263,11 +263,11 @@ def test_range_warmup_needs_15_live_and_15_min():
 - Modify: plan checkboxes
 
 **Steps:**
-- [ ] `make lint`
-- [ ] `make pre-release`
-- [ ] Merge-gate pytest command (Global Constraints)
-- [ ] Update §16: “Range bars available when `range_bars_enabled`; default time micro; synth seed does not count as live warmup.”
-- [ ] Commit `docs: §16 range-bar flag status`
+- [x] `make lint`
+- [x] `make pre-release`
+- [x] Merge-gate pytest command (Global Constraints)
+- [x] Update §16: “Range bars available when `range_bars_enabled`; default time micro; synth seed does not count as live warmup.”
+- [x] Commit `docs: §16 range-bar flag status`
 
 ---
 
