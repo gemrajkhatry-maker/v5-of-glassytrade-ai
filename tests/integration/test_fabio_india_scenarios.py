@@ -41,6 +41,8 @@ def test_scenario_triple_a_bullish_trend_day():
         aggression=True,
         acceptance=True,
         cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=True,
     )
     ctx = DecisionContext(
         bar=bar,
@@ -60,6 +62,8 @@ def test_scenario_triple_a_bullish_trend_day():
         cvd_slope=2.5,
         allow_trend=True,
         allow_reversion=True,
+        bid=24539.95,
+        ask=24540.05,
     )
     decision = DecisionService().evaluate(ctx)
     assert decision.approved is True
@@ -73,8 +77,9 @@ def test_scenario_triple_a_bullish_trend_day():
 def test_scenario_value_area_fade_day():
     # 10:30 IST VAH probe above 24600 rejected, price CLOSES BACK INSIDE the VA
     # (24590 <= VAH 24600) but still above POC 24520 -> failed auction, fade short
-    # toward POC (Fabio Model 2 reclaim semantics).
-    bar = _make_bar("2026-08-19T10:30:00+05:30", o=24620.0, h=24650.0, lo=24570.0, c=24590.0, vol=3000.0, delta=-800.0)
+    # toward POC (Fabio Model 2 reclaim semantics). Full bearish body close
+    # (>=60% of range, close in outer 75%) per the 1-min acceptance rule.
+    bar = _make_bar("2026-08-19T10:30:00+05:30", o=24645.0, h=24650.0, lo=24575.0, c=24590.0, vol=3000.0, delta=-800.0)
     evidence = SetupEvidence(
         setup_type="VA_FADE",
         direction="SHORT",
@@ -100,6 +105,8 @@ def test_scenario_value_area_fade_day():
         cvd_slope=-1.8,
         allow_trend=True,
         allow_reversion=True,
+        bid=24589.95,
+        ask=24590.05,
     )
     decision = DecisionService().evaluate(ctx)
     assert decision.approved is True
