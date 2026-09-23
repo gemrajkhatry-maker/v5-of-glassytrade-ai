@@ -548,10 +548,11 @@ class SessionRisk:
     def _cushion_tier(self) -> str:
         """House Money Protocol (§12.2) Tier Classification per Fabio spec:
         - Session R <= 0.0: Base Defensive Tier (0.25% account risk).
-        - Session R >= +0.50: Cushion Built (0.35% + 20% of session profit).
+        - Session R >= +0.25 with profit: Cushion Built (offensive §12.2 sizing).
         - 2+ consecutive wins: Momentum Day (0.40%, can add 1-2 lots).
-        - Cap: Never > 0.50%, never > 30% of session profit.
+        - Cap: Never > 0.50% of starting equity (no 30%-of-profit cap).
         - Retracement Veto: If daily profit drops by >= 50% from peak, revert to Base.
+          (Intentional safety rail — not in §12.2 spec.)
         - 1st loss: stay current tier. 2nd consecutive loss: back to conservative.
         - 3rd consecutive loss: STOP (handled by max_consecutive_losses halt).
         """
@@ -578,9 +579,10 @@ class SessionRisk:
     def _risk_per_trade_pct(self) -> float:
         """Spec §12.2 House Money Protocol Sizing Authority per Fabio:
         - Conservative: 0.25%
-        - Cushion Built: 0.35% + 20% of session profit (capped at 0.50%)
+        - Cushion Built (offensive): min(E0×0.0025 + 0.40×pnl, 0.0050)
+          — literal §12.2; no 30%-of-profit cap
         - Momentum Day: 0.40% + can add 1-2 lots (capped at 0.50%)
-        - Retracement Veto: 0.25%
+        - Retracement Veto: 0.25% (intentional safety rail, not in spec)
         """
         if self._halted:
             return 0.0
@@ -591,14 +593,11 @@ class SessionRisk:
         elif tier == "MOMENTUM":
             risk = 0.0040  # 0.40% Momentum Day (flat; no whole-pct profit cap)
         elif tier == "CUSHION_TIER_1":
-            # §12.2: Risk₹ = E0×0.25% + 0.40×cushion; 30%-of-profit caps
-            # the cushion add-on only (never the base 0.25%).
+            # §12.2 literal: Risk₹ = E0×0.0025 + 0.40×Cushion, ceiling 0.50%.
+            # (The 30%-of-profit cushion cap is deleted — offensive sizing
+            # scales to the absolute 0.50% ceiling only.)
             base = 0.0025
             cushion_add = max(0.0, self._daily_pnl) * 0.40 / self._starting_equity
-            if self._daily_pnl > 0:
-                cushion_add = min(
-                    cushion_add, self._daily_pnl * 0.30 / self._starting_equity
-                )
             risk = min(base + cushion_add, 0.0050)
         else:
             # Conservative: 0.25%

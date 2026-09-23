@@ -55,10 +55,10 @@ def test_house_money_protocol_tiers():
     assert not authority.is_pyramiding_unlocked()
 
     # Banked profit +1.5R: CUSHION_TIER_1
-    # base 0.25% + min(40%, 30%) of profit/E0 = 0.0025 + 0.00225 = 0.00475
+    # base 0.25% + 0.40 of profit/E0 = 0.0025 + 0.003 = 0.0055 → 0.50% ceiling
     authority.record_trade(pnl=750.0)
     assert authority.session_r_multiple() == pytest.approx(1.5)
-    assert authority.effective_risk_pct() == pytest.approx(0.00475)
+    assert authority.effective_risk_pct() == pytest.approx(0.0050)
     assert not authority.is_pyramiding_unlocked()
 
     # Banked profit +3.0R with 2 consecutive wins -> MOMENTUM (0.40% flat)
