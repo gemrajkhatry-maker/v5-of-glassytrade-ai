@@ -60,6 +60,8 @@ def decision_for(
         acceptance=acceptance,
         cvd_agrees=(cvd_slope > -0.2 if direction == "LONG" else cvd_slope < 0.2),
         obi_agrees=True,
+        breakout_beyond_cluster=True,
+        lvn_proximity_ok=True,
     )
     ctx = DecisionContext(
         bar=bar,
@@ -83,6 +85,8 @@ def decision_for(
         obi=obi,
         allow_trend=True,
         allow_reversion=True,
+        bid=close_px - 0.05,
+        ask=close_px + 0.05,
     )
     service = DecisionService()
     return service.evaluate(ctx)
@@ -99,7 +103,10 @@ def test_incomplete_imbalanced_market_is_no_edge():
     )
     # Market state alone with setup_type=NONE must return NO_EDGE
     assert decision.approved is False
+    assert decision.signal is None
     assert decision.reason in ("NO_EDGE", "GATE_REJECTED", "No valid Fabio AMT setup")
+    assert decision.block_reasons, "rejection must carry block_reasons trace"
+    assert any(r.gate == 3 and not r.passed for r in decision.gate_results)
 
 
 def test_completed_triple_a_is_approved_with_named_model():
@@ -115,3 +122,9 @@ def test_completed_triple_a_is_approved_with_named_model():
     assert decision.approved is True
     assert decision.signal is not None
     assert decision.signal.type == "LONG"
+    assert decision.reason == "Triple-A"
+    assert decision.model_label == "Triple-A"
+    assert decision.gate_results and all(r.passed for r in decision.gate_results)
+    sig = decision.signal
+    assert sig.sl < sig.entry < sig.tp
+    assert sig.rr >= 1.5

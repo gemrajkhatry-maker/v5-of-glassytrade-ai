@@ -74,6 +74,8 @@ def _ctx(**kw):
         triple_a_signal=kw.get("triple_a_signal", kw.get("agent_direction", "LONG")),
         cvd_slope=kw.get("cvd_slope", 1.0),
         leg_lvn=kw.get("leg_lvn", 100.0),
+        bid=kw.get("bid", close - 0.05),
+        ask=kw.get("ask", close + 0.05),
     )
 
 

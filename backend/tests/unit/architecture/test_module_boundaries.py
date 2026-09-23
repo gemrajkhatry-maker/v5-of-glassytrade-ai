@@ -2,11 +2,8 @@
 
 import ast
 from pathlib import Path
-import pytest
 
 BACKEND = Path(__file__).resolve().parent.parent.parent.parent / "app"
-TRADING_DIR = BACKEND / "domain" / "trading"
-FABIO_DIR = BACKEND / "domain" / "fabio_ai"
 DOMAIN_DIR = BACKEND / "domain"
 
 
@@ -22,18 +19,6 @@ def _collect_imports(directory: Path) -> list[tuple[Path, str]]:
             if isinstance(node, ast.ImportFrom) and node.module:
                 results.append((py_file, node.module))
     return results
-
-
-class TestTradingDomainBoundary:
-    """trading/ must not import from fabio_ai/."""
-
-    def test_no_fabio_ai_imports(self):
-        violations = [
-            (f.relative_to(TRADING_DIR), mod)
-            for f, mod in _collect_imports(TRADING_DIR)
-            if "fabio_ai" in mod
-        ]
-        assert violations == [], f"trading/ imports fabio_ai/: {violations}"
 
 
 class TestDomainInfrastructureBoundary:

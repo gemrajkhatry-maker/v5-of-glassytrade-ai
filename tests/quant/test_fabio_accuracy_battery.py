@@ -93,9 +93,9 @@ def test_fabio_accuracy_battery():
     in_va = sum(lv.volume for lv in vp if val <= lv.price <= vah)
     frac = in_va / total if total else 0
     check(
-        "V3 CME two-row VA captures target share (55-80%)",
-        0.55 <= frac <= 0.80,
-        f"frac={frac:.2f} vah={vah:.2f} val={val:.2f}",
+        "V3 CME two-row VA near 68.2%",
+        abs(frac - 0.682) <= 0.12,
+        f"frac={frac:.3f} vah={vah:.2f} val={val:.2f}",
     )
     poc_price = max(vp, key=lambda lv: lv.volume).price
     check("V3b POC inside [VAL, VAH]", val <= poc_price <= vah)
@@ -192,6 +192,31 @@ def test_fabio_accuracy_battery():
         "K2 sizing uses 50% deployment budget",
         q <= 1_000_000 * 0.50 / 100.0 * 1.05,
         f"q={q}",
+    )
+
+    # ============ 8. SETUP VOCABULARY (Second Drive + Squeeze pins) ============
+    from typing import get_args
+
+    from quant.decision.setup_labels import (
+        CanonicalSetup,
+        canonical_setup_type,
+        label_from_setup_key,
+    )
+
+    canonical_keys = set(get_args(CanonicalSetup))
+    check(
+        "F1 setup vocabulary includes SECOND_DRIVE",
+        "SECOND_DRIVE" in canonical_keys
+        and label_from_setup_key("SECOND_DRIVE") == "Second_Drive"
+        and canonical_setup_type("Second-Drive") == "SECOND_DRIVE",
+        f"keys={sorted(k for k in canonical_keys if k)}",
+    )
+    check(
+        "F2 setup vocabulary includes SQUEEZE",
+        "SQUEEZE" in canonical_keys
+        and label_from_setup_key("SQUEEZE") == "Squeeze"
+        and canonical_setup_type("SQUEEZE") == "SQUEEZE",
+        f"label={label_from_setup_key('SQUEEZE')!r}",
     )
 
     print()
