@@ -33,7 +33,10 @@ from typing import Any, Callable
 
 from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.contracts.vocabulary import is_call_symbol, is_put_symbol
-from quant.decision.context_builder import DecisionContextBuilder
+from quant.decision.context_builder import (
+    DecisionContextBuilder,
+    build_engine_context,
+)
 from quant.events import DecisionProduced, Event
 from quant.execution.exits import ExitDecision
 
@@ -193,6 +196,10 @@ class ExitManager:
         self._set_open_trade_risk = state.get("set_open_trade_risk", lambda v: None)
         self._get_state = state["get_state"]
         self._set_state = state["set_state"]
+        self._get_range_warmup = state.get(
+            "get_range_warmup",
+            lambda: (False, 0, 0.0),
+        )
         self._get_last_depth = state.get("get_last_depth", lambda: None)
         self._get_recent_decisions = state.get("get_recent_decisions", lambda: [])
         self._get_underlying_amt_dto = state.get("get_underlying_amt_dto", lambda: None)
@@ -490,38 +497,11 @@ class ExitManager:
     def _build_context(self, bar: Any, amt_dto: dict, cooldown_remaining_sec: float) -> Any:
         """Build a DecisionContext from engine state.
 
-        Shared between the thesis-flip evaluation and any other path that
-        needs to evaluate the strategy against the current position.
+        Thin delegate to the single construction owner
+        (``build_engine_context``) shared with DecisionLoop and QuantEngine —
+        used by thesis-flip evaluation and advisor close notifications.
         """
-        eval_symbol = (
-            self._get_underlying_symbol()
-            if self._underlying_gateway is not None and self._get_underlying_symbol
-            else self._symbol
-        )
-        contract_symbol = (
-            self._symbol if self._underlying_gateway is not None else None
-        )
-        pm = self._get_position_manager()
-        active_pos = pm.current_position or self._get_state().position
-        snap = getattr(self._amt_engine, "last_snapshot", None)
-        return DecisionContextBuilder(greeks=self._greeks).build(
-            bar=bar,
-            symbol=eval_symbol,
-            market=self._market,
-            contract_expiry=self._contract_expiry,
-            tick_size=self._tick_size,
-            bar_index=self._get_bar_index(),
-            warm_bars=self._amt_engine.warm_bars,
-            cooldown_remaining_sec=cooldown_remaining_sec,
-            risk_state=self._risk.state() if self._risk else None,
-            amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
-            snapshot=snap,
-            order_book=self._get_last_depth(),
-            position=active_pos,
-            entry_bar_index=self._get_entry_bar_index(),
-            recent_decisions=list(self._get_recent_decisions()),
-            contract_symbol=contract_symbol,
-        )
+        return build_engine_context(self, bar, amt_dto, cooldown_remaining_sec)
 
     # ---------------------------------------------------------------------
     # Advisor notifications

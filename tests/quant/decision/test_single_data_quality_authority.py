@@ -27,7 +27,11 @@ Contract after N3:
 
 from quant.bars import Bar
 from quant.decision.context import DecisionContext
-from quant.decision.data_quality import DataQuality, live_evidence_exact
+from quant.decision.data_quality import (
+    REQUIRED_EVIDENCE_FAMILIES,
+    DataQuality,
+    live_evidence_exact,
+)
 from quant.decision.decision_service import DecisionService
 from quant.decision.signal_builder import Signal
 from quant.engine.decision_loop import DecisionLoop
@@ -163,16 +167,27 @@ class _AMT:
     last_amt_dto = {}
 
 
-def _loop(oms, context):
+def _loop(oms, quality: DataQuality):
+    """Build a DecisionLoop whose context carries *quality* through the real
+    ``DecisionContextBuilder`` path — quality rides the AMT DTO keys the
+    builder reads (``dataQuality`` / ``evidenceProvenance``), so no test
+    patches the private ``_build_context`` seam (Task 19: one owner)."""
     strategy = type(
         "Strategy", (),
         {"should_enter": lambda self, ctx: _approved_decision()},
     )()
-    loop = DecisionLoop(
+    amt = _AMT()
+    amt.last_amt_dto = {
+        "dataQuality": quality.value,
+        "evidenceProvenance": {
+            family: quality.value for family in REQUIRED_EVIDENCE_FAMILIES
+        },
+    }
+    return DecisionLoop(
         config={"symbol": "SYM", "market": "NSE", "cooldown_bars": 0},
         deps={
             "risk": _Risk(), "oms": oms, "strategy": strategy,
-            "amt_engine": _AMT(),
+            "amt_engine": amt,
             "get_position_manager": lambda: _PositionManager(),
             "execution_enabled": True, "underlying_gateway": None,
         },
@@ -187,8 +202,6 @@ def _loop(oms, context):
         },
         emit=lambda event: None,
     )
-    loop._build_context = lambda bar, amt_dto, cooldown: context
-    return loop
 
 
 def _approved_decision():
@@ -207,7 +220,7 @@ def _bar():
 
 def test_loop_live_blocks_non_exact_quality():
     oms = _LiveOMS()
-    decision = _loop(oms, _ctx(DataQuality.CANDLE_DISTRIBUTED)).evaluate({}, _bar())
+    decision = _loop(oms, DataQuality.CANDLE_DISTRIBUTED).evaluate({}, _bar())
     assert decision.approved is False
     assert decision.reason == "PROXY_FLOW_BLOCKED"
     assert oms.submissions == []
@@ -215,13 +228,13 @@ def test_loop_live_blocks_non_exact_quality():
 
 def test_loop_live_passes_exact_quality():
     oms = _LiveOMS()
-    decision = _loop(oms, _ctx(DataQuality.TICK_EXACT)).evaluate({}, _bar())
+    decision = _loop(oms, DataQuality.TICK_EXACT).evaluate({}, _bar())
     assert decision.approved is True
 
 
 def test_loop_paper_marks_proxy_mode_without_blocking():
     oms = _PaperOMS()
-    decision = _loop(oms, _ctx(DataQuality.CANDLE_GAUSSIAN)).evaluate({}, _bar())
+    decision = _loop(oms, DataQuality.CANDLE_GAUSSIAN).evaluate({}, _bar())
     assert decision.approved is True
     assert decision.metadata["mode"] == "PROXY_MODE"
     assert oms.submissions

@@ -916,3 +916,81 @@ class DecisionContextBuilder:
             live_minutes=live_minutes,
         )
         return DecisionContext(**ctx_kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Engine-context construction (single owner)
+# ---------------------------------------------------------------------------
+
+
+def _engine_value(engine, callback: str, attribute: str):
+    """Read engine state through the injected callback or the raw attribute.
+
+    Extracted components (DecisionLoop, ExitManager) hold state as injected
+    callables; the host (QuantEngine) keeps raw attributes. Same read, one
+    spelling.
+    """
+    fn = getattr(engine, callback, None)
+    return fn() if callable(fn) else getattr(engine, attribute)
+
+
+def build_engine_context(engine, bar, amt_dto, cooldown_remaining_sec: float) -> DecisionContext:
+    """Sole DecisionContext construction owner for the engine wrappers.
+
+    ``DecisionLoop._build_context``, ``ExitManager._build_context`` and
+    ``QuantEngine._build_context`` are one-line delegates here so two
+    expressions can never diverge again:
+
+    - **position source:** ``pm.current_position or state.position`` —
+      dual-authority (pm execution book first, engine-state fallback),
+      identical on entry, thesis-flip and advisor paths;
+    - **range warmup:** ``range_bars_enabled / live_range_bars /
+      live_minutes`` threaded from ``engine._get_range_warmup()`` on every
+      path (the thesis-flip warmup gap this replaces).
+
+    ``engine`` is duck-typed over those three wrappers (see
+    ``_engine_value`` for the callback-vs-attribute split).
+    """
+    symbol = engine.symbol
+    gateway = engine._underlying_gateway
+    underlying = getattr(engine, "_get_underlying_symbol", None)
+    if underlying is None and gateway is not None:
+        underlying = getattr(engine, "_underlying", None)
+    eval_symbol = underlying() if gateway is not None and underlying else symbol
+    # Greeks must key off the execution option contract, not the underlying
+    # eval symbol — otherwise option_delta is always None and translation
+    # refuses every entry with DATA_DEGRADED.
+    contract_symbol = symbol if gateway is not None else None
+
+    get_state = getattr(engine, "_get_state", None)
+    state_obj = get_state() if get_state is not None else getattr(engine, "state", None)
+    position = engine._get_position_manager().current_position or getattr(
+        state_obj, "position", None,
+    )
+
+    range_on, live_range_bars, live_minutes = engine._get_range_warmup()
+    amt_engine = engine._amt_engine
+    risk = engine._risk
+    return DecisionContextBuilder(greeks=engine._greeks).build(
+        bar=bar,
+        symbol=eval_symbol,
+        market=engine._market,
+        contract_expiry=engine._contract_expiry,
+        tick_size=engine._tick_size,
+        bar_index=_engine_value(engine, "_get_bar_index", "_bar_index"),
+        warm_bars=amt_engine.warm_bars,
+        cooldown_remaining_sec=cooldown_remaining_sec,
+        risk_state=risk.state() if risk else None,
+        amt_dto=amt_dto or amt_engine.last_amt_dto or {},
+        snapshot=getattr(amt_engine, "last_snapshot", None),
+        order_book=_engine_value(engine, "_get_last_depth", "_last_depth"),
+        position=position,
+        entry_bar_index=_engine_value(engine, "_get_entry_bar_index", "_entry_bar_index"),
+        recent_decisions=list(
+            _engine_value(engine, "_get_recent_decisions", "_recent_decisions")
+        ),
+        contract_symbol=contract_symbol,
+        range_bars_enabled=bool(range_on),
+        live_range_bars=int(live_range_bars),
+        live_minutes=float(live_minutes),
+    )

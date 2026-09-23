@@ -74,7 +74,10 @@ from quant.amt.dto import empty_amt_dto
 from quant.contracts.contracts import ContractRef
 from quant.contracts.value_objects import OrderBook, OrderBookLevel
 from quant.decision.decision_service import DecisionService
-from quant.decision.context_builder import DecisionContextBuilder
+from quant.decision.context_builder import (
+    DecisionContextBuilder,
+    build_engine_context,
+)
 from quant.hotpath import get_hotpath_tracer
 from quant.position_manager import PositionManager
 from quant.session_gates import (
@@ -884,6 +887,15 @@ class QuantEngine:
     # Private alias — tests/contract readers use the underscore form.
     _live_range_minutes = live_range_minutes
 
+    def _get_range_warmup(self) -> tuple[bool, int, float]:
+        """Range-mode warmup triple — one expression for build_engine_context
+        and the DecisionLoop/ExitManager ``get_range_warmup`` state wiring."""
+        return (
+            bool(self.range_bars_enabled),
+            int(self._live_range_bars),
+            float(self.live_range_minutes()),
+        )
+
     def _on_range_live_tick(self, tick) -> None:
         epoch = _tick_epoch_seconds(tick)
         if self._range_mode_started_at is None and epoch is not None:
@@ -969,11 +981,8 @@ class QuantEngine:
             ),
             "set_exposure_state": lambda v: setattr(self, "exposure_state", v),
             "set_entry_time_epoch": lambda v: setattr(self, "_entry_time_epoch", v),
-            "get_range_warmup": lambda: (
-                bool(self.range_bars_enabled),
-                int(self._live_range_bars),
-                float(self.live_range_minutes()),
-            ),
+            "get_state": lambda: self.state,
+            "get_range_warmup": self._get_range_warmup,
         }
         return DecisionLoop(
             config=config,
@@ -1025,6 +1034,7 @@ class QuantEngine:
             "get_underlying_amt_dto": lambda: self._underlying_amt_dto,
             "get_last_underlying_bar": lambda: self._last_underlying_bar,
             "get_option_amt_dto": lambda: self._option_amt_dto,
+            "get_range_warmup": self._get_range_warmup,
         }
         return ExitManager(
             config=config,
@@ -1232,33 +1242,9 @@ class QuantEngine:
         return self._decision_loop._entry_guards(bar)
 
     def _build_context(self, bar, amt_dto: dict, cooldown_remaining_sec: float):
-        """Single DecisionContext source shared by the flat-path ``_decide()``
-        and the positioned thesis-flip check — extracted, not duplicated."""
-        eval_symbol = self._underlying() if self._underlying_gateway is not None else self.symbol
-        contract_symbol = (
-            self.symbol if self._underlying_gateway is not None else None
-        )
-        pm = self._get_position_manager() if hasattr(self, "_get_position_manager") else None
-        active_pos = (pm.current_position if pm is not None else None) or self.state.position
-        snap = getattr(self._amt_engine, "last_snapshot", None)
-        return DecisionContextBuilder(greeks=self._greeks).build(
-            bar=bar,
-            symbol=eval_symbol,
-            market=self._market,
-            contract_expiry=self._contract_expiry,
-            tick_size=self._tick_size,
-            bar_index=self._bar_index,
-            warm_bars=self._amt_engine.warm_bars,
-            cooldown_remaining_sec=cooldown_remaining_sec,
-            risk_state=self._risk.state(),
-            amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
-            snapshot=snap,
-            order_book=self._last_depth,
-            position=active_pos,
-            entry_bar_index=self._entry_bar_index,
-            recent_decisions=list(self._recent_decisions),
-            contract_symbol=contract_symbol,
-        )
+        """Thin delegate to the single construction owner
+        (``build_engine_context``) shared with DecisionLoop and ExitManager."""
+        return build_engine_context(self, bar, amt_dto, cooldown_remaining_sec)
 
     def _check_thesis_flip(self, amt_dto: dict, bar) -> None:
         """Opposing-signal exit (thesis invalidation).

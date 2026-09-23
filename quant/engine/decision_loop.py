@@ -19,7 +19,10 @@ from typing import Any, Callable, Optional
 
 from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.decision.context import DecisionContext
-from quant.decision.context_builder import DecisionContextBuilder
+from quant.decision.context_builder import (
+    DecisionContextBuilder,
+    build_engine_context,
+)
 from quant.decision.decision_service import QuantDecision
 from quant.decision.signal_builder import Signal
 from quant.engine.submission_handler import SubmissionHandler
@@ -143,6 +146,7 @@ class DecisionLoop:
         self._get_startup_block = state.get("get_startup_block", lambda: False)
         self._set_exposure_state = state.get("set_exposure_state")
         self._set_entry_time_epoch = state.get("set_entry_time_epoch")
+        self._get_state = state.get("get_state", lambda: None)
         self._get_range_warmup = state.get(
             "get_range_warmup",
             lambda: (False, 0, 0.0),
@@ -487,48 +491,10 @@ class DecisionLoop:
     ) -> DecisionContext:
         """Build a DecisionContext from engine state.
 
-        Single DecisionContext source shared by the flat-path ``evaluate()``
-        and the positioned thesis-flip check.
+        Thin delegate to the single construction owner
+        (``build_engine_context``) shared with ExitManager and QuantEngine.
         """
-        eval_symbol = (
-            self._get_underlying_symbol()
-            if self._underlying_gateway is not None and self._get_underlying_symbol
-            else self._symbol
-        )
-        # Greeks must key off the execution option contract, not the underlying
-        # eval symbol — otherwise option_delta is always None and translation
-        # refuses every entry with DATA_DEGRADED.
-        contract_symbol = (
-            self._symbol
-            if self._underlying_gateway is not None
-            else None
-        )
-        pm = self._get_position_manager()
-        active_pos = pm.current_position
-        snap = getattr(self._amt_engine, "last_snapshot", None)
-        greeks = getattr(self, "_greeks", None)
-        range_on, live_range_bars, live_minutes = self._get_range_warmup()
-        return DecisionContextBuilder(greeks=greeks).build(
-            bar=bar,
-            symbol=eval_symbol,
-            market=self._market,
-            contract_expiry=self._contract_expiry,
-            tick_size=self._tick_size,
-            bar_index=self._get_bar_index(),
-            warm_bars=self._amt_engine.warm_bars,
-            cooldown_remaining_sec=cooldown_remaining_sec,
-            risk_state=self._risk.state(),
-            amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
-            snapshot=snap,
-            order_book=self._get_last_depth(),
-            position=active_pos,
-            entry_bar_index=self._get_entry_bar_index(),
-            recent_decisions=list(self._get_recent_decisions()),
-            contract_symbol=contract_symbol,
-            range_bars_enabled=bool(range_on),
-            live_range_bars=int(live_range_bars),
-            live_minutes=float(live_minutes),
-        )
+        return build_engine_context(self, bar, amt_dto, cooldown_remaining_sec)
 
     def _translate_signal_for_option(
         self,
