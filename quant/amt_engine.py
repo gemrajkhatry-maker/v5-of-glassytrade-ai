@@ -30,6 +30,21 @@ from quant.state import _epoch_to_iso, session_date_key
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# AMT analyze failure reporting (B-4a)
+# ---------------------------------------------------------------------------
+# quant may not import backend.app.core.metrics (test_no_layer_bypass gates
+# host imports), so failures count through this module-level counter — the
+# same pattern as quant.execution.exits.MODEL_RISK_FAILURES. Exposed for
+# tests and for any future composition-time reader; maps to the plan's
+# ``amt_failures_total``.
+AMT_FAILURES_TOTAL = 0
+
+# AMT_FAILING snapshot flag: set while the last analyze failure is younger
+# than this (plan: snapshot field AMT_FAILING when last failure <60s).
+AMT_FAILING = "AMT_FAILING"
+AMT_FAILING_WINDOW_SEC = 60.0
+
 
 # ---------------------------------------------------------------------------
 # History-seed startup backoff
@@ -181,7 +196,10 @@ class AMTEngine:
         from quant.execution.seed_scheduler import SeedStatus
         self._seed_status: SeedStatus = SeedStatus.NOT_STARTED
         self._gex: object | None = None
-        self._amt_fail_logged: bool = False
+        # Monotonic timestamp of the last analyze() exception (None = never).
+        # Drives the AMT_FAILING snapshot flag; failures themselves are
+        # counted in the module-level AMT_FAILURES_TOTAL.
+        self._amt_last_failure_at: float | None = None
 
     def set_gex(self, gex: object | None) -> None:
         """Update GEX snapshot for this symbol and sync the latest DTO."""
@@ -611,12 +629,14 @@ class AMTEngine:
                 cvd_source=self._cvd_source,
             )
         except Exception:
-            if not self._amt_fail_logged:
-                logger.warning(
-                    "AMT analyze failed for %s — keeping last good DTO",
-                    self.symbol, exc_info=True,
-                )
-                self._amt_fail_logged = True
+            global AMT_FAILURES_TOTAL
+            AMT_FAILURES_TOTAL += 1
+            self._amt_last_failure_at = time.monotonic()
+            logger.error(
+                "AMT analyze failed for %s — keeping last good DTO "
+                "(amt_failures_total=%d)",
+                self.symbol, AMT_FAILURES_TOTAL, exc_info=True,
+            )
             return self._last_amt_dto or {}
         snap = analysis_snapshot_from_result(result, asof_time=iso_now)
         dto = amt_result_to_dto(result)
@@ -626,6 +646,19 @@ class AMTEngine:
             self._last_amt_dto = dto
             self._last_underlying_close = float(ohlc.close)
         return dto
+
+    @property
+    def status_flags(self) -> tuple[str, ...]:
+        """Snapshot flags for health surfaces.
+
+        ``AMT_FAILING`` while the last analyze failure is <60s old — the
+        failure is always logged and counted; this flag makes the *recent*
+        window visible without reading the counter delta.
+        """
+        last = self._amt_last_failure_at
+        if last is not None and (time.monotonic() - last) < AMT_FAILING_WINDOW_SEC:
+            return (AMT_FAILING,)
+        return ()
 
     @property
     def warm_bars(self) -> int:
