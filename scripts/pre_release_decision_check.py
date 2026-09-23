@@ -201,16 +201,88 @@ def check_dead_market_enum():
 
 
 def check_data_quality_gate_reachable():
-    from quant.decision.decision_service import DecisionService
+    """DecisionLoop is the sole data-quality authority (v7 prune N3).
 
-    blocked = DecisionService().evaluate(_build_ctx({"dataQuality": "PRICE_DIRECTION_PROXY"}))
-    allowed = DecisionService().evaluate(
-        _build_ctx({"dataQuality": "TICK_EXACT", "marketState": "BALANCED"})
+    DecisionService intentionally no longer pre-gates quality (gates 1-4 are
+    quality-agnostic). Live OMS requires TICK_EXACT or PRICE_DIRECTION_PROXY;
+    other grades are blocked with PROXY_FLOW_BLOCKED before OMS submission.
+    """
+    import dataclasses  # noqa: F401
+
+    from quant.bars import Bar
+    from quant.decision.context import DecisionContext
+    from quant.decision.data_quality import DataQuality
+    from quant.decision.decision_service import QuantDecision
+    from quant.engine.decision_loop import DecisionLoop
+
+    class _LiveOMS:
+        is_live = True
+        lot_size = 1
+
+        def submit(self, signal, quantity):
+            raise AssertionError("must not submit when quality blocked")
+
+    class _Risk:
+        class _State:
+            trades_today = 0
+            halted = False
+            consecutive_losses = 0
+            consecutive_wins = 0
+            equity = 100000.0
+            risk_per_trade_pct = 0.01
+
+        def can_trade(self):
+            return True, ""
+
+        def state(self):
+            return self._State()
+
+        def position_size(self, *a, **k):
+            return 1
+
+    bar = Bar(time="2026-01-15T10:00:00+05:30", open=100, high=105, low=95, close=102, volume=1000)
+
+    def _ctx(quality):
+        return DecisionContext(
+            bar=bar, symbol="SYM", data_quality=quality, agent_probability=0.7,
+        )
+
+    def _loop():
+        from quant.decision.signal_builder import Signal
+
+        decision = QuantDecision(
+            True, Signal("LONG", "Triple-A", 100, 98, 106, 3, "Triple-A", "SYM", "t"),
+            "Triple-A", "", (), model_label="Triple-A",
+        )
+        strategy = type("S", (), {"should_enter": lambda self, ctx: decision})()
+        return DecisionLoop(
+            config={"symbol": "SYM", "market": "NSE", "cooldown_bars": 0, "live_mode": True},
+            deps={"risk": _Risk(), "oms": _LiveOMS(), "strategy": strategy,
+                  "amt_engine": type("A", (), {"warm_bars": 20, "interval_seconds": 300, "last_amt_dto": {}})(),
+                  "get_position_manager": lambda: None, "execution_enabled": True},
+            state={"get_bar_index": lambda: 10, "get_entry_bar_index": lambda: 0,
+                   "set_entry_bar_index": lambda v: None, "get_last_close_bar_index": lambda: -1,
+                   "get_latch": lambda: {}, "set_latch": lambda k, v: None,
+                   "clear_latch": lambda: None, "get_cert_records": lambda: [],
+                   "get_last_depth": lambda: None, "get_recent_decisions": lambda: [],
+                   "get_exposure_state": lambda: None},
+            emit=lambda e: None,
+        )
+
+    loop = _loop()
+    loop._build_context = lambda bar, amt_dto, cooldown: _ctx(DataQuality.CANDLE_DISTRIBUTED)
+    dec_candle = loop.evaluate({}, bar)
+    loop._build_context = lambda bar, amt_dto, cooldown: _ctx(DataQuality.TICK_EXACT)
+    dec_exact = loop.evaluate({}, bar)
+
+    blocked_ok = (
+        dec_candle.approved is False and dec_candle.reason == "PROXY_FLOW_BLOCKED"
     )
+    allowed_ok = dec_exact.reason != "PROXY_FLOW_BLOCKED"
     _add(
         "C. Decision behaviour", "inferred data quality blocks, exact quality does not",
-        blocked.reason == "DATA_QUALITY_BLOCKED" and allowed.reason != "DATA_QUALITY_BLOCKED",
-        f"inferred -> {blocked.reason}, exact -> {allowed.reason}",
+        blocked_ok and allowed_ok,
+        f"inferred -> {dec_candle.reason}, exact -> {dec_exact.reason}",
     )
 
 
@@ -272,18 +344,33 @@ def check_model_risk_failure_observable():
     log and an unused ``exc``.
     """
     src = _read("quant/execution/exits.py")
-    # Locate the swallow that wraps the model-exit call.
+    # TimesFM risk authority was removed (prune Task 2): exits are deterministic.
+    # Accept either (a) the old call site with an observable handler, or
+    # (b) no evaluate_exit call site at all (authority gone — nothing to swallow),
+    # as long as there is no bare swallow wrapping a model-exit block.
     idx = src.find("self._timesfm_risk.evaluate_exit(")
-    ok = False
-    detail = "evaluate_exit call site not found"
-    if idx > 0:
-        tail = src[idx:idx + 2500]
-        m = re.search(r"except Exception as exc:\s*\n\s*(#.*\n\s*)?pass", tail)
-        if m:
-            detail = "model-exit block swallowed with bare 'except Exception: pass'"
-        else:
-            # Acceptable: the handler logs (logger.*) or re-raises.
-            if re.search(r"except Exception[^\n]*:\s*\n\s*(#.*\n\s*)*(logger\.|raise)", tail):
+    if idx < 0 and "evaluate_exit(" not in src.replace("def evaluate(", ""):
+        # No model-exit authority call remains — D-2 swallow is gone with it.
+        # Still fail if a bare except-pass sits near model/timesfm exit code.
+        model_block = re.search(
+            r"(timesfm|model_risk|MODEL_RISK).*?except Exception as exc:\s*\n\s*(#.*\n\s*)?pass",
+            src,
+            re.S | re.I,
+        )
+        ok = model_block is None
+        detail = (
+            "model-exit authority removed; no bare model-risk swallow"
+            if ok else "bare except Exception: pass still wraps model-risk block"
+        )
+    else:
+        ok = False
+        detail = "evaluate_exit call site not found"
+        if idx > 0:
+            tail = src[idx:idx + 2500]
+            m = re.search(r"except Exception as exc:\s*\n\s*(#.*\n\s*)?pass", tail)
+            if m:
+                detail = "model-exit block swallowed with bare 'except Exception: pass'"
+            elif re.search(r"except Exception[^\n]*:\s*\n\s*(#.*\n\s*)*(logger\.|raise)", tail):
                 ok = True
                 detail = "model-risk failure is logged or re-raised"
             else:

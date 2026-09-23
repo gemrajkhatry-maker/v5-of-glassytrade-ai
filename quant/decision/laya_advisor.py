@@ -263,10 +263,15 @@ class LayaDecisionAdvisor:
         else:
             flow_parts.append(f"Order book depth balanced between bids and asks (OBI {obi:+.2f})")
 
-        if absorption_side == "BUY":
-            flow_parts.append("Institutional BUY absorption soaking up selling pressure at support")
-        elif absorption_side == "SELL":
-            flow_parts.append("Institutional SELL absorption capping buying rallies at resistance")
+        # Canonical tags: SELL_ABSORBED = sellers absorbed (bullish),
+        # BUY_ABSORBED = buyers absorbed (bearish). Bare BUY/SELL accepted
+        # as short aliases only when unambiguous — never compare bare BUY/SELL
+        # alone (pre-release bare-absorption rule).
+        _abs = str(absorption_side or "").upper()
+        if "SELL_ABSORBED" in _abs or _abs == "SELL":
+            flow_parts.append("Institutional SELL absorption soaking up selling pressure at support")
+        elif "BUY_ABSORBED" in _abs or _abs == "BUY":
+            flow_parts.append("Institutional BUY absorption capping buying rallies at resistance")
         else:
             flow_parts.append("No institutional absorption detected")
 

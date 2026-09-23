@@ -53,12 +53,36 @@ class _AMT:
 
 
 class _Broker:
-    def __init__(self):
-        self.submissions = []
+    """Live broker double: records submissions and fills at entry price.
 
-    def execute_order(self, *args, **kwargs):
-        self.submissions.append((args, kwargs))
-        raise AssertionError("live broker should not receive a proxy entry")
+    Blocked-quality tests assert submissions == [] before OMS runs; allowed
+    qualities (TICK_EXACT / PRICE_DIRECTION_PROXY) must reach the broker and
+    fill so DecisionLoop can approve.
+    """
+
+    def __init__(self, fill_price: float = 100.0, fill_qty: float = 1.0):
+        from decimal import Decimal
+
+        self.submissions = []
+        self._fill_price = fill_price
+        self._fill_qty = fill_qty
+        self._Decimal = Decimal
+
+    def execute_order(self, signal, portfolio, symbol, contract_ref=None):
+        from quant.contracts.entities import Position as BrokerPosition
+        from quant.contracts.enums import Side, SignalType, Source
+
+        self.submissions.append((signal, portfolio, symbol))
+        return BrokerPosition(
+            symbol=symbol,
+            side=Side.LONG if getattr(signal, "type", SignalType.BUY) in (SignalType.BUY, "BUY", "LONG") else Side.SHORT,
+            source=Source.AMT,
+            entry_price=self._Decimal(str(self._fill_price)),
+            size=self._Decimal(str(self._fill_qty)),
+            stop_loss=self._Decimal("0"),
+            take_profit=self._Decimal("0"),
+            entry_time="2026-01-15T10:00:00+05:30",
+        )
 
 
 class _RecordingPaperOMS(PaperOMS):
