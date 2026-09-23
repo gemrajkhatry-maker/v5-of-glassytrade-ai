@@ -4248,7 +4248,7 @@
       "phase": "",
       "model_label": "",
       "block_reasons": [
-        "TRIPLE_A_EDGE: Anti-Climax: LONG rejected at +6.1\u03c3 extension"
+        "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
       "signal_entry": null,
@@ -4262,7 +4262,7 @@
       "phase": "",
       "model_label": "",
       "block_reasons": [
-        "TRIPLE_A_EDGE: Anti-Climax: LONG rejected at +5.7\u03c3 extension"
+        "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
       "signal_entry": null,
@@ -4276,7 +4276,7 @@
       "phase": "",
       "model_label": "",
       "block_reasons": [
-        "TRIPLE_A_EDGE: Anti-Climax: LONG rejected at +6.2\u03c3 extension"
+        "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
       "signal_entry": null,
@@ -4290,7 +4290,7 @@
       "phase": "",
       "model_label": "",
       "block_reasons": [
-        "TRIPLE_A_EDGE: Anti-Climax: LONG rejected at +6.2\u03c3 extension"
+        "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
       "signal_entry": null,
@@ -4304,7 +4304,7 @@
       "phase": "",
       "model_label": "",
       "block_reasons": [
-        "TRIPLE_A_EDGE: Anti-Climax: LONG rejected at +6.1\u03c3 extension"
+        "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
       "signal_entry": null,
