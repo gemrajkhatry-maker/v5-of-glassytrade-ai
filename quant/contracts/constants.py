@@ -272,8 +272,9 @@ ATR_TRAIL_PERIOD: int = 14
 # Source: https://blog.pickmytrade.trade/fabio-valentini-pro-scalper-nasdaq-scalping-strategy/
 
 # Direction resolution (context_builder.py)
-FABIO_CVD_THRESHOLD_NSE: float = 0.5     # CVD slope threshold for NSE
-FABIO_CVD_THRESHOLD_MCX: float = 0.3     # CVD slope threshold for MCX
+# matches Gate-3 veto (gates_edge) + pipeline doc; was inverted
+FABIO_CVD_THRESHOLD_NSE: float = 0.3     # CVD slope threshold for NSE (tighter)
+FABIO_CVD_THRESHOLD_MCX: float = 0.5     # CVD slope threshold for MCX (looser)
 FABIO_OBI_THRESHOLD: float = 0.20        # Order Book Imbalance threshold
 FABIO_OFI_THRESHOLD: float = 0.10        # Order Flow Imbalance threshold
 

@@ -38,7 +38,7 @@ def test_decision_context_builder_propagates_market_and_direction():
     builder = DecisionContextBuilder()
     amt_dto_mcx = {
         "marketState": "BALANCED",
-        "cvdSlope": 0.35,  # > 0.3 in MCX triggers LONG direction
+        "cvdSlope": 0.35,  # 0.35 < MCX threshold 0.5 (looser) → no LONG
         "poc": 100.0,
         "valueAreaHigh": 102.0,
         "valueAreaLow": 98.0,
@@ -63,9 +63,11 @@ def test_decision_context_builder_propagates_market_and_direction():
         amt_dto=amt_dto_mcx,
     )
     assert ctx_mcx.market == "MCX"
-    assert ctx_mcx.agent_direction == "LONG"
+    # matches Gate-3 veto (gates_edge) + pipeline doc; was inverted:
+    # MCX is now the looser market (0.5), so 0.35 does not clear it.
+    assert ctx_mcx.agent_direction is None
 
-    # In NSE, cvdSlope 0.35 in BALANCED does not trigger LONG (needs > 0.5)
+    # In NSE, cvdSlope 0.35 in BALANCED triggers LONG (NSE tighter: needs > 0.3)
     amt_dto_nse = {
         "marketState": "BALANCED",
         "cvdSlope": 0.35,
@@ -86,7 +88,7 @@ def test_decision_context_builder_propagates_market_and_direction():
         amt_dto=amt_dto_nse,
     )
     assert ctx_nse.market == "NSE"
-    assert ctx_nse.agent_direction is None
+    assert ctx_nse.agent_direction == "LONG"
 
 
 def test_all_setup_paths_pass_gate3():

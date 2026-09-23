@@ -13,8 +13,10 @@ from quant.contracts.constants import (
 
 
 def test_cvd_thresholds_match_fabio():
-    assert FABIO_CVD_THRESHOLD_NSE == 0.5
-    assert FABIO_CVD_THRESHOLD_MCX == 0.3
+    # matches Gate-3 veto (gates_edge) + pipeline doc; was inverted
+    # (NSE tighter 0.3, MCX looser 0.5 — previously 0.5/0.3)
+    assert FABIO_CVD_THRESHOLD_NSE == 0.3
+    assert FABIO_CVD_THRESHOLD_MCX == 0.5
 
 
 def test_obi_threshold():
