@@ -75,12 +75,8 @@ class OptionSelectorConfig:
     min_oi_next_week: int = 500_000     # Stricter for next-week expiry
     min_volume: int = 50_000
     max_theta_ratio: float = 0.20       # theta cost < 20% of expected profit
-    # Exchange-authoritative current NSE series (Aug 2026). These defaults are
-    # fallbacks only — callers should pass the broker/config lot size.
-    nifty_lot_size: int = 65
-    banknifty_lot_size: int = 30
-    nifty_strike_interval: int = 50
-    banknifty_strike_interval: int = 100
+    # Lot size and strike interval are NOT knobs — InstrumentRegistry is the
+    # single source of truth; unknown roots fail loud (UnknownInstrumentError).
 
 
 # Derived from InstrumentRegistry — kept as names tests already import.
@@ -107,22 +103,12 @@ class OptionSelector:
     # -- helpers -------------------------------------------------------------
 
     def _strike_interval(self, underlying: str) -> int:
-        """Return the exchange-mandated strike interval for *underlying*."""
-        spec = DEFAULT_REGISTRY.try_resolve(underlying)
-        if spec is not None:
-            return int(spec.strike_interval)
-        if underlying.upper() == "BANKNIFTY":
-            return self.cfg.banknifty_strike_interval
-        return self.cfg.nifty_strike_interval
+        """Exchange-mandated strike interval from InstrumentRegistry (or raise)."""
+        return int(DEFAULT_REGISTRY.resolve(underlying).strike_interval)
 
     def _lot_size_for(self, underlying: str) -> int:
-        """Return the standard lot size for *underlying*."""
-        spec = DEFAULT_REGISTRY.try_resolve(underlying)
-        if spec is not None:
-            return spec.lot_size
-        if underlying.upper() == "BANKNIFTY":
-            return self.cfg.banknifty_lot_size
-        return self.cfg.nifty_lot_size
+        """Standard lot size from InstrumentRegistry (or raise)."""
+        return DEFAULT_REGISTRY.resolve(underlying).lot_size
 
     @staticmethod
     def _round_to_strike(price: float, interval: int) -> int:

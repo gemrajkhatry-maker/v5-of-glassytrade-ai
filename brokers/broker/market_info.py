@@ -28,12 +28,9 @@ except (ImportError, ModuleNotFoundError):
 # =============================================================================
 
 LOT_SIZES: Dict[str, int] = {
+    # Registry roots are the authority (InstrumentRegistry); this table only
+    # adds NON-registry extras (stocks + micros) for the unknown-root fallback.
     **{s.root: s.lot_size for s in DEFAULT_REGISTRY.specs()},
-    # --- Non-registry extras: display aliases + stocks + non-registry micros
-    "NIFTY 50": 65,
-    "NIFTY BANK": 30,
-    "NIFTY FIN SERVICE": 60,
-    "NIFTY MID SELECT": 120,
     "RELIANCE": 250,
     "TCS": 150,
     "INFY": 600,
@@ -62,39 +59,13 @@ LOT_SIZES: Dict[str, int] = {
 # STRIKE STEP SIZES
 # =============================================================================
 
-INDEX_STEP_SIZES: Dict[str, float] = {
-    "NIFTY": 50.0,
-    "NIFTY 50": 50.0,
-    "BANKNIFTY": 100.0,
-    "NIFTY BANK": 100.0,
-    "FINNIFTY": 50.0,
-    "NIFTY FIN SERVICE": 50.0,
-    "MIDCPNIFTY": 25.0,
-    "NIFTY MID SELECT": 25.0,
-    "SENSEX": 100.0,
-    "BANKEX": 100.0,
-}
-
-COMMODITY_STEP_SIZES: Dict[str, float] = {
-    "GOLD": 100.0,
-    "GOLDM": 50.0,
-    "GOLDPETAL": 5.0,
+# Registry roots derive from InstrumentRegistry; only non-registry extras are
+# listed here (normalize_symbol maps display aliases before this is consulted).
+STEP_SIZES: Dict[str, float] = {
+    **{s.root: float(s.strike_interval) for s in DEFAULT_REGISTRY.specs()},
     "GOLDGUINEA": 10.0,
-    "SILVER": 250.0,
-    "SILVERM": 250.0,
     "SILVERMIC": 10.0,
-    "CRUDEOIL": 50.0,
-    "CRUDEOILM": 50.0,
-    "NATURALGAS": 5.0,
-    "COPPER": 5.0,
-    "NICKEL": 10.0,
-    "ZINC": 2.5,
-    "LEAD": 1.0,
-    "ALUMINIUM": 1.0,
 }
-
-# Combined step sizes for quick lookup
-STEP_SIZES: Dict[str, float] = {**INDEX_STEP_SIZES, **COMMODITY_STEP_SIZES}
 
 
 # =============================================================================

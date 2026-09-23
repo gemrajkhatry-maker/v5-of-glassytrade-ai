@@ -256,6 +256,21 @@ def test_effective_delta_floor_is_unified():
     assert MIN_EFFECTIVE_DELTA == 0.30
 
 
+def test_selector_unknown_root_fails_loud_not_nifty_fallback():
+    """Registry-first: an unregistered root must raise, never silently
+    fall back to NIFTY lot/interval defaults (SSoT)."""
+    import pytest
+
+    from quant.amt.session.selector import OptionSelector
+    from quant.contracts.instrument_registry import UnknownInstrumentError
+
+    sel = OptionSelector()
+    with pytest.raises(UnknownInstrumentError):
+        sel._lot_size_for("NOT_A_REAL_ROOT")
+    with pytest.raises(UnknownInstrumentError):
+        sel._strike_interval("NOT_A_REAL_ROOT")
+
+
 def test_translate_uses_shared_delta_floor():
     """A delta below the floor must clamp to the shared floor,
     not the old translation-only 0.20 floor."""

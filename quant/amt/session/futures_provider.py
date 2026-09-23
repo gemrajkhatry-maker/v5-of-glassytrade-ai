@@ -64,14 +64,15 @@ def extract_option_date(symbol: str) -> tuple[str, str, str] | None:
 
 @dataclass(frozen=True)
 class InstrumentConfig:
-    """Per-instrument configuration loaded from instruments.json."""
+    """Per-instrument configuration loaded from instruments.json.
+
+    Lot/tick/strike are NOT carried here — InstrumentRegistry
+    (quant/contracts/instrument_registry.py) is the single source of truth.
+    """
 
     underlying_symbol: str
     underlying_segment: str
     options_segment: str
-    strike_step: int
-    lot_size: int
-    tick_size: float
     session_start: str
     session_end: str
     ib_window_minutes: int
@@ -127,9 +128,6 @@ class UnderlyingFuturesProvider:
                         underlying_symbol=cfg.get("underlying_symbol", f"{underlying}FUT"),
                         underlying_segment=cfg["underlying_segment"],
                         options_segment=cfg["options_segment"],
-                        strike_step=cfg.get("strike_step", 1),
-                        lot_size=cfg.get("lot_size", 1),
-                        tick_size=cfg.get("tick_size", 0.05),
                         session_start=cfg.get("session_start", "09:15"),
                         session_end=cfg.get("session_end", "15:30"),
                         ib_window_minutes=cfg.get("ib_window_minutes", 30),

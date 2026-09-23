@@ -26,9 +26,6 @@ def provider(tmp_path):
                 "underlying_symbol": "CRUDEOIL25APRFUT",
                 "underlying_segment": "MCX_COMM",
                 "options_segment": "MCX_COMM",
-                "strike_step": 50,
-                "lot_size": 100,
-                "tick_size": 1.0,
                 "session_start": "09:00",
                 "session_end": "23:30",
                 "ib_window_minutes": 30,
@@ -40,9 +37,6 @@ def provider(tmp_path):
                 "underlying_symbol": "NATURALGAS25APRFUT",
                 "underlying_segment": "MCX_COMM",
                 "options_segment": "MCX_COMM",
-                "strike_step": 5,
-                "lot_size": 1250,
-                "tick_size": 0.10,
                 "session_start": "09:00",
                 "session_end": "23:30",
                 "ib_window_minutes": 30,
@@ -56,9 +50,6 @@ def provider(tmp_path):
                 "underlying_symbol": "NIFTY25APRFUT",
                 "underlying_segment": "NSE_FNO",
                 "options_segment": "NSE_FNO",
-                "strike_step": 50,
-                "lot_size": 75,
-                "tick_size": 0.05,
                 "session_start": "09:15",
                 "session_end": "15:30",
                 "ib_window_minutes": 30,
@@ -109,9 +100,10 @@ class TestUnderlyingFuturesProvider:
     def test_get_config(self, provider):
         cfg = provider.get_config("CRUDEOIL", "MCX")
         assert cfg is not None
-        assert cfg.strike_step == 50
-        assert cfg.lot_size == 100
-        assert cfg.tick_size == 1.0
+        # lot/tick/strike deliberately absent — InstrumentRegistry is SSoT
+        assert not hasattr(cfg, "lot_size")
+        assert not hasattr(cfg, "tick_size")
+        assert not hasattr(cfg, "strike_step")
         assert cfg.big_order_filter_lots == 30
 
     def test_get_all_underlyings(self, provider):
