@@ -683,26 +683,14 @@ class AMTAnalyzer:
             # baseline instead of two divergent ones.
             avg_vol_20=baseline_vol,
         )
-        flow["avg_candle_vol"]
         obi = flow["obi"]
-        flow["toxicity"]
         norm_delta = flow["norm_delta"]
-        flow["footprint_confirmed"]
-        flow["cvd_confirmed"]
-        flow.get("cvd_divergence_type", "")
-        cvd_state = flow["cvd_state"]
-        flow["big_trade_confirmed"]
         absorption_detected = flow["absorption_detected"]
         absorption_side = flow["absorption_side"]
         absorption_range_ratio = flow["absorption_range_ratio"]
         absorption_vol_ratio = flow["absorption_vol_ratio"]
         ofi_result = flow["ofi_result"]
-        flow["ofi_aligned"]
-        flow["confluence_bonus"]
-        flow["volume_bubble_near"]
-        flow["agg_result"]
         aggression_score = flow["aggression_score"]
-        flow["has_aggression"]
         aggression_components = flow.get("aggression_components", {})
 
         # Profile shape classification (descriptive; does not override market state)

@@ -202,7 +202,6 @@ class ExitEngine:
         now_epoch: float = 0.0,
         bar_close: float | None = None,
         session_vwap: float = 0.0,
-        timesfm_forecast: object | None = None,
     ) -> ExitDecision:
         global MODEL_RISK_FAILURES
         from quant.execution.exit_checks import (

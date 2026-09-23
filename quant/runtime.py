@@ -111,7 +111,7 @@ from quant.execution.risk import SessionRisk
 from quant.contracts.timezones import IST
 from quant.persistence import Journal
 from quant.state import LiveQuoteCache, _decision_to_view
-from quant.bars import DEFAULT_INTERVAL_SEC, BIAS_INTERVAL_SEC
+from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.event_store import EventStore
 from quant.persistence_boundary import EventAppender, PersistenceHealth
 from quant.state_machine import EngineState
@@ -342,17 +342,6 @@ class QuantEngine:
         )
         self._micro_underlying_aggregator = (
             BarAggregator(interval_seconds=MICRO_SEC)
-            if (self._underlying_gateway is not None and interval_seconds > MICRO_SEC)
-            else None
-        )
-        # ponytail: 15-min bias layer coexists with the micro split on 5m macro (15m → 5m → 1m top-down)
-        self._bias_aggregator = (
-            BarAggregator(interval_seconds=BIAS_INTERVAL_SEC)
-            if interval_seconds > MICRO_SEC
-            else None
-        )
-        self._bias_underlying_aggregator = (
-            BarAggregator(interval_seconds=BIAS_INTERVAL_SEC)
             if (self._underlying_gateway is not None and interval_seconds > MICRO_SEC)
             else None
         )

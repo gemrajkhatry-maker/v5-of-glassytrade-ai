@@ -231,7 +231,6 @@ class ExitManager:
             pm = self._get_position_manager()
             current_pos = pm.current_position
             was_open = current_pos is not None
-            tfm_fc = self._fresh_forecast()
             try:
                 remaining = pm.manage_exit(
                     amt_dto=amt_dto,
@@ -240,7 +239,6 @@ class ExitManager:
                     bar_index=self._get_bar_index(),
                     entry_bar_index=self._get_entry_bar_index(),
                     entry_time_epoch=self._get_entry_time_epoch(),
-                    timesfm_forecast=tfm_fc,
                 )
             except Exception:
                 # C3: a broker/OMS failure while exiting must not kill the engine

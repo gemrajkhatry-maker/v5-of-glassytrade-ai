@@ -169,11 +169,8 @@ def test_tp_still_books_when_bar_does_not_breach_the_protective_stop():
 
 def test_authority_stop_wins_over_deterministic_candidate():
     """D-16: the deterministic trail could propose a looser stop than the
-    TimesFM authority had already ratcheted on the same bar."""
-    import numpy as np
-
+    authority had already ratcheted on the same bar."""
     from quant.decision.signal_builder import Signal
-    from quant.decision.timesfm_agents import TimesFMForecast
     from quant.execution.exits import ExitEngine
     from quant.execution.order import Order, Position
 
@@ -181,19 +178,12 @@ def test_authority_stop_wins_over_deterministic_candidate():
                  rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
     pos = Position(order=Order(sig, 10.0), open_price=100.0, open_time="t0", size=10.0)
 
-    p50 = np.linspace(100.0, 108.0, 32)
-    fc = TimesFMForecast(
-        horizon=32, p50_path=p50, p10_path=p50 - 1.0, p90_path=p50 + 1.0,
-        q_spread=2.0, mean_forecast=float(p50[-1]), pct_change=0.08,
-        forecast_steps=["LONG"] * 32, curr_price=100.0, lat_ms=1.0,
-    )
-
     eng = ExitEngine()
     eng.evaluate(pos, bar_close=106.0, bar_high=107.0, bar_low=105.0,
-                 bar_index=3, timesfm_forecast=fc)
+                 bar_index=3)
     after_authority = eng._trail[pos._id].stop
 
-    # A later bar with NO forecast must not loosen the authority's stop.
+    # A later looser bar must not loosen the authority's stop.
     eng.evaluate(pos, bar_close=104.0, bar_high=106.0, bar_low=103.0, bar_index=4)
     assert eng._trail[pos._id].stop >= after_authority
 

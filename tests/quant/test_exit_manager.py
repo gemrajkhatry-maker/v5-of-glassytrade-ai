@@ -375,21 +375,6 @@ class TestManageExit:
         # Position is kept open for retry
         assert result is original_pos
 
-    def test_passes_forecast_to_position_manager(self):
-        """TimesFM forecast is passed through to PositionManager.manage_exit."""
-        pm = FakePositionManager()
-        pm.current_position = FakePosition()
-        forecast = MagicMock()
-        mgr = _make_exit_manager(
-            position_manager=pm,
-            state_position=FakePosition(),
-            forecast_fn=lambda: forecast,
-        )
-
-        mgr.manage_exit({}, FakeBar())
-
-        assert pm.manage_exit_calls[0]["timesfm_forecast"] is forecast
-
     def test_triggers_thesis_flip_when_position_survives(self):
         """When position survives, thesis flip evaluation runs."""
         pm = FakePositionManager()

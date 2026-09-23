@@ -143,7 +143,6 @@ class PositionManager:
         bar_index: int,
         entry_bar_index: int,
         entry_time_epoch: float,
-        timesfm_forecast: object | None = None,
         snapshot=None,
     ):
         """Evaluate exit conditions for an open position.
@@ -218,7 +217,6 @@ class PositionManager:
                 now_epoch=now_epoch,
                 bar_close=bar.close,
                 session_vwap=session_vwap,
-                timesfm_forecast=timesfm_forecast,
                 snapshot=snapshot,
             )
 
