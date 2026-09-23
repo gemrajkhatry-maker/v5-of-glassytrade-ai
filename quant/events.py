@@ -228,9 +228,16 @@ class EventBus:
         for _, handler in self._handlers.get(type(event), ()):
             try:
                 handler(event)
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "EventBus handler %r failed for %s — continuing",
                     getattr(handler, "__name__", repr(handler)),
                     type(event).__name__,
                 )
+                # Bridge writes are health-relevant, not just log-worthy:
+                # the event store can hold a position SQLite never saw, and
+                # a restart would silently drop it. Latch DEGRADED_BRIDGE_WRITE
+                # (lazy import — events must not depend on subscribers at load).
+                if getattr(handler, "__module__", None) == "quant.persistence_bridge":
+                    from quant.persistence_boundary import PersistenceHealth
+                    PersistenceHealth.mark_bridge_write_failure(exc)
