@@ -105,6 +105,16 @@ class TickHandler:
         self._last_underlying_bar = None
         self._underlying_amt_dto = None
         self._option_amt_dto = None
+        # Decision deferral counters (B-4b): reason -> count
+        self._deferred_counts: dict[str, int] = {}
+
+    def _defer_decision(self, reason: str) -> None:
+        """Record a skipped decision evaluation (no behavior change)."""
+        self._deferred_counts[reason] = self._deferred_counts.get(reason, 0) + 1
+        logger.info(
+            "DecisionDeferred reason=%s symbol=%s",
+            reason, self.symbol,
+        )
 
     def _range_micro(self) -> bool:
         return getattr(self._micro_aggregator, "range_size", None) is not None
@@ -138,9 +148,11 @@ class TickHandler:
             getattr(self._macro_aggregator, "interval_seconds", 0) or 0
         )
         if dto_time is None or decision_time is None or macro_seconds <= 0:
+            self._defer_decision("STALE_DTO")
             return False
         age_seconds = (decision_time - dto_time).total_seconds()
         if age_seconds < 0 or age_seconds > macro_seconds:
+            self._defer_decision("STALE_DTO")
             return False
         self._decide(amt_dto, macro_bar, execution_bar)
         return True

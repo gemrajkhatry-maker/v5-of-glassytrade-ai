@@ -164,9 +164,19 @@ class DecisionLoop:
         # Debounce: tracks the bar index of the last rejection so repeated
         # blocked evaluations within 2 bars are suppressed.
         self._last_rejected_bar_index: int = -999
+        # Decision deferral counters (B-4b): reason -> count
+        self._deferred_counts: dict[str, int] = {}
 
         # --- Submission handler ---
         self._submission_handler = self._create_submission_handler()
+
+    def _defer_decision(self, reason: str) -> None:
+        """Record a blocked entry evaluation (no behavior change)."""
+        self._deferred_counts[reason] = self._deferred_counts.get(reason, 0) + 1
+        logger.info(
+            "DecisionDeferred reason=%s symbol=%s",
+            reason, self._symbol,
+        )
 
     def _create_submission_handler(self) -> SubmissionHandler:
         """Build a SubmissionHandler wired to this loop's state and dependencies."""
@@ -306,12 +316,14 @@ class DecisionLoop:
         """Debounce, risk-halt and post-trade cooldown gates.
 
         Returns ``(blocked, cooldown_remaining_sec)``; the halt and cooldown
-        branches emit their DecisionProduced, the debounce branch emits nothing.
+        branches emit their DecisionProduced, the debounce/startup/exposure
+        branches log DecisionDeferred and increment a deferral counter.
         """
         # Broker may hold partial exposure after a timeout/cancel race. Until
         # reconciled, this engine must stay flat and reject new entries.
         if self._get_startup_block():
             logger.error("[BLOCKED] %s: startup/storage/reconciliation health is unresolved", self._symbol)
+            self._defer_decision("STARTUP_BLOCK")
             return True, 0.0
         if self._get_exposure_state is not None:
             exposure = self._get_exposure_state()
@@ -320,11 +332,13 @@ class DecisionLoop:
                     "[BLOCKED] %s: broker exposure requires reconciliation (%s)",
                     self._symbol, exposure.status,
                 )
+                self._defer_decision("EXPOSURE_BLOCK")
                 return True, 0.0
 
         # Debounce repeated rejected entries to avoid log flood
         bar_index = self._get_bar_index()
         if (bar_index - self._last_rejected_bar_index) < 2:
+            self._defer_decision("DEBOUNCE")
             return True, 0.0
 
         # Guard 0: trade-count / risk halt check BEFORE building any context

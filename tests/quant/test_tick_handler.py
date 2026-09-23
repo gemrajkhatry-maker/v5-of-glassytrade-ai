@@ -1,5 +1,6 @@
 """Verify TickHandler extraction from runtime.py."""
 
+import logging
 from unittest.mock import MagicMock, Mock
 
 from quant.engine.tick_handler import TickHandler
@@ -204,6 +205,86 @@ class TestTickHandlerFuturesPath:
         handler.process_tick(tick)
 
         decide.assert_called_once_with(amt_dto, micro_bar, None)
+
+
+class TestDecideIfMacroFreshDeferred:
+    """DecisionDeferred observability for stale/unparseable AMT DTO (B-4b)."""
+
+    def _make_handler(self, amt_dto, micro_bar, *, macro_seconds=300):
+        micro_agg = MagicMock()
+        micro_agg.add_tick.return_value = micro_bar
+        amt_engine = MagicMock()
+        amt_engine.last_amt_dto = amt_dto
+        amt_engine.last_snapshot = None
+        macro_agg = MagicMock()
+        macro_agg.interval_seconds = macro_seconds
+        return TickHandler(
+            symbol="NIFTY24SEPFUT",
+            macro_aggregator=macro_agg,
+            micro_aggregator=micro_agg,
+            amt_engine=amt_engine,
+            state_getter=lambda: MagicMock(position=None),
+            manage_tick_exit_callback=MagicMock(),
+            decide_callback=MagicMock(),
+            on_bar_closed_callback=MagicMock(),
+            manage_exit_callback=MagicMock(),
+        )
+
+    def test_stale_dto_defers_with_logged_reason(self, caplog):
+        """A DTO older than one macro bar skips decide and logs DecisionDeferred."""
+        micro_bar = Mock()
+        micro_bar.time = "2026-09-16T10:10:00+05:30"
+        # DTO is 10 min old; macro interval is 5 min -> stale.
+        handler = self._make_handler({"time": "2026-09-16T10:00:00+05:30"}, micro_bar)
+
+        with caplog.at_level(logging.INFO, logger="quant.engine.tick_handler"):
+            result = handler._decide_if_macro_fresh(
+                {"time": "2026-09-16T10:00:00+05:30"}, Mock(), micro_bar
+            )
+
+        assert result is False
+        assert handler._decide.call_count == 0
+        deferred = [
+            r for r in caplog.records
+            if "DecisionDeferred" in r.message and "reason=STALE_DTO" in r.message
+        ]
+        assert deferred, "expected DecisionDeferred reason=STALE_DTO log"
+        assert handler._deferred_counts.get("STALE_DTO") == 1
+
+    def test_unparseable_dto_defers_with_logged_reason(self, caplog):
+        """A DTO with no usable time skips decide and logs DecisionDeferred."""
+        micro_bar = Mock()
+        micro_bar.time = "2026-09-16T10:01:00+05:30"
+        handler = self._make_handler({"time": "not-a-timestamp"}, micro_bar)
+
+        with caplog.at_level(logging.INFO, logger="quant.engine.tick_handler"):
+            result = handler._decide_if_macro_fresh(
+                {"time": "not-a-timestamp"}, Mock(), micro_bar
+            )
+
+        assert result is False
+        deferred = [
+            r for r in caplog.records
+            if "DecisionDeferred" in r.message and "reason=STALE_DTO" in r.message
+        ]
+        assert deferred, "expected DecisionDeferred reason=STALE_DTO log"
+        assert handler._deferred_counts.get("STALE_DTO") == 1
+
+    def test_fresh_dto_defers_nothing(self, caplog):
+        """Fresh DTO decides normally — no DecisionDeferred logged."""
+        micro_bar = Mock()
+        micro_bar.time = "2026-09-16T10:01:00+05:30"
+        handler = self._make_handler({"time": "2026-09-16T10:00:00+05:30"}, micro_bar)
+
+        with caplog.at_level(logging.INFO, logger="quant.engine.tick_handler"):
+            result = handler._decide_if_macro_fresh(
+                {"time": "2026-09-16T10:00:00+05:30"}, Mock(), micro_bar
+            )
+
+        assert result is True
+        assert handler._decide.call_count == 1
+        assert not [r for r in caplog.records if "DecisionDeferred" in r.message]
+        assert "STALE_DTO" not in handler._deferred_counts
 
 
 class TestTickHandlerPositioned:

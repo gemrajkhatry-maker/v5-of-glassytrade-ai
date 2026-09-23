@@ -13,6 +13,7 @@ Tests the DecisionLoop in isolation using mock dependencies. Covers:
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
@@ -355,6 +356,40 @@ class TestEntryGuards:
         result = loop.evaluate({}, bar)
 
         assert result is None  # debounced
+
+    def test_debounce_defers_with_logged_reason(self, caplog):
+        """Debounce block logs DecisionDeferred reason=DEBOUNCE and counts it."""
+        loop = make_decision_loop(bar_index=10)
+        loop._last_rejected_bar_index = 9
+        bar = FakeBar()
+
+        with caplog.at_level(logging.INFO, logger="quant.engine.decision_loop"):
+            result = loop.evaluate({}, bar)
+
+        assert result is None
+        deferred = [
+            r for r in caplog.records
+            if "DecisionDeferred" in r.message and "reason=DEBOUNCE" in r.message
+        ]
+        assert deferred, "expected DecisionDeferred reason=DEBOUNCE log"
+        assert loop._deferred_counts.get("DEBOUNCE") == 1
+
+    def test_startup_block_counts_as_deferral(self, caplog):
+        """Startup block already logs ERROR; it also counts as a deferral."""
+        loop = make_decision_loop()
+        loop._get_startup_block = lambda: True
+        bar = FakeBar()
+
+        with caplog.at_level(logging.INFO, logger="quant.engine.decision_loop"):
+            result = loop.evaluate({}, bar)
+
+        assert result is None
+        deferred = [
+            r for r in caplog.records
+            if "DecisionDeferred" in r.message and "reason=STARTUP_BLOCK" in r.message
+        ]
+        assert deferred, "expected DecisionDeferred reason=STARTUP_BLOCK log"
+        assert loop._deferred_counts.get("STARTUP_BLOCK") == 1
 
     def test_no_cooldown_when_no_prior_trade(self):
         """When last_close_bar_index is -1, cooldown is skipped."""
