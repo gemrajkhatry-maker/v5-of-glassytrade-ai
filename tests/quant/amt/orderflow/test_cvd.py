@@ -99,6 +99,55 @@ class TestCVDTracker:
         assert tracker._last_emitted_slope == emitted
 
 
+def _ema(values: list[float], period: int) -> float:
+    """Independent EMA reference: alpha = 2/(period+1), seeded at values[0]."""
+    if not values:
+        return 0.0
+    alpha = 2.0 / (period + 1)
+    ema = values[0]
+    for v in values[1:]:
+        ema = alpha * v + (1 - alpha) * ema
+    return ema
+
+
+class TestCVDSlopeEMA:
+    """Slope must be EMA3(CVD) − EMA9(CVD) per spec §6.2 (linreg removed)."""
+
+    def test_slope_equals_ema3_minus_ema9(self):
+        t = CVDTracker(slope_window=5)
+        for i in range(10):
+            t.update(_candle(100, delta=10, time=f"2025-01-01T12:{i:02d}:00+00:00"))
+        expected = _ema(t._history, 3) - _ema(t._history, 9)
+        assert t.state().slope == pytest.approx(expected)
+        assert expected > 0
+
+    def test_slope_is_not_linreg(self):
+        from quant.amt.compute import linreg_slope
+
+        t = CVDTracker(slope_window=5)
+        for i in range(10):
+            t.update(_candle(100, delta=10, time=f"2025-01-01T12:{i:02d}:00+00:00"))
+        linreg = linreg_slope(list(t._history))
+        assert t.state().slope != pytest.approx(linreg, rel=1e-3)
+
+    def test_sign_persistence_applies_to_ema_slope(self):
+        t = CVDTracker(slope_window=5)
+        for i in range(10):
+            t.update(_candle(100, delta=10, time=f"2025-01-01T12:{i:02d}:00+00:00"))
+        before = t.state().slope
+        assert before > 0
+
+        # One sharp reversal flips the raw sign, but it is not yet persistent.
+        t.update(_candle(100, delta=-500, time="2025-01-01T12:10:00+00:00"))
+        assert t._slope_sign_history[-1] == -1
+        assert t.state().slope == pytest.approx(before)
+
+        # After CVD_SLOPE_PERSISTENCE_BARS consecutive negative signs, emit flips.
+        for i in range(2):
+            t.update(_candle(100, delta=-500, time=f"2025-01-01T12:{11 + i:02d}:00+00:00"))
+        assert t.state().slope < 0
+
+
 class TestCVDSessionReset:
     def test_cvd_accumulates_within_session(self):
         tracker = CVDTracker()

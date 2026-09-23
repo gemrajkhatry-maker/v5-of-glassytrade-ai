@@ -1,10 +1,10 @@
 """CVD Tracker — Cumulative Volume Delta tracking with slope & divergence.
 
-Tracks running CVD across candles, computes its linear-regression slope,
-and detects price-vs-CVD divergence (absorption signals).
+Tracks running CVD across candles, computes its slope as EMA3(CVD) − EMA9(CVD)
+(spec §6.2; linear-regression slope removed), and detects price-vs-CVD
+divergence (absorption signals).
 
 Enhanced with:
-- Extended slope window (40 candles) for session-leg scale
 - Sign persistence filter to prevent rapid slope flipping
 """
 
@@ -21,6 +21,17 @@ from quant.contracts.timezones import epoch_to_iso
 # ---------------------------------------------------------------------------
 # Value Objects
 # ---------------------------------------------------------------------------
+
+
+def _ema(values: list[float], period: int) -> float:
+    """EMA over ``values`` with alpha = 2/(period+1), seeded at values[0]."""
+    if not values:
+        return 0.0
+    alpha = 2.0 / (period + 1)
+    ema = values[0]
+    for v in values[1:]:
+        ema = alpha * v + (1 - alpha) * ema
+    return ema
 
 
 def direction_of_signed(value: float | None, *, epsilon: float = 0.0) -> str | None:
@@ -54,7 +65,7 @@ class CVDState:
     """Snapshot of the CVD tracker at a point in time."""
 
     value: float  # Current cumulative delta
-    slope: float  # Linear-regression slope over window
+    slope: float  # EMA3(CVD) − EMA9(CVD) with sign persistence
     has_divergence: bool  # Price vs CVD divergence detected?
     divergence_type: str  # "BULLISH_DIV" | "BEARISH_DIV" | "NONE"
     z_score: float = 0.0  # Z-score of divergence strength
@@ -166,19 +177,19 @@ class CVDTracker:
     # -- internals -----------------------------------------------------------
 
     def _compute_slope(self, *, advance_persistence: bool = False) -> float:
-        """Linear-regression slope of recent CVD values with sign persistence filter.
+        """EMA3(CVD) − EMA9(CVD) with sign persistence filter.
 
-        The raw slope is computed over the extended window (40 candles).
-        The emitted slope only changes sign after the new sign persists for
-        CVD_SLOPE_PERSISTENCE_BARS consecutive bars. This prevents rapid
-        flipping like +33k → +5k → -3k → -7k. Persistence advances only
-        when explicitly requested by ``update()``.
+        The raw slope is the difference of a 3-period and 9-period EMA over
+        the CVD history (spec §6.2). The emitted slope only changes sign after
+        the new sign persists for CVD_SLOPE_PERSISTENCE_BARS consecutive bars.
+        This prevents rapid flipping like +33k → +5k → -3k → -7k. Persistence
+        advances only when explicitly requested by ``update()``.
         """
-        window = self._history[-self._slope_window :]
-        if len(window) < 3:
+        history = list(self._history)
+        if len(history) < 3:
             return 0.0
 
-        raw_slope = mc.linreg_slope(window)
+        raw_slope = _ema(history, 3) - _ema(history, 9)
 
         # Track sign: +1 for positive, -1 for negative, 0 for near-zero
         if raw_slope > 0.01:
