@@ -33,7 +33,7 @@ The restart flow is:
    - Sets `pm.current_position = position` (execution book)
    - Sets `self.state = self.state.with_position(_position_to_state(position))` (event-sourced state)
    - Appends a synthetic `PositionOpened` event to the `EventStore`
-4. Later, `engine.startup_reconcile()` (runtime.py:1810-1855) folds the EventStore and rebuilds `self.state` from scratch.
+4. Later, `engine.startup_reconcile()` (runtime.py:1810-1855) folds the EventStore and rebuilds `self.state` from scratch. The fold sees the baseline seed written in step 2; the JSONL journal is write-only and is not replayed — if the fold is empty, the restored pm book wins.
 
 The divergence scenarios:
 

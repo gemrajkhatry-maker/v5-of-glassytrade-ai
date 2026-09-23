@@ -10,9 +10,12 @@ Role map (DB vs journal vs broker):
 - DB-vs-broker (crash recovery): owned by backend ``StartupReconciliation``,
   which loads DB rows + broker rows, calls :func:`reconcile_sets`, and
   performs deletes ONLY under explicit ``DELETE_STALE`` opt-in.
-- Journal replay (restart rebuild): owned by
-  ``QuantEngine.startup_reconcile`` — a fold, not a compare; has no broker
-  role and stays local.
+- Restart rebuild (positions): owned by the coordinator loading SQLite
+  open-position rows into ``QuantEngine.restore_position`` (baseline
+  ``PositionOpened`` seed), then ``QuantEngine.startup_reconcile`` folds
+  that seeded EventStore (execution book wins if the fold is empty). A fold,
+  not a compare; no broker role. The JSONL journal is write-only durability
+  audit — never replayed into the store on restart.
 - Broker-vs-engine book (intraday drift): owned by
   ``QuantCoordinator._intraday_reconcile`` — detect-and-alert only; shares
   :func:`canonical_key`/:func:`partition_keys` from this module.

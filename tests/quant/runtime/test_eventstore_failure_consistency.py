@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from quant.bars import Bar
 from quant.events import BarClosed, PositionClosed, PositionOpened
-from quant.events import PositionReduced
+from quant.events import PositionReduced, StopMoved
 from quant.execution.order import Order, Position
 from quant.decision.signal_builder import Signal
 from quant.runtime import QuantEngine
@@ -81,6 +81,43 @@ def test_failed_append_keeps_non_lifecycle_operational_state(monkeypatch):
 
     assert engine.state.last_bar.time == "t1"
     assert engine.event_store.fold().last_bar is None
+
+
+def test_stop_moved_is_appended_before_bus_publish(monkeypatch):
+    """B-5: StopMoved must be durable before observers see it (append→publish)."""
+    engine = _engine(monkeypatch)
+    observed: list[str] = []
+    order: list[str] = []
+    engine._bus.subscribe(StopMoved, lambda _e: (order.append("publish"), observed.append("pub")))
+    real_append = engine.event_store.append
+
+    def tracking_append(event):
+        order.append("append")
+        return real_append(event)
+
+    monkeypatch.setattr(engine.event_store, "append", tracking_append)
+
+    engine._emit(StopMoved(symbol="NIFTY", time="t1", old_sl=99.0, new_sl=100.5,
+                           reason="TRAIL_RATCHET", position_id="p-1"))
+
+    assert observed == ["pub"], "StopMoved never published"
+    assert order == ["append", "publish"], (
+        f"StopMoved must append before publish, got {order}"
+    )
+
+
+def test_failed_stop_moved_append_is_not_published(monkeypatch):
+    """A StopMoved that never hit the store must not reach bus/journal."""
+    engine = _engine(monkeypatch)
+    observed = []
+    engine._bus.subscribe(StopMoved, observed.append)
+    monkeypatch.setattr(engine.event_store, "append", lambda _event: (_ for _ in ()).throw(OSError("disk full")))
+
+    engine._emit(StopMoved(symbol="NIFTY", time="t1", old_sl=99.0, new_sl=100.5,
+                           reason="TRAIL_RATCHET", position_id="p-1"))
+
+    assert observed == []
+    assert engine.event_store.fold().position is None
 
 
 def test_unmatched_reduction_emits_structured_replay_diagnostic(caplog):

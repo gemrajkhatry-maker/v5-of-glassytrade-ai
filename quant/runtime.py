@@ -1335,14 +1335,18 @@ class QuantEngine:
     def _emit(self, event: Event) -> None:
         """Publish to the bus, append to the trace, fold into the projector.
 
-        Journal persistence is handled by a low-priority bus subscriber
-        (set up in __init__) so JSON serialization stays off the hot path.
+        Journal (JSONL) persistence is handled by a low-priority bus
+        subscriber (set up in __init__) so JSON serialization stays off the
+        hot path; the journal is write-only durability audit.
 
         Guarded by a lock so concurrent emitters (depth updates) never race
         the engine thread's own emits.
 
         Event sourcing: every emitted event is appended to the EventStore
         (the source of truth) and folded into the cached EngineState.
+        Lifecycle events (PositionOpened/Reduced/Closed) and StopMoved are
+        append-before-publish: bus/journal subscribers only see them after a
+        durable append. Other telemetry/market events publish first.
 
         Timestamp contract: the EventStore rejects empty event times (audit
         integrity), so an event constructed without a time inherits the last
@@ -1376,7 +1380,12 @@ class QuantEngine:
                 else:
                     self._recent_decisions[-1] = entry
             lifecycle_event = isinstance(event, (PositionOpened, PositionReduced, PositionClosed))
-            if not lifecycle_event:
+            # StopMoved is durable-gated like lifecycle events: append first,
+            # publish only after a durable append (stop-move audit must not
+            # precede the store). Other telemetry/market events stay
+            # publish-before-append for low-latency observability.
+            durable_gated = lifecycle_event or isinstance(event, StopMoved)
+            if not durable_gated:
                 self._bus.publish(event)
                 self._trace.append(event)
             # Track latest event-derived values for the WS snapshot
@@ -1390,9 +1399,9 @@ class QuantEngine:
                 self._latest_depth = event.depth
             # Event sourcing: append to EventStore and fold into state.
             # Contained: a sourcing failure (disk I/O, corrupt payload, clock
-            # skew) must never kill the caller mid-bookkeeping — the journal
-            # and storage bridge already received the event via the bus, and
-            # the reconcile layer re-syncs event-sourced drift on startup.
+            # skew) must never kill the caller mid-bookkeeping. Eager-publish
+            # events already reached the bus/journal; durable-gated events
+            # (lifecycle, StopMoved) are held back until append succeeds.
             append_sequence = self.event_appender.append(event)
             append_failed = append_sequence is None
             if append_failed:
@@ -1417,23 +1426,26 @@ class QuantEngine:
                     "re-syncs on startup)",
                     self.symbol, type(event).__name__,
                 )
-            if not append_failed or not lifecycle_event:
-                # Lifecycle state is canonical only after durable append. Other
-                # telemetry/market events may still update the operational cache.
+            if not append_failed or not durable_gated:
+                # Lifecycle/StopMoved state is canonical only after durable
+                # append. Other telemetry/market events may still update the
+                # operational cache.
                 self.state = apply_event(self.state, event)
             if lifecycle_event:
                 # Always adopt the execution-book cache from the lifecycle
-                # event. On a durable append this is the journal rebuild; on
-                # append failure the OMS fill still happened and must not be
-                # orphaned (reconciliation_required is already latched above).
+                # event. On a durable append this is the post-append book
+                # adopt; on append failure the OMS fill still happened and
+                # must not be orphaned (reconciliation_required is already
+                # latched above).
                 self._adopt_position_cache_from_journal(event)
-            if lifecycle_event and not append_failed:
+            if durable_gated and not append_failed:
                 self._bus.publish(event)
                 self._trace.append(event)
+            if lifecycle_event and not append_failed:
                 self.persist_kernel_state()
 
     def _adopt_position_cache_from_journal(self, event: Event) -> None:
-        """Rebuild ``pm.current_position`` from the lifecycle journal event.
+        """Rebuild ``pm.current_position`` from the lifecycle store event.
 
         OMS fill paths emit PositionOpened/Reduced/Closed; this is the only
         writer that adopts the execution-book cache from those events so the
@@ -1465,11 +1477,14 @@ class QuantEngine:
         return underlying
 
     def startup_reconcile(self) -> None:
-        """Rebuild state from event store on startup.
+        """Rebuild state from the EventStore after a process restart.
 
-        Replays all events in the event store to reconstruct the canonical
-        EngineState. Called once before trading resumes after a restart.
-        Verifies checksum chain integrity to detect tampering.
+        Cross-restart position rebuild is SQLite-row first: the coordinator
+        loads open-position rows and calls ``restore_position()`` (baseline
+        ``PositionOpened`` seed). This method then verifies the checksum
+        chain and folds the EventStore; if the fold is empty but the
+        execution book holds a restored position, the book wins. The JSONL
+        journal is write-only durability audit and is NOT replayed here.
         """
         # Verify checksum chain integrity (tamper detection)
         if not self.event_store.verify_chain():
@@ -1485,7 +1500,7 @@ class QuantEngine:
             # Restored-book baseline (process restart): restore_position()
             # seeds the EventStore with a baseline PositionOpened event, so
             # the fold normally yields a position. This branch fires only
-            # when the fold still yields no position (e.g., journal pruned,
+            # when the fold still yields no position (e.g., EventStore pruned,
             # seed event absent, or the store is genuinely empty). Adopting
             # the PositionManager's book keeps the run-loop position gates
             # (tick/bar exits, entry blocking) consistent with execution.

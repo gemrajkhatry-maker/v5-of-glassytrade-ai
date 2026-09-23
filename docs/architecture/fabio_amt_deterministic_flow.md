@@ -155,9 +155,12 @@ DecisionService.evaluate(ctx)
 
 ### Restart & Recovery
 
+0. Coordinator loads SQLite open-position rows → `row_to_position(row)` → `restore_position(...)` (cross-restart durable source; JSONL journal is write-only and not replayed).
 1. `restore_position(position)` — Seeds `EventStore` with a baseline `PositionOpened` event and rehydrates `PositionManager`.
-2. `startup_reconcile()` — Verifies checksum chain, folds `EventStore`, reconciles against `PositionManager` book.
+2. `startup_reconcile()` — Verifies checksum chain, folds `EventStore`, reconciles against `PositionManager` book (book wins if fold empty).
 3. `periodic_reconcile()` — Compares cached `EngineState` against fresh fold; detects drift.
+
+Covering tests: `tests/quant/persistence/test_restart_contract.py::test_restart_restores_position_from_sqlite_row_then_startup_reconcile`, `tests/quant/test_partial_fold_reconcile.py::TestStartupReconcileRestore`.
 
 ## 6. Responsibility Ownership Map
 

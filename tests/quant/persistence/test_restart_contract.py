@@ -1,4 +1,14 @@
-"""Stage 6 contract: kernel + exit cursor survive save/restore."""
+"""Stage 6 contract: kernel + exit cursor survive save/restore.
+
+Also pins the cross-restart position rebuild path (B-5 honesty): SQLite
+open-position rows → ``row_to_position`` → ``restore_position`` (baseline
+seed) → ``startup_reconcile`` fold. The JSONL journal is write-only and is
+NOT replayed into the EventStore. Related coverage (cite in docs):
+- ``tests/quant/test_partial_fold_reconcile.py::TestStartupReconcileRestore``
+- ``tests/quant/runtime/test_restore_open_risk.py``
+- ``tests/quant/test_audit_regressions.py::test_restore_position_sets_engine_book``
+- ``tests/quant/contracts/test_order_domain.py`` (row ↔ Position roundtrip)
+"""
 
 from __future__ import annotations
 
@@ -9,7 +19,7 @@ from quant.amt.session_kernel import SessionKernel
 from quant.decision.signal_builder import Signal
 from quant.events import PositionOpened, PositionReduced
 from quant.execution.exits import ExitEngine
-from quant.execution.order import Fill, Order, Position
+from quant.execution.order import Fill, Order, Position, row_to_position
 from quant.contracts.value_objects import OHLC
 from quant.state_machine import EngineState
 from quant.transitions import apply_event
@@ -102,6 +112,54 @@ def test_cvd_tracker_roundtrip_alone():
     t2.import_state(data)
     assert t2.value == t.value
     assert t2.state().slope == t.state().slope
+
+
+def test_restart_restores_position_from_sqlite_row_then_startup_reconcile():
+    """End-to-end restart rebuild from a durable SQLite row (no journal replay).
+
+    Simulates the coordinator spawn path: an open-position row loaded from
+    storage is converted, restored (which seeds the EventStore baseline),
+    then startup_reconcile folds — the book and state must agree.
+    """
+    from quant.runtime import QuantEngine
+    from tests.helpers.synthetic import SyntheticGateway
+
+    row = {
+        "id": "row-1",
+        "symbol": "NIFTY",
+        "side": "LONG",
+        "entry_price": 100.0,
+        "size": 4.0,
+        "quantity": 4.0,
+        "stop_loss": 99.0,
+        "take_profit": 120.0,
+        "entry": 100.0,
+        "reason": "t",
+        "rr": 2.0,
+        "type": "LONG",
+        "model_label": "Triple-A",
+        "opened_at": "2026-01-01T10:00:00+05:30",
+        "timestamp": "2026-01-01T10:00:00+05:30",
+        "breakeven": 100.0,
+        "trail_stop": 100.5,
+        "tp_tier": 1,
+    }
+    position = row_to_position(row)
+    assert position._id == "row-1"
+
+    eng = QuantEngine(SyntheticGateway([]), "NIFTY", interval_seconds=60)
+    eng.restore_position(position, stop_meta=row)
+    eng.startup_reconcile()
+
+    pm = eng._get_position_manager()
+    assert pm.current_position is not None
+    assert pm.current_position._id == "row-1"
+    assert eng.state.position is not None
+    assert eng.state.position.id == "row-1"
+    assert abs(float(eng.state.position.size) - 4.0) < 1e-9
+    folded = eng.event_store.fold()
+    assert folded.position is not None
+    assert folded.position.id == "row-1"
 
 
 def test_pm_cache_matches_fold_after_lifecycle_events():

@@ -19,6 +19,20 @@ Live OMS capability requires `TICK_EXACT` evidence; paper/replay marks
 `tests/quant/decision/test_single_data_quality_authority.py` before proposing
 changes.
 
+## Persistence / restart rebuild (honesty)
+
+Cross-restart positions rebuild from **SQLite open-position rows**:
+`row_to_position` → `restore_position` (baseline `PositionOpened` seed) →
+`startup_reconcile` fold (execution book wins if the fold is empty). The
+JSONL `Journal` is **write-only** durability audit — it is never replayed
+into the EventStore or decisions. There is no cross-restart journal-replay
+engine. Lifecycle events and `StopMoved` are append-before-publish in
+`QuantEngine._emit`. Covering tests:
+`tests/quant/persistence/test_restart_contract.py`,
+`tests/quant/test_partial_fold_reconcile.py::TestStartupReconcileRestore`,
+`tests/quant/runtime/test_restore_open_risk.py`.
+See `../architecture/fabio_amt_deterministic_flow.md` §5.
+
 ## Execution graphs (parallel agent work)
 
 - [`../architecture/2026-09-21-v7-prune-execution-plan.md`](../architecture/2026-09-21-v7-prune-execution-plan.md)

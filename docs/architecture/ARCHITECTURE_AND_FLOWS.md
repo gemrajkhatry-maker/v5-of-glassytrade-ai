@@ -33,7 +33,7 @@ GlassyTrade AI is a high-frequency, low-latency algorithmic trading platform bui
 The platform solves three historic problems in retail/semi-institutional automated trading:
 1. **Deterministic Execution:** The trading hot-path is 100% deterministic, single-threaded per instrument, and zero-allocation where possible. It runs without dependency on network AI models or external blocking I/O.
 2. **Auction Market Theory (AMT) Structural Edge:** Rather than relying on lagging indicators (RSI, MACD), entries and exits are governed by institutional volume distribution (Volume Profile, VPOC, 70% Value Area, Session VWAP with +/-1/2 Standard Deviations, Initial Balance ranges, and Order Flow Delta/Absorption).
-3. **Event-Sourced Truth:** The system state is never mutated in place. All transitions are append-only events (`BarClosed`, `SignalApproved`, `OrderFilled`, `PositionOpened`, `PositionClosed`), mathematically verified via a SHA-256 hash chain and replayable from inception.
+3. **Event-Sourced Truth:** The system state is never mutated in place. All transitions are append-only events (`BarClosed`, `SignalApproved`, `OrderFilled`, `PositionOpened`, `PositionClosed`), verified via a SHA-256 hash chain. Within a process, state is derived by `EventStore.fold()`. Across a process restart, open positions rebuild from **SQLite open-position rows** (`restore_position` baseline seed → `startup_reconcile` fold) — the JSONL journal is write-only durability audit and is **not** replayed into the store.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
@@ -97,7 +97,7 @@ These nodes exhibit the highest degree and betweenness centrality, acting as the
 
 | Rank | Node Label | Edges | Primary Source File | Architectural Responsibility |
 |:---:|:---|:---:|:---|:---|
-| 1 | `EventStore` | **359** | [`quant/event_store.py:L247`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/event_store.py#L247) | Append-only event log. Single source of truth for engine state; every state mutation is derived via `fold()`. |
+| 1 | `EventStore` | **359** | [`quant/event_store.py:L247`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/event_store.py#L247) | Append-only event log. In-process source of truth; state derived via `fold()`. Cross-restart positions come from SQLite rows + baseline seed, not journal replay. |
 | 2 | `Bar` | **344** | [`quant/bars.py:L11`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/bars.py#L11) | Immutable price/volume candle carrier feeding Volume Profile, VWAP, and decision gates. |
 | 3 | `QuantEngine` | **324** | [`quant/runtime.py:L252`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/runtime.py#L252) | Single-threaded per-symbol orchestrator consuming ticks, computing AMT, and managing order state machines. |
 | 4 | `PositionOpened`| **299** | [`quant/events.py:L138`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/events.py#L138) | Primary lifecycle event recording entry price, quantity, initial stop, target tiers, and execution source. |
@@ -528,10 +528,10 @@ GlassyTrade AI uses an event-sourced architecture. State is never updated by dir
 ```
 
 ### Event Flow Invariants:
-1. **Append-Only Immutability:** Events once written to `EventStore` are permanent. Each event contains an incrementing `sequence`, a UTC timestamp, and the SHA-256 hash of the preceding event.
-2. **Deterministic Replay (`fold`):** At any time, `EventStore.fold(initial_state)` can reconstruct the exact state of any symbol by reapplying all logged events through `apply_event()`.
+1. **Append-Only Immutability:** Events once written to `EventStore` are permanent. Each event contains an incrementing `sequence`, a UTC timestamp, and the SHA-256 hash of the preceding event. Lifecycle events and `StopMoved` are **append-before-publish**; other telemetry publishes first.
+2. **Deterministic Replay (`fold`):** Within a running process, `EventStore.fold()` reconstructs state by reapplying all logged events through `apply_event()`. Across a **process restart**, the store starts empty until `restore_position()` seeds a baseline `PositionOpened` from the durable SQLite open-position row; `startup_reconcile()` then folds that seeded store (execution book wins if the fold is empty). There is **no cross-restart journal-replay rebuild** — the JSONL journal is never read back into decisions or state.
 3. **Projection Decoupling:** `project_state(EngineState)` projects the domain state into a read-only `ViewState`. The presentation layer never touches internal domain entities directly.
-4. **Structured Journaling:** Every trade, signal rejection, and stop adjustment is logged to disk in JSONL format via [`Journal`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/persistence.py#L11), providing an audit ledger for compliance and backtesting verification.
+4. **Structured Journaling:** Every trade, signal rejection, and stop adjustment is logged to disk in JSONL format via [`Journal`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/persistence.py#L11) — a **write-only** durability/audit ledger for compliance and offline analysis; it is not a rebuild source. Restart restore coverage: `tests/quant/persistence/test_restart_contract.py::test_restart_restores_position_from_sqlite_row_then_startup_reconcile` (plus `tests/quant/test_partial_fold_reconcile.py::TestStartupReconcileRestore`, `tests/quant/runtime/test_restore_open_risk.py`).
 
 ---
 
@@ -558,6 +558,10 @@ When the application boots via [`backend/app/main.py`](file:///Users/apple/Docum
     - Match: Position restored to engine memory.
     - DB position missing at broker: Stale position removed from DB.
     - Broker position missing in DB: Orphaned position quarantined.
+  • Per matched row: engine.restore_position(row_to_position(row)) seeds
+    the EventStore with a baseline PositionOpened; startup_reconcile()
+    folds that seeded store (book wins if fold empty). JSONL journal is
+    NOT replayed.
   • Generates cryptographic startup-contract SHA-256 fingerprint.
 
 [Phase 4: QuantCoordinator Engine Spawning]
