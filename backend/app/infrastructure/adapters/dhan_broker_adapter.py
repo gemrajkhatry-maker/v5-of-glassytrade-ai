@@ -251,21 +251,27 @@ class DhanBrokerAdapter(IBroker):
                 except Exception:
                     # The order may still be live at the broker: CANCELLED would
                     # be a lie, and a later fill would be untracked exposure.
-                    # Persist the honest terminal state; reconciliation (C4/B3)
-                    # treats UNKNOWN as reconcile-required, and the executing
-                    # guard keeps this signal from re-submitting blind.
+                    # With a durable ledger wired, persist the honest terminal
+                    # state: reconciliation (C4/B3) treats UNKNOWN as
+                    # reconcile-required, the executing guard keeps this signal
+                    # from re-submitting blind, and restart reconciliation picks
+                    # the row up. Without a ledger there is nowhere durable to
+                    # record the truth — raise so the engine cannot classify
+                    # this as a clean rejection.
                     logger.warning(
                         "Order %s: cancel request failed after timeout — outcome UNKNOWN",
                         placed_order_id,
                     )
                     self._persist_order_terminal(
-                        signal, "RECONCILIATION_REQUIRED", broker_order_id=placed_order_id
+                        signal, "UNKNOWN", broker_order_id=placed_order_id
                     )
-                    raise ReconciliationRequiredError(
-                        "broker order outcome is unknown",
-                        order_id=placed_order_id,
-                        requested_qty=qty,
-                    )
+                    if getattr(self, "_storage", None) is None:
+                        raise ReconciliationRequiredError(
+                            "broker order outcome is unknown",
+                            order_id=placed_order_id,
+                            requested_qty=qty,
+                        )
+                    return None
                 # A fill can race the cancel — the broker's post-cancel state
                 # decides; never trust the local intent. Hand an observed
                 # TERMINAL status to the normal path below: FILLED -> position
@@ -297,19 +303,24 @@ class DhanBrokerAdapter(IBroker):
                         to_float(post_cancel.filled_quantity),
                         to_float(post_cancel.quantity),
                     )
+                    # Durable ledger wired: record FILLED with the fractional
+                    # quantity — the row IS the exposure of record. Without a
+                    # ledger, raise so the unresolved fill cannot be ignored.
                     self._persist_order_terminal(
-                        signal, "RECONCILIATION_REQUIRED",
+                        signal, "FILLED",
                         broker_order_id=placed_order_id,
                         filled_quantity=to_float(post_cancel.filled_quantity),
                         avg_fill_price=to_float(post_cancel.average_fill_price),
                     )
-                    raise ReconciliationRequiredError(
-                        "broker order partially filled before cancellation",
-                        order_id=placed_order_id,
-                        requested_qty=qty,
-                        filled_qty=to_float(post_cancel.filled_quantity),
-                        fill_price=to_float(post_cancel.average_fill_price),
-                    )
+                    if getattr(self, "_storage", None) is None:
+                        raise ReconciliationRequiredError(
+                            "broker order partially filled before cancellation",
+                            order_id=placed_order_id,
+                            requested_qty=qty,
+                            filled_qty=to_float(post_cancel.filled_quantity),
+                            fill_price=to_float(post_cancel.average_fill_price),
+                        )
+                    return None
                 else:
                     self._persist_order_terminal(signal, "CANCELLED", broker_order_id=placed_order_id)
                     return None
