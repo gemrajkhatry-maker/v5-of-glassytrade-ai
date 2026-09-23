@@ -1165,6 +1165,15 @@ class QuantCoordinator:
                 stale.append(sym)
         return sorted(stale)
 
+    def feed_health(self) -> dict:
+        """Shared MultiplexedMarketFeed snapshot for the /health endpoint (B-3).
+
+        Surfaces silent symbols, drop counts, WS→REST poll fallback, and
+        producer-thread liveness — the failure modes that previously hid
+        behind an "ok" coordinator check.
+        """
+        return self._feed.health_snapshot()
+
     def emergency_halt(self, reason: str = "emergency halt", *, force_close: bool = False) -> int:
         """Externally halt every engine's SessionRisk (SIGTERM flatten path).
 

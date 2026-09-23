@@ -445,19 +445,27 @@ class MultiplexedMarketFeed:
             self._depth_cache[symbol]["asks"] = parsed_levels
         self._depth_cache[symbol]["ts"] = time.time()
 
-    def _put_tick(self, q: queue.Queue, tick: Tick) -> None:
-        """Enqueue with drop-oldest when the bounded queue is full."""
+    def _put_tick(self, q: queue.Queue, tick: Tick, symbol: str) -> None:
+        """Enqueue with drop-oldest when the bounded queue is full.
+
+        Drop-oldest events are counted as ``queue_full:<symbol>`` so a
+        stalled consumer is visible on /health instead of silently
+        discarding ticks."""
         try:
             q.put_nowait(tick)
         except queue.Full:
+            dropped = False
             try:
                 q.get_nowait()
+                dropped = True
             except queue.Empty:  # silent-except - race: queue drained between Full and get
                 pass
             try:
                 q.put_nowait(tick)
             except queue.Full:  # silent-except - still full after drop; drop this tick
-                pass
+                dropped = True
+            if dropped:
+                self._note_drop("queue_full", symbol, "drop-oldest")
 
     def _note_drop(self, reason: str, symbol: str, detail: str = "") -> None:
         """Rate-limited (≥30s per key) warning for a packet that never reached
@@ -493,9 +501,9 @@ class MultiplexedMarketFeed:
                 "no_queue", symbol, f"known={sorted(self._queues)}"
             )
             return
-        self._put_tick(q, tick)
+        self._put_tick(q, tick, symbol)
         for reader in tuple(self._readers.get(symbol, ())):
-            self._put_tick(reader, tick)
+            self._put_tick(reader, tick, symbol)
         self._last_route_mono[symbol] = time.monotonic()
 
     def silent_symbols(self, threshold_sec: float = 60.0) -> list[str]:
@@ -514,6 +522,29 @@ class MultiplexedMarketFeed:
             if last is None or (now - last) > threshold_sec:
                 silent.append(sym)
         return sorted(silent)
+
+    def health_snapshot(self) -> dict:
+        """Observability snapshot for the /health coordinator block (B-3).
+
+        Returns ``silentSymbols``, ``dropCounts``, ``pollFallback`` (+ age in
+        seconds for the >60s degraded rule), and ``producerAlive``. The
+        poll-fallback flag is owned by the market-data adapter (set when
+        ``stream_full`` switches WS→REST) and read from ``self._md`` here —
+        the feed never imports the adapter.
+        """
+        thread = self._thread
+        producer_alive = bool(thread is not None and thread.is_alive())
+        poll_since = getattr(self._md, "poll_fallback_since", None)
+        if not isinstance(poll_since, (int, float)):
+            poll_since = None
+        poll_age = (time.monotonic() - float(poll_since)) if poll_since is not None else None
+        return {
+            "silentSymbols": self.silent_symbols(),
+            "dropCounts": dict(self._drop_counts),
+            "pollFallback": poll_since is not None,
+            "pollFallbackAgeSec": poll_age,
+            "producerAlive": producer_alive,
+        }
 
     def _check_silent(self) -> None:
         """Rate-lwarn (≥30s/symbol) when a subscribed queue is getting no packets."""

@@ -74,6 +74,9 @@ class DhanMarketDataAdapter(IMarketData):
             "DHAN_SERIALIZE_OPTION_CHAIN", ""
         ).lower() in ("1", "true", "yes")
         self._option_chain_broker_lock = threading.Lock()
+        # Set when stream_full falls back WS→REST; read by
+        # MultiplexedMarketFeed.health_snapshot for /health (B-3).
+        self.poll_fallback_since: float | None = None
 
     def get_broker(self):
         """Return DhanBroker instance (lazy-created, cached)."""
@@ -455,6 +458,8 @@ class DhanMarketDataAdapter(IMarketData):
 
         instruments = [self._make_instrument(sym) for sym in symbols]
 
+        # Fresh WS attempt — clear any prior fallback age until it fails again.
+        self.poll_fallback_since = None
         try:
             pkt_count = 0
             async for pkt in broker.stream_full(instruments):
@@ -466,6 +471,7 @@ class DhanMarketDataAdapter(IMarketData):
                 yield asdict(pkt)
         except Exception as e:
             logger.warning("stream_full WebSocket ended (%s) — falling back to REST quote polling", e)
+            self.poll_fallback_since = time.monotonic()
             async for pkt in self.stream_poll(symbols, poll_interval=1.0):
                 yield pkt
 

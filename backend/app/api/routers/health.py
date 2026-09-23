@@ -17,6 +17,7 @@ from app.api.dependencies import (
     get_storage,
 )
 from app.config import settings
+from quant.amt.session.symbol_registry import is_market_open
 from quant.probability.features import (
     FEATURE_NAMES,
     PROBABILITY_FEATURE_SCHEMA_VERSION,
@@ -96,6 +97,7 @@ async def health_check(
         checks["probability"] = f"error: {e}"
 
     # Greenfield QuantCoordinator check (additive — does not gate overall health)
+    feed_degraded = False
     if coordinator is not None:
         try:
             started = bool(getattr(coordinator, "started", False))
@@ -127,6 +129,39 @@ async def health_check(
                 "status": f"error: {e}",
             }
 
+        # Feed health (B-3): silence / drops / poll-fallback / producer liveness.
+        if hasattr(coordinator, "feed_health"):
+            try:
+                snap = coordinator.feed_health() or {}
+                silent = list(snap.get("silentSymbols") or [])
+                drops = dict(snap.get("dropCounts") or {})
+                poll_fb = bool(snap.get("pollFallback"))
+                poll_age = snap.get("pollFallbackAgeSec")
+                producer_alive = bool(snap.get("producerAlive"))
+                # Silence only matters while ticks are expected — reuse the
+                # canonical session clock (NSE covers Mon-Fri day; MCX evening).
+                market_open = is_market_open() or is_market_open(exchange="MCX")
+                feed_degraded = (
+                    (bool(silent) and market_open)
+                    or (poll_fb and poll_age is not None and float(poll_age) > 60.0)
+                    or not producer_alive
+                )
+                checks["feed"] = {
+                    "silentSymbols": silent,
+                    "dropCounts": drops,
+                    "pollFallback": poll_fb,
+                    "producerAlive": producer_alive,
+                }
+            except Exception as e:
+                logger.warning("Health check: feed_health failed: %s", e)
+                checks["feed"] = {
+                    "silentSymbols": [],
+                    "dropCounts": {},
+                    "pollFallback": False,
+                    "producerAlive": False,
+                }
+                feed_degraded = True
+
     # Determine overall status
     # Database is strictly critical
     # LLM/Probability are allowed to be 'not_ready' (still loading) without failing health
@@ -137,12 +172,13 @@ async def health_check(
     elif all(
         v in ["ok", "not_ready", "degraded"]
         for k, v in checks.items()
-        if k not in {"coordinator"}
+        if k not in {"coordinator", "feed"}
     ):
         coord_check = checks.get("coordinator")
-        if isinstance(coord_check, dict) and (
-            coord_check.get("crashedEngines") or coord_check.get("staleEngines")
-        ):
+        if (
+            isinstance(coord_check, dict)
+            and (coord_check.get("crashedEngines") or coord_check.get("staleEngines"))
+        ) or feed_degraded:
             overall = "degraded"
         else:
             overall = "ok"

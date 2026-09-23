@@ -716,6 +716,61 @@ def test_convert_iso_timestamp_does_not_produce_zero_time():
     assert float(tick.time) > 946684800  # post-2000 epoch
 
 
+def test_queue_full_drop_oldest_is_counted():
+    """A full queue must count drop-oldest as queue_full:<sym> — not vanish.
+
+    B-3: drop-oldest silently discarded ticks with no counter, so a stalled
+    consumer hid behind an otherwise-ok health check.
+    """
+    import queue as queue_mod
+
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+    from unittest.mock import MagicMock
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    sym = "QFULL TEST FUT"
+    q = queue_mod.Queue(maxsize=2)
+    feed._put_tick(q, Tick(time="1", price=1.0, volume=1.0), sym)
+    feed._put_tick(q, Tick(time="2", price=2.0, volume=1.0), sym)
+    # Queue full — third put must drop the oldest and count the event.
+    feed._put_tick(q, Tick(time="3", price=3.0, volume=1.0), sym)
+
+    assert feed._drop_counts.get(f"queue_full:{sym}") == 1
+    assert q.qsize() == 2
+    # Oldest (price=1.0) evicted; survivors are 2.0 then 3.0.
+    assert q.get_nowait().price == 2.0
+    assert q.get_nowait().price == 3.0
+
+
+def test_health_snapshot_reports_silence_drops_and_producer():
+    """health_snapshot() is the /health feed block source of truth."""
+    from unittest.mock import MagicMock
+
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    snap = feed.health_snapshot()
+    assert snap["silentSymbols"] == []
+    assert snap["dropCounts"] == {}
+    assert snap["pollFallback"] is False
+    assert snap["producerAlive"] is False  # not started yet
+
+    # Seed a drop and a subscribed-but-silent queue.
+    feed._note_drop("late_tick", "X", "ts=1")
+    feed.subscribe("SILENT")
+    snap = feed.health_snapshot()
+    assert snap["dropCounts"].get("late_tick:X") == 1
+    assert "SILENT" in snap["silentSymbols"]
+    assert snap["pollFallback"] is False
+
+    # Producer thread reports alive once kicked.
+    feed.set_symbols(["SILENT"])
+    try:
+        _wait_until(lambda: feed.health_snapshot()["producerAlive"])
+    finally:
+        feed.close()
+
+
 def test_stale_freshness_uses_arrival_not_old_ltt():
     """Illiquid LTT must not freeze _last_tick_wall while packets keep arriving.
 
