@@ -317,67 +317,6 @@ class OptionSelector:
             viable=theta_ratio < self.cfg.max_theta_ratio,
         )
 
-    def compute_lot_size(
-        self,
-        account_equity: float,
-        risk_pct: float,
-        stop_loss_points: float,
-        lot_size: int,
-    ) -> int:
-        """Derive the number of lots from risk parameters.
-
-        ``risk_amount = account_equity * risk_pct``
-        ``lots = risk_amount / (lot_size * stop_loss_points)``
-
-        Always returns at least 1.
-        """
-        if stop_loss_points <= 0 or lot_size <= 0:
-            return 1
-        risk_amount = account_equity * risk_pct
-        lots = risk_amount / (lot_size * stop_loss_points)
-        return max(1, math.floor(lots))
-
-    def compute_option_lot_size(
-        self,
-        account_equity: float,
-        risk_pct: float,
-        underlying_stop_points: float,
-        option_delta: float,
-        lot_size: int,
-        session_profit: float = 0.0,
-        max_lots_cap: int = 50,
-        is_expiry: bool = False,
-    ) -> int:
-        """Derive option lots from underlying stop points mapped via option delta.
-
-        Enforces Fabio Cushion System:
-        - Base risk: account_equity * risk_pct (e.g. 0.25% - 0.50%)
-        - If session_profit > 0: add 20% of session profit to the risk budget
-        - Option stop points = underlying_stop_points * max(MIN_EFFECTIVE_DELTA, min(1.0, abs(option_delta)))
-        - On expiry day: max lots capped at 50% of standard ceiling
-        """
-        if underlying_stop_points <= 0 or lot_size <= 0:
-            return 1
-        
-        # 1. Calculate allowed rupee risk with intraday cushion
-        base_risk = account_equity * risk_pct
-        # ponytail: cushion is exactly 20% of session profit — the old
-        # min(..., 30% profit) cap could never bind.
-        cushion = max(0.0, session_profit * 0.20) if session_profit > 0 else 0.0
-        total_risk_rupees = base_risk + cushion
-
-        # 2. Map underlying stop to option premium stop via observed delta
-        effective_delta = max(MIN_EFFECTIVE_DELTA, min(1.0, abs(option_delta)))
-        option_stop_points = underlying_stop_points * effective_delta
-
-        # 3. Size lots
-        lots = total_risk_rupees / (lot_size * option_stop_points)
-        num_lots = max(1, math.floor(lots))
-
-        # 4. Cap by expiry day and max lots limit
-        effective_cap = max(1, max_lots_cap // 2) if is_expiry else max_lots_cap
-        return min(num_lots, effective_cap)
-
     def select_expiry(
         self,
         available_expiries: list[str],

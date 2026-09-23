@@ -65,39 +65,40 @@ class TestClusterNodes:
         ]
 
     def test_empty(self):
-        assert _cluster_nodes([], 1.0, keep_highest=True) == []
+        assert _cluster_nodes([], 1.0) == []
 
     def test_no_clustering_needed(self):
         nodes = self._make_hvns([(100.0, 3.0), (105.0, 4.0), (110.0, 2.0)])
-        result = _cluster_nodes(nodes, min_separation=3.0, keep_highest=True)
+        result = _cluster_nodes(nodes, min_separation=3.0)
         assert len(result) == 3
 
     def test_hvn_keeps_highest_in_cluster(self):
         # 100 and 101 are within separation=3 → keep highest strength (101, s=5)
         nodes = self._make_hvns([(100.0, 3.0), (101.0, 5.0), (110.0, 2.0)])
-        result = _cluster_nodes(nodes, min_separation=3.0, keep_highest=True)
+        result = _cluster_nodes(nodes, min_separation=3.0)
         prices = [n.price for n in result]
         assert 101.0 in prices
         assert 100.0 not in prices
         assert 110.0 in prices
 
-    def test_lvn_keeps_lowest_strength_in_cluster(self):
-        # 100 and 101 are within separation=3 → keep lowest strength (100, s=0.1)
+    def test_lvn_keeps_highest_strength_in_cluster(self):
+        # Always-max policy: 100 and 101 are within separation=3 → keep the
+        # highest-strength node (101, s=0.5); 110 (s=0.9) is its own cluster.
         nodes = self._make_lvns([(100.0, 0.1), (101.0, 0.5), (110.0, 0.9)])
-        result = _cluster_nodes(nodes, min_separation=3.0, keep_highest=False)
+        result = _cluster_nodes(nodes, min_separation=3.0)
         prices = [n.price for n in result]
-        assert 100.0 in prices
-        assert 101.0 not in prices
+        assert 101.0 in prices
+        assert 100.0 not in prices
 
     def test_all_in_one_cluster(self):
         nodes = self._make_hvns([(1.0, 2.0), (1.5, 5.0), (2.0, 3.0)])
-        result = _cluster_nodes(nodes, min_separation=5.0, keep_highest=True)
+        result = _cluster_nodes(nodes, min_separation=5.0)
         assert len(result) == 1
         assert result[0].price == 1.5  # highest strength
 
     def test_result_sorted_by_price(self):
         nodes = self._make_hvns([(10.0, 2.0), (5.0, 3.0), (20.0, 1.0)])
-        result = _cluster_nodes(nodes, min_separation=1.0, keep_highest=True)
+        result = _cluster_nodes(nodes, min_separation=1.0)
         prices = [n.price for n in result]
         assert prices == sorted(prices)
 

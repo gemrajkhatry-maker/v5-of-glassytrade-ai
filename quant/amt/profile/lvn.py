@@ -88,21 +88,16 @@ _NodeT = TypeVar("_NodeT", LVNLevel, HVNLevel)
 def _cluster_nodes(
     nodes: list,
     min_separation: float,
-    *,
-    keep_highest: bool,
 ) -> list:
     """Merge nodes that are closer than ``min_separation`` in price.
 
-    Within each cluster keep only:
-    - the node with the *highest* volume strength (for HVNs, keep_highest=True)
-    - the node with the *lowest* volume strength  (for LVNs, keep_highest=False)
+    Within each cluster keep only the node with the *highest* strength
+    (LVN strength is trough depth, HVN strength is peak height — both
+    are "higher is better"). Ties keep the higher-priced node.
 
     Args:
         nodes: Sorted (by price) list of LVNLevel or HVNLevel.
         min_separation: Minimum price gap required between distinct nodes.
-        keep_highest: True → keep max-strength node per cluster (HVN).
-                      False → keep min-strength node per cluster (LVN —
-                      lowest strength == lowest volume == best LVN).
 
     Returns:
         Filtered list with at most one representative per cluster.
@@ -218,7 +213,7 @@ def find_lvns(
     if eff_separation > 0 and len(lvns) > 1:
         # LVN strength is trough depth (higher = better). Always keep the
         # strongest node; price is the tie-break (higher price wins).
-        lvns = _cluster_nodes(lvns, eff_separation, keep_highest=True)
+        lvns = _cluster_nodes(lvns, eff_separation)
 
     # Return top max_nodes ranked by strength (lowest volume trough = highest strength)
     if max_nodes > 0 and len(lvns) > max_nodes:
@@ -287,7 +282,7 @@ def find_hvns(
     eff_separation = max(min_separation, 0.04 * price_range, 8.0 * tick_size)
 
     if eff_separation > 0 and len(hvns) > 1:
-        hvns = _cluster_nodes(hvns, eff_separation, keep_highest=True)
+        hvns = _cluster_nodes(hvns, eff_separation)
 
     # Return top max_nodes ranked by strength (highest volume peak = highest strength)
     if max_nodes > 0 and len(hvns) > max_nodes:
