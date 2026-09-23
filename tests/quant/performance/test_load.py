@@ -16,11 +16,8 @@ Severity scale:
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
-import threading
 import time
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -69,7 +66,7 @@ def test_fold_is_incremental():
 
     # First fold — full scan, expected to be slow
     t0 = time.perf_counter()
-    state1 = store.fold()
+    store.fold()
     t_first = time.perf_counter() - t0
 
     # Append 100 more events
@@ -78,7 +75,7 @@ def test_fold_is_incremental():
 
     # Second fold — should be O(Δ) if cached, O(N) if not
     t0 = time.perf_counter()
-    state2 = store.fold()
+    store.fold()
     t_second = time.perf_counter() - t0
 
     # If incremental: t_second should be <1% of t_first
@@ -202,7 +199,7 @@ def test_event_store_is_compactable():
         store.append(_event(i))
 
     # Fold to derive current state
-    state = store.fold()
+    store.fold()
 
     # After folding, we should be able to prune old events
     # (e.g., snapshot the state and discard the log)
@@ -500,7 +497,7 @@ def test_event_store_memory_bounded():
         store.append(_event(i))
 
     # Fold to derive state
-    state = store.fold()
+    store.fold()
 
     # Must have a way to prune old events
     prune_methods = [m for m in dir(store) if "prune" in m.lower() or "compact" in m.lower() or "snapshot" in m.lower()]

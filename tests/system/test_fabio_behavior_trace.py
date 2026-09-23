@@ -8,11 +8,9 @@ Establishes a baseline event trace verifying:
    setup evidence, direction, gate results, reason, entry, stop, target, risk, and exit reason.
 """
 
-import pytest
 from quant.contracts.enums import MarketState
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
-from quant.decision.gates_edge import gate_triple_a_edge
 from quant.decision.setup_state import SetupEvidence, SetupType
 from quant.bars import Bar
 

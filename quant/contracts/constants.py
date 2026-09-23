@@ -12,6 +12,8 @@ The infrastructure adapter loads from YAML and provides values to this module.
 import logging
 import os
 
+from quant.contracts.aggregates import INITIAL_CAPITAL as _INITIAL_CAPITAL
+
 logger = logging.getLogger(__name__)
 
 
@@ -233,8 +235,6 @@ MIN_GRADE_SCORE_THRESHOLD = 1
 # canonical capital, never a local literal: the scanner used 100000 and the
 # snapshot client 200000 while INITIAL_CAPITAL is 1000000 — three different
 # numbers for one concept, all on the sizing path.
-from quant.contracts.aggregates import INITIAL_CAPITAL as _INITIAL_CAPITAL
-
 FALLBACK_EQUITY: float = float(_INITIAL_CAPITAL)
 
 # Notional leverage bound applied in TimesFM dynamic sizing. Named so the

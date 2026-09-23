@@ -21,7 +21,7 @@ import pytest
 
 from quant.event_store import EventStore
 from quant.events import BarClosed, PositionClosed, PositionOpened, RiskUpdated
-from quant.execution.order import Fill, Order, Position
+from quant.execution.order import Fill, Position
 from quant.state_machine import Bar, PositionState, RiskState
 
 

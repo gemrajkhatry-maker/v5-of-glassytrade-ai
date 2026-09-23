@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
-from typing import FrozenSet, Dict, Any, Optional
+from typing import FrozenSet, Dict, Any
 
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY
 

@@ -13,7 +13,6 @@ from quant.amt.session.futures_provider import (
     build_futures_symbol,
     extract_option_date,
 )
-from tests.quant.parity_harness import assert_parity
 
 
 def _write_config(tmp_path):

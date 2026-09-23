@@ -17,9 +17,9 @@ _project_root = os.path.normpath(
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-import pandas as pd
+import pandas as pd  # noqa: E402
 
-from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter, _delta_proxy
+from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter, _delta_proxy, _exchange_enum  # noqa: E402
 
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -115,7 +115,7 @@ def test_get_broker_creates_once():
     with patch("brokers.broker.dhan.application.broker.DhanBroker.create", return_value=mock_broker):
         # Import here to patch correctly
         from brokers.broker.dhan.application.broker import DhanBroker
-        with patch.object(DhanBroker, "create", return_value=mock_broker) as mock_create:
+        with patch.object(DhanBroker, "create", return_value=mock_broker):
             adapter._broker = None  # reset
             b1 = adapter.get_broker()
             b2 = adapter.get_broker()
@@ -249,8 +249,6 @@ def test_get_ltp_exception_returns_zero():
 # ---------------------------------------------------------------------------
 # _exchange_enum
 # ---------------------------------------------------------------------------
-
-from app.infrastructure.adapters.dhan_adapter import _exchange_enum
 
 
 def test_exchange_enum_nse():

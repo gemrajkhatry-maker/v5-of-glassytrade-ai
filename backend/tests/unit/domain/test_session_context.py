@@ -2,7 +2,6 @@
 
 from datetime import date, datetime, timezone, timedelta
 
-import pytest
 
 from quant.amt.session.context import (
     get_session_info,

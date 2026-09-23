@@ -1,12 +1,8 @@
 """Tests for exit_rules.py pure functions."""
 
-import pytest
-import time
 
 from quant.execution.exit_rules import (
     get_session_time_stop,
-    TIME_STOP_TABLE,
-    HARD_MAX_HOLD_SECONDS,
 )
 
 
@@ -68,7 +64,6 @@ class TestSessionTimeStop:
 
     def test_session_time_stop_morning(self):
         """Morning session time stop."""
-        from quant.execution.exit_rules import get_session_time_stop
         
         result = get_session_time_stop(
             market_state="BALANCED",
@@ -80,7 +75,6 @@ class TestSessionTimeStop:
 
     def test_session_time_stop_expiry(self):
         """Expiry session time stop."""
-        from quant.execution.exit_rules import get_session_time_stop
         
         result = get_session_time_stop(
             market_state="BALANCED",

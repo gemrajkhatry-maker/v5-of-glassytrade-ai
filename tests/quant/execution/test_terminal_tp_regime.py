@@ -8,8 +8,6 @@ import pytest
 
 from quant.decision.signal_builder import Signal
 from quant.execution.exit_checks import check_take_profit_tiers, tp2_level
-from quant.execution.exits import ExitEngine
-from quant.execution.oms import PaperOMS
 from quant.execution.order import Order, Position
 
 

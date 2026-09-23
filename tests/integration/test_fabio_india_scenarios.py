@@ -8,22 +8,20 @@ Simulates complete market days under Fabio AMT rules:
 4. Expiry Afternoon Session: Halves risk caps, closes out prior to 15:20 close protection.
 """
 
-import pytest
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
 from quant.decision.setup_state import SetupEvidence
 from quant.contracts.enums import MarketState
-from quant.execution.exits import ExitEngine
 from quant.execution.risk import SessionRisk
 from quant.bars import Bar
 
 
-def _make_bar(time_str: str, o: float, h: float, l: float, c: float, vol: float = 1000.0, delta: float = 200.0) -> Bar:
+def _make_bar(time_str: str, o: float, h: float, lo: float, c: float, vol: float = 1000.0, delta: float = 200.0) -> Bar:
     return Bar(
         time=time_str,
         open=o,
         high=h,
-        low=l,
+        low=lo,
         close=c,
         volume=vol,
         buy_volume=vol * 0.6 if delta > 0 else vol * 0.4,
@@ -34,7 +32,7 @@ def _make_bar(time_str: str, o: float, h: float, l: float, c: float, vol: float 
 
 def test_scenario_triple_a_bullish_trend_day():
     # 10:00 IST Primary window
-    bar = _make_bar("2026-08-19T10:00:00+05:30", o=24500.0, h=24550.0, l=24490.0, c=24540.0, vol=5000.0, delta=1500.0)
+    bar = _make_bar("2026-08-19T10:00:00+05:30", o=24500.0, h=24550.0, lo=24490.0, c=24540.0, vol=5000.0, delta=1500.0)
     evidence = SetupEvidence(
         setup_type="TRIPLE_A",
         direction="LONG",
@@ -76,7 +74,7 @@ def test_scenario_value_area_fade_day():
     # 10:30 IST VAH probe above 24600 rejected, price CLOSES BACK INSIDE the VA
     # (24590 <= VAH 24600) but still above POC 24520 -> failed auction, fade short
     # toward POC (Fabio Model 2 reclaim semantics).
-    bar = _make_bar("2026-08-19T10:30:00+05:30", o=24620.0, h=24650.0, l=24570.0, c=24590.0, vol=3000.0, delta=-800.0)
+    bar = _make_bar("2026-08-19T10:30:00+05:30", o=24620.0, h=24650.0, lo=24570.0, c=24590.0, vol=3000.0, delta=-800.0)
     evidence = SetupEvidence(
         setup_type="VA_FADE",
         direction="SHORT",
@@ -115,7 +113,7 @@ def test_scenario_value_area_fade_day():
 
 def test_scenario_midday_blocks_trend_continuation():
     # 12:45 IST Midday window: allow_trend is False
-    bar = _make_bar("2026-08-19T12:45:00+05:30", o=24700.0, h=24730.0, l=24690.0, c=24720.0, vol=2000.0, delta=500.0)
+    bar = _make_bar("2026-08-19T12:45:00+05:30", o=24700.0, h=24730.0, lo=24690.0, c=24720.0, vol=2000.0, delta=500.0)
     evidence = SetupEvidence(
         setup_type="TRIPLE_A",
         direction="LONG",

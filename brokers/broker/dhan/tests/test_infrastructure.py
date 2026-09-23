@@ -44,20 +44,14 @@ from shared.entities.models import Instrument
 from brokers.broker.types import Exchange
 
 from brokers.broker.dhan.domain import (
-    DhanError,
     DhanNetworkError,
-    DhanConnectionError,
     DhanTimeoutError,
     ORDERS,
     DhanRateLimitError,
     DhanAuthError,
     DhanTokenInvalidError,
     DhanTokenExpiredError,
-    DhanSymbolNotFoundError,
     DhanHistoricalDataError,
-    ExchangeSegment,
-    InstrumentTypeEnum,
-    OptionType,
     HISTORICAL_MAX_DAYS,
     RATE_LIMIT_HISTORICAL,
 )
@@ -354,7 +348,7 @@ class TestDhanWebSocketClient:
     @pytest.mark.asyncio
     async def test_subscribe_populates_ws_sid_to_rest(self, dhan_ws_client):
         """Subscribe must pre-populate _ws_sid_to_rest so binary decode resolves IDs."""
-        from unittest.mock import AsyncMock, PropertyMock, patch
+        from unittest.mock import AsyncMock, patch
 
         # Mock is_connected to return True and _send_subscription to no-op
         with patch.object(type(dhan_ws_client), "is_connected", new_callable=PropertyMock, return_value=True):
@@ -368,7 +362,7 @@ class TestDhanWebSocketClient:
     @pytest.mark.asyncio
     async def test_subscribe_handles_non_numeric_ids(self, dhan_ws_client):
         """Non-numeric security IDs should not crash subscribe."""
-        from unittest.mock import AsyncMock, PropertyMock, patch
+        from unittest.mock import AsyncMock, patch
 
         with patch.object(type(dhan_ws_client), "is_connected", new_callable=PropertyMock, return_value=True):
             dhan_ws_client._send_subscription = AsyncMock()
@@ -1148,7 +1142,6 @@ class TestProtocolCompliance:
         assert hasattr(dhan_http_client, 'close')
         
         # Check methods are async
-        import asyncio
         assert asyncio.iscoroutinefunction(dhan_http_client.get)
         assert asyncio.iscoroutinefunction(dhan_http_client.post)
         assert asyncio.iscoroutinefunction(dhan_http_client.request)
@@ -1164,7 +1157,6 @@ class TestProtocolCompliance:
         assert hasattr(dhan_ws_client, 'messages')
         
         # Check methods are async
-        import asyncio
         assert asyncio.iscoroutinefunction(dhan_ws_client.connect)
         assert asyncio.iscoroutinefunction(dhan_ws_client.disconnect)
         assert asyncio.iscoroutinefunction(dhan_ws_client.subscribe)
@@ -1176,7 +1168,6 @@ class TestProtocolCompliance:
         assert hasattr(rate_limiter, 'acquire')
         
         # Check methods are async
-        import asyncio
         assert asyncio.iscoroutinefunction(rate_limiter.acquire)
     
     def test_circuit_breaker_protocol_compliance(self, circuit_breaker):
@@ -1186,7 +1177,6 @@ class TestProtocolCompliance:
         assert hasattr(circuit_breaker, 'state')
         
         # Check methods are async
-        import asyncio
         assert asyncio.iscoroutinefunction(circuit_breaker.execute)
 
 
@@ -1307,20 +1297,17 @@ class TestHistoricalDataRateLimits:
     
     def test_historical_max_days_constant(self):
         """Test that HISTORICAL_MAX_DAYS is set to 90."""
-        from brokers.broker.dhan.domain import HISTORICAL_MAX_DAYS
         
         assert HISTORICAL_MAX_DAYS == 90
     
     def test_rate_limit_historical_is_10(self):
         """Test that RATE_LIMIT_HISTORICAL is set to 10 req/sec."""
-        from brokers.broker.dhan.domain import RATE_LIMIT_HISTORICAL
         
         assert RATE_LIMIT_HISTORICAL == 10
     
     @pytest.mark.asyncio
     async def test_historical_rate_limit_category_exists(self):
         """Test that 'historical' rate limit category is configured."""
-        from brokers.broker.dhan.infrastructure import TokenBucketRateLimiter, DEFAULT_RATE_LIMITS
         
         # Check that 'historical' category exists in default rate limits
         assert "historical" in DEFAULT_RATE_LIMITS
@@ -1411,7 +1398,7 @@ class TestHistoricalDataRateLimits:
         to_date = from_date + timedelta(days=90)
         
         # Should succeed
-        result = await broker._get_historical_async(instrument, from_date, to_date, "1d")
+        await broker._get_historical_async(instrument, from_date, to_date, "1d")
         
         # Verify rate limiter was called with 'historical' category
         mock_rate_limiter.acquire.assert_called_once_with("historical")
@@ -1422,7 +1409,6 @@ class TestHistoricalDataRateLimits:
     ):
         """Test that from_date after to_date raises error."""
         from brokers.broker.dhan.application import DhanBroker, DhanConfig
-        from brokers.broker.dhan.domain import DhanHistoricalDataError
         
         # Create broker with mocks
         config = DhanConfig(
@@ -1465,7 +1451,6 @@ class TestHistoricalDataRateLimits:
     ):
         """Test that rate limiter is applied for valid historical data requests."""
         from brokers.broker.dhan.application import DhanBroker, DhanConfig
-        from datetime import timedelta
         
         # Create broker with mocks
         config = DhanConfig(
@@ -1504,10 +1489,6 @@ class TestHistoricalDataRateLimiterIntegration:
     @pytest.mark.asyncio
     async def test_rate_limiter_historical_config(self):
         """Test that historical rate limiter is properly configured."""
-        from brokers.broker.dhan.infrastructure import (
-            TokenBucketRateLimiter,
-            DEFAULT_RATE_LIMITS,
-        )
         from brokers.broker.dhan.domain import (
             RATE_LIMIT_HISTORICAL,
             RATE_BURST_HISTORICAL,
@@ -1527,7 +1508,6 @@ class TestHistoricalDataRateLimiterIntegration:
     @pytest.mark.asyncio
     async def test_rate_limiter_enforces_historical_limit(self):
         """Test that rate limiter enforces 10 req/sec for historical data."""
-        from brokers.broker.dhan.infrastructure import TokenBucketRateLimiter
         import time
         
         # Create rate limiter
@@ -1549,7 +1529,6 @@ class TestHistoricalDataRateLimiterIntegration:
     @pytest.mark.asyncio
     async def test_rate_limiter_categories_are_independent(self):
         """Test that rate limit categories are independent."""
-        from brokers.broker.dhan.infrastructure import TokenBucketRateLimiter
         
         limiter = TokenBucketRateLimiter()
         

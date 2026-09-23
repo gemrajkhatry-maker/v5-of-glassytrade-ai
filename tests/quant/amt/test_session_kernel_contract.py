@@ -15,9 +15,9 @@ from quant.contracts.enums import MarketState
 from quant.contracts.value_objects import OHLC, VolumeProfileLevel
 
 
-def _candle(t: str, o: float, h: float, l: float, c: float, v: float, delta: float = 0.0) -> OHLC:
+def _candle(t: str, o: float, h: float, lo: float, c: float, v: float, delta: float = 0.0) -> OHLC:
     return OHLC.create(
-        time=t, open=o, high=h, low=l, close=c, volume=v, delta=delta,
+        time=t, open=o, high=h, low=lo, close=c, volume=v, delta=delta,
         taker_buy_volume=max(0.0, (v + delta) / 2),
     )
 

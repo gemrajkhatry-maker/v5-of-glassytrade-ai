@@ -18,12 +18,12 @@ def _candle(
 ) -> OHLC:
     """Build an OHLC with float fields."""
     h = high if high is not None else close + 0.1
-    l = low if low is not None else close - 0.1
+    lo = low if low is not None else close - 0.1
     return OHLC(
         time=time,
         open=close,
         high=h,
-        low=l,
+        low=lo,
         close=close,
         volume=volume,
         vwap=close,
@@ -76,7 +76,6 @@ class TestGapProfileDetector:
     def test_detects_up_gap(self):
         """Session opening above prior close with sufficient gap → UP gap."""
         prior_close = 100.0
-        prior_range = 10.0  # VAH-VAL = 10
         candles = _session_with_gap(prior_close, "UP", gap_size=2.0)
 
         detector = GapProfileDetector(min_gap_pct=0.005)
@@ -198,7 +197,6 @@ class TestGapProfileDetector:
     def test_gap_fill_pct(self):
         """gap_fill_pct measures how much of the gap has been filled."""
         prior_close = 100.0
-        open_price = 103.0  # UP gap
         candles = _session_with_gap(prior_close, "UP", gap_size=3.0, n_candles=5)
 
         detector = GapProfileDetector(min_gap_pct=0.005)

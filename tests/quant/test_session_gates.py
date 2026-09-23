@@ -5,9 +5,8 @@ Tests the pure functions: session_allow_entry, session_force_exit,
 parse_contract_expiry, bar_epoch_ms, ist_dt.
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
-import pytest
 
 from quant.session_gates import (
     bar_epoch_ms,

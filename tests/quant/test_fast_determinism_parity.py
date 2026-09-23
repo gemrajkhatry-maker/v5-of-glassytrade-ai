@@ -25,7 +25,6 @@ so replay harnesses know the boundaries):
 """
 from __future__ import annotations
 
-import pytest
 
 from quant.runtime import QuantEngine
 from tests.helpers.synthetic import SyntheticGateway

@@ -7,11 +7,9 @@ its JSON file); this test exercises the actual QuantEngine wiring, not the
 SessionRisk constructor in isolation.
 """
 
-import json
 import os
 import tempfile
 
-from quant.execution.risk import SessionRisk
 from quant.runtime import QuantEngine
 from quant.session_levels import SessionLevelStore
 from tests.helpers.synthetic import SyntheticGateway

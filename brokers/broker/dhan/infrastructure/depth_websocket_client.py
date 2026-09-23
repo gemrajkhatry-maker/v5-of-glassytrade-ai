@@ -34,7 +34,7 @@ Auth URL differs from regular feed — no `version=2` param:
 import json
 import struct
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from brokers.broker.dhan.domain.constants import (
     WS_URL_DEPTH_20,
@@ -50,7 +50,6 @@ from brokers.broker.dhan.domain.constants import (
 from brokers.broker.dhan.ports import WSMessage
 from brokers.broker.dhan.infrastructure.websocket_client import DhanWebSocketClient, _SEGMENT_MAP
 from brokers.broker.dhan.domain import (
-    DhanWebSocketConnectionError,
     DhanWebSocketMessageError,
 )
 from brokers.broker.logging import get_logger
@@ -269,9 +268,12 @@ class DepthWebSocketClient(DhanWebSocketClient):
                 for _ in range(num_levels):
                     if o + 16 > len(data):
                         break
-                    price  = struct.unpack_from('<d', data, o)[0]; o += 8   # float64
-                    qty    = struct.unpack_from('<I', data, o)[0]; o += 4   # uint32
-                    orders = struct.unpack_from('<I', data, o)[0]; o += 4   # uint32
+                    price  = struct.unpack_from('<d', data, o)[0]
+                    o += 8   # float64
+                    qty    = struct.unpack_from('<I', data, o)[0]
+                    o += 4   # uint32
+                    orders = struct.unpack_from('<I', data, o)[0]
+                    o += 4   # uint32
                     levels.append({
                         "price": round(price, 2),
                         "qty": qty,

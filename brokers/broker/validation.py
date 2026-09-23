@@ -7,7 +7,7 @@ CRITICAL: Prevents corrupt data from entering trading decisions.
 PRODUCTION-SAFE: Explicit failures, no silent corruption.
 """
 
-from typing import List, Optional
+from typing import List
 
 import numpy as np
 import pandas as pd

@@ -1,8 +1,6 @@
 """Unit tests for Gamma Exposure (GEX) engine."""
 
-import pytest
 from quant.amt.profile.gamma import (
-    StrikeGEX,
     GammaExposureResult,
     bs_gamma,
     compute_gamma_exposure,

@@ -1,10 +1,8 @@
 """Tests for InitialBalanceEngine."""
 
-import pytest
 
 from quant.amt.session.ib_engine import (
     IBLocation,
-    IBState,
     InitialBalanceEngine,
 )
 from quant.contracts.value_objects import OHLC
@@ -13,8 +11,8 @@ from quant.contracts.value_objects import OHLC
 # ===== Initial Balance Engine =====
 
 
-def _make_candle(time: str, o: float, h: float, l: float, c: float) -> OHLC:
-    return OHLC.create(time=time, open=o, high=h, low=l, close=c, volume=100)
+def _make_candle(time: str, o: float, h: float, lo: float, c: float) -> OHLC:
+    return OHLC.create(time=time, open=o, high=h, low=lo, close=c, volume=100)
 
 
 class TestInitialBalanceEngine:

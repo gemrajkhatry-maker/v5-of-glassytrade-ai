@@ -5,13 +5,10 @@ position authority; LiveQuoteCache handles only per-tick live quotes.
 """
 
 from quant.bars import Bar
-from quant.decision.decision_service import QuantDecision
 from quant.decision.signal_builder import Signal
 from quant.event_store import EventStore
 from quant.events import (
-    AmtUpdated,
     BarClosed,
-    DecisionProduced,
     PositionClosed,
     PositionOpened,
     RiskUpdated,

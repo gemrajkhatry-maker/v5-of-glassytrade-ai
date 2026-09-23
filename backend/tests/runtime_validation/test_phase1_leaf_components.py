@@ -19,15 +19,13 @@ from __future__ import annotations
 
 import pytest
 from dataclasses import replace as _dc_replace
-from decimal import Decimal
 
 from tests.helpers.market_data import generate_market_data
 from quant.decision.result import GateResult
 from quant.bars import Bar
-from quant.contracts.value_objects import OHLC
-from quant.contracts.entities import Position, Signal
-from quant.contracts.aggregates import Portfolio, INITIAL_CAPITAL
-from quant.contracts.enums import SignalType, SetupType, Source, Side, PositionStatus
+from quant.contracts.entities import Signal
+from quant.contracts.aggregates import Portfolio
+from quant.contracts.enums import SignalType, SetupType, Source
 from quant.decision.context import DecisionContext
 from quant.decision.signal_builder import SignalBuilder
 from quant.execution.exits import ExitEngine as LiveExitEngine
@@ -211,7 +209,7 @@ class TestRiskSizing:
 
 class TestOMS:
     def test_live_exit_engine_sl_signal(self):
-        sig = _signal(price=100, sl=95, tp=120)
+        _signal(price=100, sl=95, tp=120)
         live_sig = type("LiveSig", (), {
             "entry": 100.0, "sl": 95.0, "tp": 120.0, "rr": 2.0,
             "confidence": 0.8, "symbol": "NIFTY", "timestamp": "t0",
@@ -225,7 +223,7 @@ class TestOMS:
         assert dec.reason == "SL"
 
     def test_live_exit_engine_holds_in_range(self):
-        sig = _signal(price=100, sl=95, tp=120)
+        _signal(price=100, sl=95, tp=120)
         live_sig = type("LiveSig", (), {
             "entry": 100.0, "sl": 95.0, "tp": 120.0, "rr": 2.0,
             "confidence": 0.8, "symbol": "NIFTY", "timestamp": "t0",

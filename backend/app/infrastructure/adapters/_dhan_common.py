@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import pathlib
-import re
 import sys
 
 # Discovers the root by walking up until we find the brokers/ directory.

@@ -6,7 +6,6 @@ import asyncio
 from typing import Dict, List, Optional, Tuple
 
 from shared.entities.models import Instrument
-from brokers.broker.types import Exchange
 
 from brokers.broker.dhan.ports import (
     IHttpClient,
@@ -15,7 +14,6 @@ from brokers.broker.dhan.ports import (
     ICircuitBreaker,
 )
 from brokers.broker.dhan.domain import (
-    DhanInstrument,
     ExchangeSegment,
     DhanError,
     DhanSymbolNotFoundError,

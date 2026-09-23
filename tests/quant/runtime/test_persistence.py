@@ -1,4 +1,3 @@
-import tempfile
 from quant.persistence import Journal
 
 

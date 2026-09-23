@@ -18,18 +18,23 @@ class ProtectiveStopState:
     @property
     def effective_stop(self) -> float:
         candidates = [float(self.submitted_sl)]
-        if self.breakeven_floor is not None: candidates.append(float(self.breakeven_floor))
-        if self.trail_stop is not None: candidates.append(float(self.trail_stop))
+        if self.breakeven_floor is not None:
+            candidates.append(float(self.breakeven_floor))
+        if self.trail_stop is not None:
+            candidates.append(float(self.trail_stop))
         positive = [v for v in candidates if v > 0]
-        if not positive: return 0.0
+        if not positive:
+            return 0.0
         return max(positive) if self.side.upper() == "LONG" else min(positive)
 
     def tighten(self, candidate: float, *, kind: StopKind, bar_index: int = -1) -> "ProtectiveStopState":
         candidate = float(candidate)
-        if candidate <= 0: return self
+        if candidate <= 0:
+            return self
         current = self.effective_stop
         tighter = candidate > current if self.side.upper() == "LONG" else candidate < current
-        if not tighter: return self
+        if not tighter:
+            return self
         if kind == "BREAKEVEN":
             return replace(self, breakeven_floor=candidate, authority=kind, updated_at_bar=bar_index)
         return replace(self, trail_stop=candidate, authority=kind, updated_at_bar=bar_index)

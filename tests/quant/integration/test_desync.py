@@ -14,8 +14,6 @@ A passing test means the system handled that case; a failing test is a finding.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,12 +23,10 @@ from quant.events import (
     Event,
     PositionClosed,
     PositionOpened,
-    RiskUpdated,
 )
 from quant.execution.order import Fill, Order, Position
-from quant.execution.risk import RiskState
-from quant.state import ViewState, project_state
-from quant.state_machine import Bar, EngineState, PositionState, RiskState
+from quant.state import project_state
+from quant.state_machine import Bar, EngineState, PositionState
 from quant.transitions import apply_event, _position_to_state
 from quant.ws_adapter import view_state_to_ws
 
@@ -91,7 +87,7 @@ class TestPyramidPositionOpenedCrash:
         a pyramid PositionOpened arrives while the base position is open.
         This would crash the engine thread in production.
         """
-        base_pos = _make_position(pos_id="base-001")
+        _make_position(pos_id="base-001")
         base_state = EngineState(symbol="NIFTY", position=PositionState(
             id="base-001", entry=100.0, size=10.0, sl=95.0, tp=110.0, side="LONG"
         ))
@@ -100,7 +96,6 @@ class TestPyramidPositionOpenedCrash:
         # (PositionManager.check_pyramid → OMS.add_pyramid) stamps
         # is_pyramid=True on the add-on so the fold treats it as a pyramid.
         pyramid_pos = _make_position(pos_id="pyr-001", entry=101.0)
-        from dataclasses import replace as _replace
         from quant.execution.order import Position as _Position
 
         pyramid_pos = _Position(
@@ -128,7 +123,6 @@ class TestPyramidPositionOpenedCrash:
         store = EventStore()
         base_pos = _make_position(pos_id="base-001")
         pyramid_pos = _make_position(pos_id="pyr-001", entry=101.0)
-        from dataclasses import replace as _replace
         from quant.execution.order import Position as _Position
 
         pyramid_pos = _Position(

@@ -8,10 +8,9 @@ import pytest
 
 from quant.amt.session.selector import (
     OptionSelector,
-    OptionSelectorConfig,
     OptionSelection,
 )
-from quant.amt.session.scanner import OptionScannerService, ScanResult
+from quant.amt.session.scanner import OptionScannerService
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +273,6 @@ def test_momentum_bias_aligns_option_type():
     broker.get_option_chain.return_value = _chain_with_calls_puts()
 
     # Force BULLISH: monkeypatch volume on both sides so CE > PE * 1.5
-    from unittest.mock import patch
     scanner._broker = broker
     chain = _chain_with_calls_puts()
     ce = list(chain.calls.values())[0]

@@ -1,13 +1,12 @@
 """Unit tests for acceptance_rejection — acceptance/rejection at VA boundaries."""
 
-import pytest
 
 from quant.amt.market.acceptance_rejection import ARResult, AcceptanceRejectionEngine
 from quant.contracts.value_objects import OHLC
 
 
-def _candle(t, o, h, l, c, v=1000, delta=0.0) -> OHLC:
-    return OHLC(time=t, open=o, high=h, low=l, close=c, volume=v,
+def _candle(t, o, h, lo, c, v=1000, delta=0.0) -> OHLC:
+    return OHLC(time=t, open=o, high=h, low=lo, close=c, volume=v,
                 delta=delta, taker_buy_volume=0.0)
 
 

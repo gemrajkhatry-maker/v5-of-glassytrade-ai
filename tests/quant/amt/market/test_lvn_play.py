@@ -1,13 +1,12 @@
 """Unit tests for lvn_play_detector — LVN rejection plays."""
 
-import pytest
 
 from quant.amt.market.lvn_play import detect_lvn_play
 from quant.contracts.value_objects import OHLC
 
 
-def _candle(o, h, l, c, v=1000, delta=0.0) -> OHLC:
-    return OHLC(time="09:15", open=o, high=h, low=l, close=c, volume=v,
+def _candle(o, h, lo, c, v=1000, delta=0.0) -> OHLC:
+    return OHLC(time="09:15", open=o, high=h, low=lo, close=c, volume=v,
                 delta=delta, taker_buy_volume=0.0)
 
 

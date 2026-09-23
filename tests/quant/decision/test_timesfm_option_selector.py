@@ -4,11 +4,9 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from quant.decision.timesfm_agents import TimesFMForecast
 from quant.decision.timesfm_option_selector import (
-    ScoredOptionContract,
     TimesFMOptionSelector,
     find_velocity_horizon,
     simulate_contract_payoff,

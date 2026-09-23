@@ -13,7 +13,8 @@ Design Principles:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Optional, AsyncIterator, Dict, Tuple, Union, runtime_checkable, Protocol
+from importlib import import_module as _import_module
+from typing import TYPE_CHECKING, List, Optional, AsyncIterator, Dict, Tuple
 from datetime import datetime
 
 from shared.entities.models import Instrument, Quote, Tick, Order, Position, OptionChain, Option, MarketDepth, FullPacket
@@ -23,24 +24,15 @@ from .market_info import get_lot_size as _get_lot_size, get_step_size as _get_st
 # QuantPosition: this module's own `Position` (broker-layer, from .entities)
 # collides with the engine-layer quant Position used in IBroker's return
 # annotations — alias keeps both layer models distinct (spec §8).
-from quant.contracts.entities import Position as QuantPosition, Signal
-from quant.contracts.aggregates import Portfolio
 
 if TYPE_CHECKING:
     import pandas as pd
-    from rx import Observable
 
 
 # =============================================================================
 # Circuit Breaker - Unified Implementation
 # =============================================================================
 
-from shared.resilience import (
-    CircuitState,
-    CircuitBreakerConfig,
-    CircuitBreakerError,
-    CircuitBreaker,
-)
 
 
 # =============================================================================
@@ -379,8 +371,6 @@ class IBrokerPort(ABC):
 # =============================================================================
 # Engine-Side Execution Port
 # =============================================================================
-
-from importlib import import_module as _import_module
 
 # Compatibility surface for broker implementations. Keep the canonical
 # execution port in the domain without introducing a static domain import edge

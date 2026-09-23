@@ -12,10 +12,7 @@ from __future__ import annotations
 
 import math
 import sys
-import uuid
-from dataclasses import dataclass, field
-from typing import Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,9 +21,7 @@ from quant.events import (
     Event,
     PositionClosed,
     PositionOpened,
-    PositionReduced,
     RiskUpdated,
-    StopMoved,
 )
 from quant.event_store import EventStore
 from quant.execution.order import Fill, Order, Position
@@ -1290,7 +1285,7 @@ class TestFoldIdempotencyWithState:
         initial_len = len(store)
         initial_seq = store._sequence
 
-        state = store.fold()
+        store.fold()
 
         # Store should be unchanged
         assert len(store) == initial_len

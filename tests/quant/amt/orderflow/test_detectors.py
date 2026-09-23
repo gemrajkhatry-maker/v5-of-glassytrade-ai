@@ -1,27 +1,22 @@
 """Unit tests for OrderFlow Detectors — BigTrade, Bubble, OFI, Absorption per FR-03."""
 
-import pytest
 from quant.amt.orderflow.detectors import (
     BigTradeDetector,
     BubbleDetector,
     OFICalculator,
     AbsorptionDetector,
-    BigTradeCluster,
-    BubbleResult,
-    OFIResult,
-    AbsorptionResult,
 )
 from quant.contracts.value_objects import OHLC
 
 
 def _candle(close=100, volume=500, delta=100, high=None, low=None, time="t"):
     h = high or close * 1.01
-    l = low or close * 0.99
+    lo = low or close * 0.99
     return OHLC(
         time=time,
         open=close,
         high=h,
-        low=l,
+        low=lo,
         close=close,
         volume=volume,
         vwap=0,

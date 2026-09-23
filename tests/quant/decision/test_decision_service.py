@@ -2,7 +2,7 @@ from dataclasses import replace
 
 from quant.bars import Bar
 from quant.decision.data_quality import DataQuality
-from quant.decision.decision_service import DecisionService, QuantDecision
+from quant.decision.decision_service import DecisionService
 from quant.decision.context import DecisionContext
 
 

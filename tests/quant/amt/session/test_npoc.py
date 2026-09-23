@@ -6,7 +6,6 @@ Ported from backend/tests/unit/test_npoc_tracker.py; imports rewritten to quant.
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock, call
 
 from quant.contracts.ports.npoc import INPOC, NPOCRecord, NPOCResult
 from quant.amt.session.npoc import NPOCTracker

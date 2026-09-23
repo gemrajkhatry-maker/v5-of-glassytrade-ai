@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app.api.dependencies import get_storage, get_trade_journal

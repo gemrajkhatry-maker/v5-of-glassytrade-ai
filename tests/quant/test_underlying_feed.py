@@ -7,7 +7,7 @@ startup warning.
 """
 
 from quant.brokers.gateway import Tick
-from quant.events import BarClosed, DepthUpdated
+from quant.events import BarClosed
 from quant.runtime import QuantEngine
 from tests.helpers.synthetic import SyntheticGateway
 import quant.runtime as rt

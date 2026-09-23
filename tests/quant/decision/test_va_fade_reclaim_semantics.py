@@ -3,9 +3,9 @@ from quant.decision.context import DecisionContext
 from quant.bars import Bar
 
 
-def _bar(o, h, l, c):
-    return Bar(time=1, open=o, high=h, low=l, close=c, volume=1000,
-               buy_volume=500, sell_volume=500, delta=0, oi=50000, vwap=(h+l+c)/3)
+def _bar(o, h, lo, c):
+    return Bar(time=1, open=o, high=h, low=lo, close=c, volume=1000,
+               buy_volume=500, sell_volume=500, delta=0, oi=50000, vwap=(h+lo+c)/3)
 
 
 def _ctx(**kw):

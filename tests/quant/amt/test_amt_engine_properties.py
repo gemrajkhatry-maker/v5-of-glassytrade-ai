@@ -1,5 +1,4 @@
 # tests/quant/amt/test_amt_engine_properties.py
-import pytest
 from quant.amt_engine import AMTEngine
 from quant.session_levels import SessionLevelStore
 from quant.contracts.value_objects import FloatOHLC

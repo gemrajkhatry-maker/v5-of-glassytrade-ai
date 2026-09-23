@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from quant.amt.session.scanner import OptionScannerService, ContractSwitchGuard
-from tests.quant.parity_harness import assert_parity
+from quant.amt.session.scanner import OptionScannerService
 
 
 def _opt(ltp=100.0, oi=1_000_000, volume=50_000, delta=0.5, symbol="NIFTY 20 MAR 23400 CALL"):

@@ -1,4 +1,3 @@
-import pytest
 from automation.monitor import ContinuousMonitor, MonitorReport, MonitorAction
 
 
@@ -41,7 +40,7 @@ def test_monitor_saves_report(tmp_path):
         test_path="tests/automation/test_scanner.py",
         report_dir=str(tmp_path),
     )
-    report = monitor.run_cycle()
+    monitor.run_cycle()
 
     # Check that a report file was created
     report_files = list(tmp_path.glob("monitor_report_*.json"))

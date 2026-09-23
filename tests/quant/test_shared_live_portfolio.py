@@ -1,6 +1,5 @@
 """Live engines must share one capital book."""
 
-import threading
 
 from quant.execution.live_oms import LiveOMS
 from quant.multi_engine import QuantCoordinator

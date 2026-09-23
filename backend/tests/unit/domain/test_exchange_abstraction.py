@@ -8,9 +8,8 @@ Tests:
 
 from __future__ import annotations
 
-import os
 import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import timezone, timedelta
 
 from quant.contracts.exchange_config import ExchangeConfig
 from quant.amt.session.symbol_registry import SymbolRegistry

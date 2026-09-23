@@ -9,7 +9,6 @@ a fade, so no signal is returned until the reclaim close is in hand.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from quant.decision.context import DecisionContext
 

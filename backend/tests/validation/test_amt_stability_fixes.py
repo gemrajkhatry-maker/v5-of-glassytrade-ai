@@ -11,24 +11,15 @@ Tests verify:
 8. Decision history spans full session
 """
 
-import pytest
-from unittest.mock import MagicMock
-from decimal import Decimal
 
 from quant.amt.orderflow.aggression import (
-    AggressionScorer,
     PersistentAggressionScorer,
 )
 from quant.amt.orderflow.cvd import CVDTracker
 from quant.amt.analyzer import (
-    AMTAnalyzer,
-    AMTConfig,
     LVNPersistenceTracker,
-    find_lvns,
 )
-from quant.amt.market.state_engine import detect_market_state
 from quant.amt.market.structure import (
-    MarketStructureClassifier,
     MarketStructure,
 )
 from quant.contracts.enums import MarketState
@@ -196,9 +187,6 @@ class TestProbingRangeContradiction:
         """When market_state=PROBING and structure=BALANCE, override to TRANSITION."""
         # Note: PROBING is now mapped to IMBALANCED in the 2-state model
         # This test verifies the cross-validation logic is handled in the pipeline
-        from quant.amt.market.structure import (
-            MarketStructure,
-        )
         # PROBING state maps to IMBALANCED
         market_state = MarketState.IMBALANCED
         balance_structure = MarketStructure(
@@ -214,9 +202,6 @@ class TestProbingRangeContradiction:
 
     def test_balanced_state_preserves_balance_structure(self):
         """When market_state=BALANCED, BALANCE structure is valid."""
-        from quant.amt.market.structure import (
-            MarketStructure,
-        )
         balance_structure = MarketStructure(
             state="BALANCE",
             confidence_score=75,

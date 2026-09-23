@@ -1,4 +1,3 @@
-import pytest
 from automation.performance.detector import (
     PerformanceDetector,
     BenchmarkResult,

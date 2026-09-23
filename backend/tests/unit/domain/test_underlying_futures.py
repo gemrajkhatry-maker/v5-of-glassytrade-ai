@@ -1,14 +1,11 @@
 """Tests for UnderlyingFuturesProvider and instrument mapping config."""
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from quant.amt.session.futures_provider import (
-    InstrumentConfig,
-    DualFeedMapping,
     UnderlyingFuturesProvider,
     build_futures_symbol,
     extract_option_date,

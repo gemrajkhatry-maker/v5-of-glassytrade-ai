@@ -14,8 +14,8 @@ from quant.decision.va_fade import detect_gap_fill_fade
 
 def _bar(close: float, high: float | None = None, low: float | None = None) -> Bar:
     h = high if high is not None else close + 1.0
-    l = low if low is not None else close - 1.0
-    return Bar(time="t", open=close, high=h, low=l, close=close,
+    lo = low if low is not None else close - 1.0
+    return Bar(time="t", open=close, high=h, low=lo, close=close,
                volume=1000.0, buy_volume=600.0, sell_volume=400.0)
 
 
@@ -111,7 +111,7 @@ class TestDetectGapFillFade:
         """Gap exists but price has barely entered the gap zone -> no signal."""
         # UP gap: gap_val=110, gap_vah=115. close=114.5 (just barely inside gap)
         # filled = (115-114.5)/5 = 0.1 = 10% < 30% threshold
-        ctx = _ctx(
+        _ctx(
             bar=_bar(close=114.0),  # close > vah=105, so outside VA
         )
         # Actually close must be inside VA for the check. Let me reconsider.

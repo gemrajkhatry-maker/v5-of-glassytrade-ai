@@ -20,9 +20,8 @@ test's expected set, and regenerate the fixture IN THE SAME COMMIT.
 import json
 import pathlib
 
-import pytest
 
-from quant.execution.order import Fill, Order, Position
+from quant.execution.order import Order, Position
 from quant.events import DepthUpdated
 from quant.event_store import EventStore
 from quant.state import project_state, _decision_to_view

@@ -1,5 +1,4 @@
 from quant.decision.context import DecisionContext
-from quant.bars import Bar
 
 
 def test_context_defaults():

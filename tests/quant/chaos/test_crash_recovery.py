@@ -111,7 +111,7 @@ class TestCrashRecovery:
         """Simulate crash mid-trace: events appended to store but state not
         folded. After restart, fold() must recover the correct state."""
         from quant.event_store import EventStore
-        from quant.events import PositionOpened, PositionClosed
+        from quant.events import PositionOpened
         from quant.state_machine import PositionState
 
         store = EventStore()
@@ -153,7 +153,7 @@ class TestCrashRecovery:
                 bar = Bar(time=f"t{i}", close=100.0 + i)
                 event = BarClosed(symbol="TEST", time=f"t{i}", bar=bar)
                 store.append(event)
-                state_local = apply_event(state, event)  # nonlocal in real code
+                apply_event(state, event)  # nonlocal in real code
                 time.sleep(0.0001)  # small window for race
             stop.set()
 
@@ -498,7 +498,8 @@ class TestDiskFull:
         from quant.persistence import Journal
 
         # Create a journal pointing to a read-only path to force OSError
-        import tempfile, os
+        import tempfile
+        import os
         with tempfile.TemporaryDirectory() as tmpdir:
             journal_path = os.path.join(tmpdir, "test.jsonl")
             journal = Journal(path=journal_path)
@@ -522,8 +523,9 @@ class TestDiskFull:
         """Journal tracks consecutive_failures but QuantCoordinator's
         journal_consecutive_failures() is the only consumer — and it's
         only used for /health display, never for halt."""
-        import tempfile, os
-        from unittest.mock import patch, MagicMock
+        import tempfile
+        import os
+        from unittest.mock import MagicMock
         from quant.persistence import Journal
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -693,8 +695,8 @@ class TestDoubleCloseGuardReset:
         assert refused is None, "guard did not block the re-close after manage_exit"
         double_closed = [e for e in emitted if isinstance(e, PositionClosed)]
         assert len(double_closed) == 0, (
-            f"CRITICAL: Double-close guard is non-functional — "
-            f"base_pos was closed again after manage_exit"
+            "CRITICAL: Double-close guard is non-functional — "
+            "base_pos was closed again after manage_exit"
         )
 
 
@@ -788,7 +790,7 @@ class TestPositionIdMismatch:
         state = EngineState(symbol="NIFTY", position=base)
 
         # Close a pyramid that was never opened (different ID)
-        pyr_pos = _make_position(size=50.0, pos_id="pyr-1")
+        _make_position(size=50.0, pos_id="pyr-1")
         pyr_fill = MockFill(pos_id="pyr-1", size=50.0)
         event = PositionClosed(symbol="NIFTY", time="t1", fill=pyr_fill)
 

@@ -9,7 +9,7 @@ from quant.events import (
     RiskUpdated,
 )
 from quant.execution.risk import RiskState
-from quant.state import ViewState, project_state
+from quant.state import project_state
 from quant.state_machine import EngineState
 from quant.ws_adapter import view_state_to_ws
 
@@ -68,7 +68,6 @@ def test_agent_decision_passthrough_only():
 
 
 def test_agent_decision_from_advisor_event():
-    from quant.events import AgentDecisionProduced
     vs = _view_state_with_everything()
     from dataclasses import replace
     vs = replace(vs, agent_decision={

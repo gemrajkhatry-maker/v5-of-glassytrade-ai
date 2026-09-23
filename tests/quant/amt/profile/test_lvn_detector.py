@@ -1,6 +1,5 @@
 """Tests for LVNDetector — independent, isolated tests."""
 
-import pytest
 
 from quant.amt.profile.lvn import (
     HVNLevel,
@@ -119,7 +118,7 @@ class TestFindLVNs:
         profile = _uniform_profile(20, vol=1000)
         profile[10] = VolumeProfileLevel(price=10.0, volume=1)
         lvns = find_lvns(profile, smoothing_window=1)
-        assert any(l.price == 10.0 for l in lvns)
+        assert any(lv.price == 10.0 for lv in lvns)
 
     def test_uniform_profile_no_lvns(self):
         """Uniform volume has no local minima → no LVNs regardless of percentile."""

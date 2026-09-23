@@ -409,7 +409,8 @@ class Portfolio:
         if any(p.id == position_id for p in self.positions):
             return None
 
-        _dec = lambda v: Decimal(str(v)) if v is not None and v != 0 else Decimal("0")
+        def _dec(v):
+            return Decimal(str(v)) if v is not None and v != 0 else Decimal("0")
 
         side_val = str(pos_data.get("side", "LONG")).upper()
         side = Side.LONG if side_val == "LONG" else Side.SHORT

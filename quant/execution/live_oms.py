@@ -424,7 +424,7 @@ class LiveOMS:
             )
 
         _fill = broker_position_to_fill(broker_pos, fallback_price=price, fallback_qty=qty)
-        fill_price, filled_qty = _fill.fill_price, _fill.filled_qty
+        fill_price, _filled_qty = _fill.fill_price, _fill.filled_qty
 
         partial_pnl = (fill_price - position.open_price) * closed_size
 

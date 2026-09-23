@@ -1,7 +1,6 @@
 """Integration tests for non-blocking LLM Advisor and ViewState streaming."""
 
 import time
-import pytest
 from quant.runtime import QuantEngine
 from tests.helpers.synthetic import SyntheticGateway
 from tests.quant.runtime.test_runtime import _ticks

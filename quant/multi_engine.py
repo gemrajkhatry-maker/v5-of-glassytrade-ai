@@ -69,6 +69,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from quant.decision.timesfm_forecast_factory import FALLBACK_BAND_PCT
 from quant.amt.session.scanner import OptionScannerService
@@ -87,9 +88,7 @@ from quant.contracts.vocabulary import is_call_symbol, is_put_symbol
 from quant.session_gates import parse_contract_expiry
 from quant.contracts.market_calendar import is_trading_day
 from quant.contracts.timezones import IST, MCX_SESSION_CLOSE, NSE_SESSION_CLOSE
-from quant.events import BarClosed
 from quant.execution.live_oms import LiveOMS
-from quant.execution.oms import PaperOMS
 from quant.execution.paper_reconciliation import PaperPositionReconciler, ReconciliationResult
 from quant.execution.ledger_reconstruction import reconstruct_fill_ledger
 from quant.execution.readiness import readiness_status, ReadinessStatus
@@ -2159,7 +2158,6 @@ class QuantCoordinator:
             # fallthrough when open_rows empty
 
         if _journal_dir:
-            from quant.persistence import Journal
             from quant.contracts.timezones import IST as _IST_TZ
 
             day = _dt.now(tz=_IST_TZ).strftime("%Y-%m-%d")

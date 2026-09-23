@@ -3,7 +3,6 @@
 import pytest
 
 from quant.amt.profile.volume_profile import (
-    VolumeProfileSnapshot,
     build_snapshot,
     compute_bucket_index,
     compute_poc,
@@ -13,8 +12,8 @@ from quant.amt.profile.volume_profile import (
 from quant.contracts.value_objects import OHLC, VolumeProfileLevel
 
 
-def _make_candle(time: str, o: float, h: float, l: float, c: float, v: float) -> OHLC:
-    return OHLC.create(time=time, open=o, high=h, low=l, close=c, volume=v)
+def _make_candle(time: str, o: float, h: float, lo: float, c: float, v: float) -> OHLC:
+    return OHLC.create(time=time, open=o, high=h, low=lo, close=c, volume=v)
 
 
 class TestBucketIndex:
@@ -237,7 +236,7 @@ class TestVolumeProfileIntegration:
                     f"09:{15 + i:02d}",
                     o=base,
                     h=base + 30,
-                    l=base - 10,
+                    lo=base - 10,
                     c=base + 15,
                     v=1000 + i * 100,
                 )

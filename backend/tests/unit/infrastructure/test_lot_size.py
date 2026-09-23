@@ -4,8 +4,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import os
-from unittest.mock import MagicMock, AsyncMock, patch
-import pytest
+from unittest.mock import MagicMock
 
 # Ensure project root is on path
 _project_root = os.path.normpath(
@@ -14,10 +13,10 @@ _project_root = os.path.normpath(
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter
-from quant.contracts.ports.market_data import IMarketData
-from brokers.broker.dhan.application.broker import DhanBroker
-from brokers.broker.types import Exchange
+from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter  # noqa: E402
+from quant.contracts.ports.market_data import IMarketData  # noqa: E402
+from brokers.broker.dhan.application.broker import DhanBroker  # noqa: E402
+from brokers.broker.types import Exchange  # noqa: E402
 
 class MockMarketData(IMarketData):
     """Mock implementation of IMarketData to test default get_lot_size."""

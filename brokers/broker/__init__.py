@@ -27,4 +27,6 @@ __all__ = [
     'DepthLevel',
     # Ports
     'IBrokerPort',
+    # Subpackage (eager import for registration side effects)
+    'dhan',
 ]

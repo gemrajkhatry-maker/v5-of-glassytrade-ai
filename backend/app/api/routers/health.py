@@ -5,17 +5,13 @@ import logging
 
 from app.core.async_boundary import ensure_sync_adapter_result
 
-logger = logging.getLogger(__name__)
-
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from app.api.dependencies import (
-    ActiveSymbolsDep,
     BrokerDep,
     ConfigDep,
     StorageDep,
     get_active_symbols,
-    get_broker,
     get_configuration,
     get_market_data,
     get_storage,
@@ -25,6 +21,8 @@ from quant.probability.features import (
     FEATURE_NAMES,
     PROBABILITY_FEATURE_SCHEMA_VERSION,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["health"])
 
@@ -379,7 +377,7 @@ async def scanner_rescan(request: Request):
 
     if results:
         final = [r for r in results if r.ltp > 0] or results
-        active_symbols = [r.symbol for r in final]
+        [r.symbol for r in final]
         return {
             "count": len(final),
             "contracts": [

@@ -23,9 +23,7 @@ Contract after N3:
    (``live_evidence_exact``) — unchanged.
 """
 
-from dataclasses import replace as _dc_replace
 
-import pytest
 
 from quant.bars import Bar
 from quant.decision.context import DecisionContext

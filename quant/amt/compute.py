@@ -303,9 +303,9 @@ def batch_atr(highs: list[float], lows: list[float], closes: list[float], period
     if not _HAS_MLX or len(highs) < _MLX_MIN_SIZE:
         return atr(highs, lows, closes, period)
     h = mx.array(highs[1:], dtype=mx.float32)
-    l = mx.array(lows[1:], dtype=mx.float32)
+    lo = mx.array(lows[1:], dtype=mx.float32)
     prev_c = mx.array(closes[:-1], dtype=mx.float32)
-    tr = mx.maximum(h - l, mx.maximum(mx.abs(h - prev_c), mx.abs(l - prev_c)))
+    tr = mx.maximum(h - lo, mx.maximum(mx.abs(h - prev_c), mx.abs(lo - prev_c)))
     subset = tr[-period:] if len(tr) >= period else tr
     result = mx.mean(subset).item()
     return result if result > 0 else 1.0

@@ -84,7 +84,6 @@ class TestTradingInvariants:
 
     def test_signal_reason_string_is_current(self):
         """Ensure the '7 gates' ghost string is not reintroduced."""
-        from pathlib import Path
         signal_file = ROOT / 'quant' / 'decision' / 'signal_builder.py'
         content = signal_file.read_text()
         assert '7 gates' not in content, (

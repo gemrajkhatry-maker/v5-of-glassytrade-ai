@@ -1,7 +1,6 @@
 """Tests for auth provider wiring in DhanBroker factory and components."""
 import os
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

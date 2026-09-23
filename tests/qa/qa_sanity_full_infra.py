@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import datetime
-from unittest.mock import MagicMock
 from quant.brokers.gateway import Tick
 from quant.multi_engine import QuantCoordinator
 
@@ -68,11 +67,11 @@ def run_sanity():
     print("="*50)
     
     # 1. Pipeline Execution Order
-    print(f"\n1. EXECUTION ORDER:")
+    print("\n1. EXECUTION ORDER:")
     print("  [PASS] Data Ingestion -> AMT Analysis -> Decision Logic executed in strict deterministic order.")
         
     # 2. Live Quote Cache
-    print(f"\n2. LIVE QUOTE CACHE:")
+    print("\n2. LIVE QUOTE CACHE:")
     print(f"  Symbol: {state.symbol}")
     print(f"  LTP: {state.ltp}")
     if state.ltp == 24540.0:

@@ -19,7 +19,6 @@ from tests.validation.synthetic_market_data import (
     get_scenario_trend_long_at_lvn,
     get_scenario_balanced_mean_reversion,
     get_scenario_no_trade_choppy,
-    get_scenario_first_drive_fakeout,
 )
 
 

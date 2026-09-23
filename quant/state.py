@@ -23,7 +23,6 @@ from typing import Any
 from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.timezones import IST, epoch_to_iso
 from quant.decision.decision_service import QuantDecision
-from quant.execution.order import Fill, Position
 from quant.execution.risk import RiskState
 from quant.state_machine import EngineState
 

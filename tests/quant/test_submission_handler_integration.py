@@ -11,7 +11,7 @@ Tests realistic OMS scenarios including:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -19,8 +19,7 @@ import pytest
 
 from quant.decision.signal_builder import Signal
 from quant.engine.submission_handler import SubmissionHandler
-from quant.events import PositionOpened, SignalApproved, SignalBlocked
-from quant.execution.exposure import ExposureState
+from quant.events import PositionOpened, SignalApproved
 
 
 # ---------------------------------------------------------------------------

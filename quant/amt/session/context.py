@@ -25,7 +25,6 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone, timedelta
 from functools import lru_cache
-from typing import Literal
 
 from quant.contracts.sync_boundary import ensure_sync_adapter_result
 from quant.contracts.timezones import (

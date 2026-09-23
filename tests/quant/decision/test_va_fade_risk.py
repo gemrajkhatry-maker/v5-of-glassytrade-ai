@@ -1,18 +1,17 @@
 # tests/quant/decision/test_va_fade_risk.py
 """Tests for Value-Area Fade Structural Risk and Invalidation (Task 5)."""
 
-import pytest
 from quant.decision.context import DecisionContext
 from quant.decision.va_fade import detect_va_fade
 from quant.bars import Bar
 
 
-def _make_bar(c, l, h):
+def _make_bar(c, lo, h):
     return Bar(
         time="2026-08-19T10:00:00+05:30",
         open=c,
         high=h,
-        low=l,
+        low=lo,
         close=c,
         volume=1000.0,
         buy_volume=600.0,
@@ -23,7 +22,7 @@ def _make_bar(c, l, h):
 
 def test_val_bounce_fade_has_structural_stop_below_probe_low():
     # probed below VAL, closed back inside VA
-    bar = _make_bar(c=95.5, l=93.0, h=96.0)
+    bar = _make_bar(c=95.5, lo=93.0, h=96.0)
     ctx = DecisionContext(
         bar=bar,
         poc=100.0,
@@ -44,7 +43,7 @@ def test_val_bounce_fade_has_structural_stop_below_probe_low():
 
 def test_vah_rejection_fade_has_structural_stop_above_probe_high():
     # probed above VAH, closed back inside VA
-    bar = _make_bar(c=104.5, l=104.0, h=107.0)
+    bar = _make_bar(c=104.5, lo=104.0, h=107.0)
     ctx = DecisionContext(
         bar=bar,
         poc=100.0,
@@ -64,7 +63,7 @@ def test_vah_rejection_fade_has_structural_stop_above_probe_high():
 
 
 def test_inside_va_does_not_fade():
-    bar = _make_bar(c=100.0, l=99.0, h=101.0)
+    bar = _make_bar(c=100.0, lo=99.0, h=101.0)
     ctx = DecisionContext(
         bar=bar,
         poc=100.0,

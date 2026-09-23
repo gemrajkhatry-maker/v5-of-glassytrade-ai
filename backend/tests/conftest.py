@@ -11,7 +11,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 # Before any LightGBM/MLX imports: avoid OpenMP runtime aborts in mixed native stacks.
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")

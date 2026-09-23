@@ -1,6 +1,5 @@
 """Unit tests for MarketStructureClassifier — regime detection from candle data."""
 
-import pytest
 from quant.contracts.value_objects import OHLC
 from quant.amt.market.structure import (
     MarketStructureClassifier,

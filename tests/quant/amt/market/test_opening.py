@@ -1,13 +1,12 @@
 """Unit tests for OpeningTypeClassifier — market open auction analysis."""
 
-import pytest
 
 from quant.amt.market.opening import OpeningTypeClassifier, OpeningTypeResult
 from quant.contracts.value_objects import OHLC
 
 
-def _candle(o, h, l, c, v=1000) -> OHLC:
-    return OHLC(time="09:15", open=o, high=h, low=l, close=c, volume=v,
+def _candle(o, h, lo, c, v=1000) -> OHLC:
+    return OHLC(time="09:15", open=o, high=h, low=lo, close=c, volume=v,
                 delta=0.0, taker_buy_volume=0.0)
 
 

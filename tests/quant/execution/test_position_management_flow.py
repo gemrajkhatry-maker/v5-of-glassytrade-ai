@@ -2,9 +2,7 @@
 """Tests for 7-Level Deterministic Exit Priority and Position Management Flow (Task 7)."""
 
 import uuid
-import pytest
-from quant.execution.exits import ExitEngine, ExitDecision
-from quant.contracts.enums import MarketState
+from quant.execution.exits import ExitEngine
 
 
 class DummySignal:

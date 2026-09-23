@@ -1,7 +1,6 @@
 # tests/quant/decision/test_setup_state.py
 """Tests for SetupEvidence and Fabio Setup State Transitions (Task 2)."""
 
-import pytest
 from quant.decision.setup_state import SetupEvidence
 
 

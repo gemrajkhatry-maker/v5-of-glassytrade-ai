@@ -24,20 +24,16 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
 from quant.event_store import EventStore
 from quant.events import (
     BarClosed,
-    Event,
     PositionClosed,
     PositionOpened,
-    RiskUpdated,
 )
-from quant.state_machine import Bar, EngineState, PositionState, RiskState
-from quant.transitions import apply_event
+from quant.state_machine import Bar, PositionState
 
 
 # =============================================================================
@@ -329,7 +325,7 @@ class TestPrivateMemberAccess:
         store.append(_make_bar_close())
 
         # Attacker directly modifies the events list
-        original_event = store._events[0]
+        store._events[0]
         store._events[0] = _make_bar_close(symbol="TAMPERED")
 
         # SECURE: This should not be possible
@@ -556,7 +552,7 @@ class TestFoldWithoutVerification:
 
         # SECURE: fold() should raise SecurityError
         # Actual: fold() proceeds without checking
-        state = store.fold()  # Should raise, but doesn't
+        store.fold()  # Should raise, but doesn't
 
 
 # =============================================================================

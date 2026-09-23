@@ -8,7 +8,6 @@ failure. A trader reading logs would see a scary warning on every fresh start.
 """
 import json
 import logging
-import pytest
 
 from quant.execution.risk import RiskLoadStatus, SessionRisk
 

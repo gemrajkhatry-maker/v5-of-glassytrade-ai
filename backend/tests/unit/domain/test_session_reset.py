@@ -6,17 +6,16 @@ import pytest
 from quant.contracts.value_objects import OHLC
 from quant.amt.orderflow.cvd import CVDTracker
 from quant.amt.analyzer import AMTAnalyzer
-from tests.helpers.market_data import generate_market_data
 
 
 def _candle(close: float, time: str, delta: float = 10.0,
             volume: float = 1000.0) -> OHLC:
     h = close * 1.002
-    l = close * 0.998
+    lo = close * 0.998
     return OHLC(
-        time=time, open=close, high=h, low=l,
+        time=time, open=close, high=h, low=lo,
         close=close, volume=volume,
-        vwap=(h + l + close) / 3,
+        vwap=(h + lo + close) / 3,
         taker_buy_volume=(volume + delta) / 2,
         delta=delta,
     )

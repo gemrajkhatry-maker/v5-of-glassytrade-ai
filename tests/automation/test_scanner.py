@@ -1,4 +1,3 @@
-import pytest
 from automation.quality.scanner import CodeQualityScanner, QualityReport, QualityIssue
 
 

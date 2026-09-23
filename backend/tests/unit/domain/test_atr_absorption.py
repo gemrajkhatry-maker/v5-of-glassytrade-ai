@@ -22,12 +22,12 @@ def _candle(
     volume: float = 100.0,
 ) -> OHLC:
     h = price + 5 if high is None else high
-    l = price - 5 if low is None else low
+    lo = price - 5 if low is None else low
     return OHLC(
         time=f"2026-01-01T09:{i:02d}:00Z",
         open=price,
         high=h,
-        low=l,
+        low=lo,
         close=price,
         volume=volume,
         delta=0,

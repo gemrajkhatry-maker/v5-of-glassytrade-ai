@@ -1,6 +1,6 @@
 """Tests for QuantCoordinator.emergency_halt(force_close=True)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import threading
 
 from quant.multi_engine import QuantCoordinator

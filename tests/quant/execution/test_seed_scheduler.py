@@ -11,7 +11,6 @@ Phase 0.5 introduces:
 - Per-engine seed status exposed for readiness and telemetry
 """
 import time
-import pytest
 
 from quant.execution.seed_scheduler import (
     HistorySeedScheduler,

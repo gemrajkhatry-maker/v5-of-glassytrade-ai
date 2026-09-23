@@ -1,7 +1,6 @@
 # tests/quant/decision/test_setup_approval_flow.py
 """Tests for Fabio Setup Approval Flows (Task 4)."""
 
-import pytest
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
 from quant.decision.setup_state import SetupEvidence

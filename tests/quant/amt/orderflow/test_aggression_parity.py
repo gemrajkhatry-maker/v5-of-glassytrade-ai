@@ -4,9 +4,7 @@ Compare AggressionScorer.score() for the boolean-mask combos: all-False,
 all-True, and mixed.
 """
 
-import pytest
 from quant.amt.orderflow.aggression import AggressionScorer as NewScorer
-from tests.quant.parity_harness import assert_parity
 
 
 def _kw(i):

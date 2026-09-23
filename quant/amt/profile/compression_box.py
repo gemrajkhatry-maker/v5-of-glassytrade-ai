@@ -30,7 +30,6 @@ from dataclasses import dataclass
 from quant.contracts.value_objects import OHLC
 
 from quant.amt.profile.volume_profile import (
-    build_snapshot,
     compute_poc,
     compute_value_area,
     create_profile,
@@ -136,7 +135,7 @@ class CompressionBoxDetector:
             return _EMPTY_BOX
 
         max_range = self._range_ticks * tick_size
-        last = data[-1]
+        data[-1]
 
         best: CompressionBox | None = None
 

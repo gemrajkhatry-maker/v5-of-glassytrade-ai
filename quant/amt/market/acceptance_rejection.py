@@ -15,6 +15,7 @@ from datetime import datetime
 from quant.contracts.candle_metrics import (
     body as calc_body,
 )
+from quant.contracts.value_objects import OHLC
 
 logger = logging.getLogger(__name__)
 

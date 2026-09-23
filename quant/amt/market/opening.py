@@ -52,7 +52,7 @@ class OpeningTypeClassifier:
         lowest = min(float(d.low) for d in data)
         
         total_range = highest - lowest
-        dist_from_open = current_price - open_price
+        current_price - open_price
         
         # 1. OPEN DRIVE (Strong move, no look back)
         # Criteria: range is > 1.5x of first candle, and close is at extreme 20% of range
@@ -69,7 +69,8 @@ class OpeningTypeClassifier:
         # Criteria: Price tests prior VA boundary or POC and reverses hard
         levels = [prior_vah, prior_val, prior_poc]
         for level in levels:
-            if level <= 0: continue
+            if level <= 0:
+                continue
             
             # Test above then reject
             if highest >= level - self._tick_size * 2 and highest <= level + self._tick_size * 10:

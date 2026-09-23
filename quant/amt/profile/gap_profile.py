@@ -29,12 +29,11 @@ Usage::
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from quant.contracts.value_objects import OHLC
 
 from quant.amt.profile.volume_profile import (
-    build_snapshot,
     compute_poc,
     compute_value_area,
     create_profile,

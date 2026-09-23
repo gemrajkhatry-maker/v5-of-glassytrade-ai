@@ -1,9 +1,6 @@
 """Tests for P1-P10 performance and reliability fixes."""
 
 import queue
-import re
-from dataclasses import dataclass
-from unittest.mock import MagicMock
 
 import pytest
 

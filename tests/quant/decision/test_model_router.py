@@ -1,5 +1,4 @@
 """One selector: auction state picks the model, certified evidence may override."""
-import pytest
 from quant.contracts.enums import MarketState
 from quant.decision.model_router import (
     TREND, MEAN_REVERSION, allows, select_model, setup_model,

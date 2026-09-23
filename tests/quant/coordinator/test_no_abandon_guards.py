@@ -13,7 +13,6 @@ PositionManager) through the coordinator guards.
 """
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from quant.brokers.gateway import Tick

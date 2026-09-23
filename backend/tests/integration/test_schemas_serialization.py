@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
-from quant.contracts.enums import Side, Source, SignalType, SetupType, PositionStatus
+from quant.contracts.enums import Side, Source, SignalType, SetupType
 from quant.contracts.value_objects import (
-    OHLC, OrderBook, OrderBookLevel,
-    StrategyStats, FootprintLevel, FootprintCandle,
-    AMTResult, VolumeProfileLevel, AggressivePrint,
+    OHLC, StrategyStats, FootprintLevel, FootprintCandle,
+    AMTResult,
 )
 from quant.contracts.entities import Signal, Position
 from quant.contracts.aggregates import Portfolio

@@ -1,7 +1,5 @@
 """The active analyzer computes raw order-flow components (no direction gating)."""
 
-from types import SimpleNamespace
-from unittest.mock import patch
 
 from quant.amt.orderflow.compute import compute_order_flow_metrics
 from quant.contracts.enums import MarketState

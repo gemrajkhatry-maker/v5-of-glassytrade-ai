@@ -1,6 +1,5 @@
 """Tests for CompressionBoxDetector — Layer 2 micro-balance profile (spec §5.2)."""
 
-import pytest
 
 from quant.amt.profile.compression_box import (
     CompressionBoxDetector,
@@ -19,12 +18,12 @@ def _candle(
 ) -> OHLC:
     """Build a FloatOHLC-like OHLC with float fields."""
     h = high if high is not None else close + 0.1
-    l = low if low is not None else close - 0.1
+    lo = low if low is not None else close - 0.1
     return OHLC(
         time=time,
         open=close,
         high=h,
-        low=l,
+        low=lo,
         close=close,
         volume=volume,
         vwap=close,

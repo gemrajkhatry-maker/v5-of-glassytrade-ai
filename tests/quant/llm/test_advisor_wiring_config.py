@@ -13,13 +13,11 @@ changes (Phase 3) can be validated against a known baseline.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-import pytest  # noqa: E402
 
 from quant.brokers.gateway import Tick  # noqa: E402
 from quant.events import AgentDecisionProduced, DecisionProduced  # noqa: E402
@@ -72,7 +70,7 @@ class TestBuildLiveAdvisorEnvGating:
         # Without MLX_MODEL_PATH, the advisor constructs in rule-based mode
         # or fails gracefully — either way, the env gate didn't block it
         monkeypatch.delenv("MLX_MODEL_PATH", raising=False)
-        result = build_live_advisor(None)
+        build_live_advisor(None)
         # Result may be None (if import fails) or an LLMAdvisor instance
         # The key assertion is that we got PAST the env check
         # (no assertion on result being None here — that would mean the env gate blocked)

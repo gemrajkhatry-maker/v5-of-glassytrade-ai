@@ -1,7 +1,6 @@
 """Verify TickHandler extraction from runtime.py."""
 
 from unittest.mock import MagicMock, Mock
-import pytest
 
 from quant.engine.tick_handler import TickHandler
 

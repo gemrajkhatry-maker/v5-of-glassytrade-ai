@@ -8,14 +8,12 @@ The manager receives dependencies via constructor injection.
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from quant.contracts.enums import MarketState
 from quant.contracts.vocabulary import absorption_direction
 from quant.decision.stops import structural_stop
-from quant.execution.exit_checks import is_terminal_tp_only, tp2_level
 from quant.execution.exits import ExitDecision, ExitEngine
-from quant.execution.oms import PaperOMS
 from quant.execution.ports import IOMS
 from quant.execution.risk import SessionRisk
 from quant.events import (
@@ -24,6 +22,9 @@ from quant.events import (
 )
 from quant.session_gates import session_allow_entry, session_force_exit, ist_dt as _ist_dt
 from quant.amt.session.context import get_session_info, seconds_to_close
+
+if TYPE_CHECKING:
+    from quant.execution.order import Position
 
 logger = logging.getLogger(__name__)
 

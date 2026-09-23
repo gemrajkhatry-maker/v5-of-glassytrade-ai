@@ -1,10 +1,6 @@
 """Gate 3 — the Triple-A edge (Fabio: absorption -> accumulation -> aggression)."""
 
 from quant.amt.orderflow.aggression import canonical_absorption_direction, AggressionScorer
-from quant.contracts.constants import (
-    ABSORPTION_MAX_AGE_BARS as _ABSORPTION_MAX_AGE_BARS,
-    OBI_AGGRESSION_THRESHOLD as _OBI_AGGRESSION_THRESHOLD,
-)
 from quant.contracts.enums import MarketState
 
 from quant.decision.context import DecisionContext
@@ -354,10 +350,12 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
     # This ensures the aggression score reflects the actual candidate trade
     # direction, not the observed bar delta (which the AMT engine uses
     # since it runs before the strategy direction is resolved).
-    aggression_score = rescore_aggression_with_direction(ctx)
+    rescore_aggression_with_direction(ctx)
 
     r = _check_guards(ctx)
-    if r: return r
+    if r:
+        return r
     r = _check_setup_paths(ctx, ctx.cvd_slope)
-    if r: return r
+    if r:
+        return r
     return GateResult(3, False, "No Triple-A edge: no valid setup")

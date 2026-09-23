@@ -29,7 +29,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from quant.brokers.gateway import Tick  # noqa: E402
 from quant.events import (  # noqa: E402
-    BarClosed,
     DecisionProduced,
     PositionOpened,
 )
@@ -250,7 +249,6 @@ def test_zero_size_position_never_opens():
     deployment path costs lot_size × entry × 0.15 per lot. A small account
     still cannot afford even one lot — that is the zero-guard invariant."""
     from quant.execution.risk import SessionRisk
-    from quant.decision.context import DecisionContext
 
     # Tiny account: 50% deployment = 50K budget; 120-lot × 14912 × 0.15
     # = 268K/lot → 0 lots affordable.

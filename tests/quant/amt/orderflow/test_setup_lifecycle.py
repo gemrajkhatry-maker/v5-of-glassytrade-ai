@@ -1,7 +1,6 @@
 # tests/quant/amt/orderflow/test_setup_lifecycle.py
 """Tests for Drive Tracker and Order Flow Lifecycle (Task 8)."""
 
-import pytest
 from quant.amt.orderflow.drive import DriveTracker
 from quant.contracts.value_objects import OHLC
 

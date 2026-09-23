@@ -1,4 +1,4 @@
-from quant.execution.protective_stop import ProtectiveStopState
+from quant.execution.protective_stop import ProtectiveStopState, resolve_protective_stop
 
 
 def test_long_stop_tightens_monotonically():
@@ -30,8 +30,6 @@ def test_invalid_or_non_tightening_candidates_are_ignored():
     state = ProtectiveStopState(submitted_sl=95.0)
     assert state.tighten(0.0, kind="TRAIL", bar_index=1) == state
     assert state.tighten(94.0, kind="TRAIL", bar_index=2) == state
-
-from quant.execution.protective_stop import resolve_protective_stop
 
 
 def test_resolve_protective_stop_matches_bar_and_tick_precedence():

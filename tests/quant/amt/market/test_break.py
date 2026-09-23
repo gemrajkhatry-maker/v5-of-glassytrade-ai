@@ -1,13 +1,12 @@
 """Unit tests for break_detector — initiative/responsive/absorption breaks."""
 
-import pytest
 
-from quant.amt.market.break_detector import BreakResult, detect_break, check_ib_break_tick
+from quant.amt.market.break_detector import detect_break, check_ib_break_tick
 from quant.contracts.value_objects import OHLC
 
 
-def _candle(o, h, l, c, v=1000, delta=0.0) -> OHLC:
-    return OHLC(time="09:15", open=o, high=h, low=l, close=c, volume=v,
+def _candle(o, h, lo, c, v=1000, delta=0.0) -> OHLC:
+    return OHLC(time="09:15", open=o, high=h, low=lo, close=c, volume=v,
                 delta=delta, taker_buy_volume=0.0)
 
 

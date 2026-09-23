@@ -2,7 +2,7 @@
 """Tests for Option Delta Translation and Risk per Unit (Task 5)."""
 
 import pytest
-from quant.amt.session.selector import OptionSelector, OptionSelectorConfig
+from quant.amt.session.selector import OptionSelector
 
 
 def test_delta_stop_mapping_scales_underlying_stop_to_option_stop():
@@ -147,7 +147,6 @@ def test_aligned_stacked_imbalance_does_not_block():
 def test_print_wall_anchors_sl_for_long():
     """Gap #10: a big BUY print below price becomes SL support — the wall
     beats VA/LVN in anchor priority."""
-    from dataclasses import replace as _dc_replace
     from quant.decision.context import DecisionContext
     from quant.decision.signal_builder import SignalBuilder
     from quant.decision.result import GateResult

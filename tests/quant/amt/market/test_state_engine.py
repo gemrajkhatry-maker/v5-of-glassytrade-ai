@@ -4,7 +4,6 @@ import pytest
 from quant.amt.market.state_engine import (
     detect_market_state,
     classify_zone,
-    MarketStateResult,
 )
 from quant.contracts.enums import MarketState
 

@@ -6,12 +6,11 @@ using the new clean architecture with dependency injection.
 """
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
-import asyncio
+from unittest.mock import patch, MagicMock, AsyncMock
 import pandas as pd
 
-from brokers.broker.types import Exchange, OptionType, OrderSide, OrderStatus
-from shared.entities.models import Instrument, Quote, Tick, Order, Position, OptionChain
+from brokers.broker.types import Exchange
+from shared.entities.models import Instrument, Quote
 from brokers.broker.ports import IBrokerPort
 
 

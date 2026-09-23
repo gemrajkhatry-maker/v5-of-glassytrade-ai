@@ -35,7 +35,6 @@ from collections import defaultdict
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 

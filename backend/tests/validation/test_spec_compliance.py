@@ -16,7 +16,6 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import pytest
-from types import SimpleNamespace
 
 
 # ============================================================================
@@ -152,7 +151,7 @@ class TestMarketStateEngine:
 
     def test_balanced_inside_va(self):
         """Price inside VA = BALANCED."""
-        vah, val, poc = 105, 95, 100
+        vah, val, _poc = 105, 95, 100
         price = 101  # Inside VA
         is_balanced = val <= price <= vah
         assert is_balanced

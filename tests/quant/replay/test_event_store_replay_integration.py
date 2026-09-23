@@ -20,13 +20,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from quant.brokers.gateway import Tick  # noqa: E402
 from quant.event_store import EventStore  # noqa: E402
-from quant.events import (  # noqa: E402
-    BarClosed,
-    DecisionProduced,
-    PositionClosed,
-    PositionOpened,
-    RiskUpdated,
-)
 from quant.execution.risk import SessionRisk  # noqa: E402
 from quant.runtime import QuantEngine  # noqa: E402
 from tests.helpers.synthetic import SyntheticGateway  # noqa: E402

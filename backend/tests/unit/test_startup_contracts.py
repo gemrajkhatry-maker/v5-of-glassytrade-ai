@@ -1,6 +1,5 @@
 """Unit tests for _build_startup_contracts runtime probes."""
 
-import pytest
 from app.main import _build_startup_contracts
 
 

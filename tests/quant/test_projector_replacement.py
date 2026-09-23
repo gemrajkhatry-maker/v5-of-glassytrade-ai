@@ -41,4 +41,4 @@ class TestFoldIsSoleAuthority:
     def test_state_projector_removed(self):
         """StateProjector has been removed — importing it raises ImportError."""
         with pytest.raises(ImportError):
-            from quant.state import StateProjector
+            pass

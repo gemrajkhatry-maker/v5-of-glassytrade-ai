@@ -36,16 +36,14 @@ from __future__ import annotations
 from quant.contracts.enums import MarketState
 
 import logging
-import math
-import re
-from datetime import datetime
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from quant.amt.orderflow.footprint import TickFootprintAccumulator
+    from quant.amt.session.npoc import NPOCTracker
 
-from quant.amt import compute as mc
 
-from quant.contracts.enums import MarketState, SignalType, Source, SetupType
+from quant.contracts.enums import SetupType
 from quant.contracts.instrument_registry import is_option_contract
 from quant.contracts.vocabulary import is_call_symbol, is_put_symbol
 from quant.contracts.value_objects import (
@@ -59,8 +57,6 @@ from quant.amt.triple_a import TripleAMachine
 from quant.contracts.constants import (
     LVN_MIN_PERSISTENCE_BARS,
     LVN_REMOVAL_THRESHOLD,
-    DELTA_PROFILE_BUCKETS,
-    DISPLACEMENT_LOOKBACK,
     IB_MINUTES,
     VALUE_AREA_PCT,
     LVN_THRESHOLD,
@@ -95,7 +91,6 @@ from quant.amt.market.state_engine import (
 )
 from quant.amt.orderflow.drive import DriveTracker
 from quant.amt.orderflow.aggression import (
-    AggressionScorer,
     PersistentAggressionScorer,
 )
 from quant.amt.orderflow.aggressive_prints import (
@@ -105,20 +100,14 @@ from quant.amt.orderflow.aggressive_prints import (
 )
 from quant.amt.market.acceptance_rejection import (
     AcceptanceRejectionEngine,
-    ARResult,
 )
 from quant.amt.session.ib_engine import InitialBalanceEngine
-from quant.amt.market.break_detector import (
-    detect_break,
-    check_ib_break_tick,
-)
 from quant.amt.market.lvn_play import detect_lvn_play
 from quant.amt.profile.volume_profile import create_profile
 from quant.amt.profile.volume_profile import compute_value_area
 from quant.amt.profile.compression_box import CompressionBoxDetector
 from quant.amt.profile.gap_profile import GapProfileDetector
 from quant.amt.market.displacement import (
-    detect_displacement,
     detect_acceptance,
 )
 from quant.amt.market.opening import OpeningTypeClassifier
@@ -127,8 +116,21 @@ from quant.amt.market.opening import OpeningTypeClassifier
 # The local definition is kept for backward compatibility.
 from quant.contracts.ports.config_port import ISymbolConfig
 
+# ---------------------------------------------------------------------------
+# Volume Profile + LVN/HVN Detection — imported from extracted services
+# ---------------------------------------------------------------------------
+from quant.amt.profile.migration import ValueMigrationTracker
+from quant.amt.profile.volume_profile import IncrementalVolumeProfile
+from quant.amt.profile.lvn import (
+    find_lvns as _find_lvns_extracted,
+    find_hvns as _find_hvns_extracted,
+    LVNPersistenceTracker,
+)
+
 # Backward compatibility alias
 SymbolConfigLike = ISymbolConfig
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -173,13 +175,6 @@ class AMTConfig:
 # ---------------------------------------------------------------------------
 # Volume Profile + LVN/HVN Detection — imported from extracted services
 # ---------------------------------------------------------------------------
-from quant.amt.profile.migration import ValueMigrationTracker
-from quant.amt.profile.volume_profile import IncrementalVolumeProfile
-from quant.amt.profile.lvn import (
-    find_lvns as _find_lvns_extracted,
-    find_hvns as _find_hvns_extracted,
-    LVNPersistenceTracker,
-)
 
 
 def find_lvns(
@@ -295,7 +290,6 @@ class AMTAnalyzer:
         # MTFAnalyzer removed - uses MultiTimeframeAMTAnalyzer in configure() instead
         # self._mtf_analyzer = MTFAnalyzer()  # This class doesn't exist, causes NameError
         # Initialize LVN tracker here to avoid AttributeError if configure() not called
-        from quant.contracts.constants import LVN_MIN_PERSISTENCE_BARS, LVN_REMOVAL_THRESHOLD
         self._lvn_tracker = LVNPersistenceTracker(
             min_bars=LVN_MIN_PERSISTENCE_BARS,
             removal_threshold=LVN_REMOVAL_THRESHOLD,
@@ -667,7 +661,6 @@ class AMTAnalyzer:
             bar_low=float(current.low),
         )
         market_state = state_result.state
-        zone = state_result.zone
 
         log_state_transition(self._previous_state, market_state, state_result)
         self._previous_state = market_state
@@ -690,26 +683,26 @@ class AMTAnalyzer:
             # baseline instead of two divergent ones.
             avg_vol_20=baseline_vol,
         )
-        avg_candle_vol = flow["avg_candle_vol"]
+        flow["avg_candle_vol"]
         obi = flow["obi"]
-        toxicity = flow["toxicity"]
+        flow["toxicity"]
         norm_delta = flow["norm_delta"]
-        footprint_confirmed = flow["footprint_confirmed"]
-        cvd_confirmed = flow["cvd_confirmed"]
-        cvd_divergence_type = flow.get("cvd_divergence_type", "")
+        flow["footprint_confirmed"]
+        flow["cvd_confirmed"]
+        flow.get("cvd_divergence_type", "")
         cvd_state = flow["cvd_state"]
-        big_trade_confirmed = flow["big_trade_confirmed"]
+        flow["big_trade_confirmed"]
         absorption_detected = flow["absorption_detected"]
         absorption_side = flow["absorption_side"]
         absorption_range_ratio = flow["absorption_range_ratio"]
         absorption_vol_ratio = flow["absorption_vol_ratio"]
         ofi_result = flow["ofi_result"]
-        ofi_aligned = flow["ofi_aligned"]
-        confluence_bonus = flow["confluence_bonus"]
-        volume_bubble_near = flow["volume_bubble_near"]
-        agg_result = flow["agg_result"]
+        flow["ofi_aligned"]
+        flow["confluence_bonus"]
+        flow["volume_bubble_near"]
+        flow["agg_result"]
         aggression_score = flow["aggression_score"]
-        has_aggression = flow["has_aggression"]
+        flow["has_aggression"]
         aggression_components = flow.get("aggression_components", {})
 
         # Profile shape classification (descriptive; does not override market state)

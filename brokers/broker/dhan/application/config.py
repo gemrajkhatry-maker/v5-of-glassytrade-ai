@@ -20,10 +20,8 @@ Example:
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from brokers.broker.dhan.domain import (
-    API_BASE_URL,
     DEFAULT_MAX_RETRIES,
     DEFAULT_TIMEOUT_SECONDS,
     DHAN_API_V2_BASE_URL,

@@ -1,5 +1,14 @@
 """Tests for portfolio scale-in integration."""
 
+import pytest
+
+from quant.decision.signal_builder import Signal
+from quant.execution.exits import ExitEngine, ExitDecision
+from quant.execution.oms import PaperOMS
+from quant.execution.portfolio_risk import PortfolioRiskAuthority
+from quant.execution.risk import SessionRisk
+from quant.position_manager import PositionManager
+
 
 def test_portfolio_add_to_position():
     """Portfolio.add_to_position scales into winning position."""
@@ -81,15 +90,6 @@ def test_refused_add_leaves_no_ghost():
 # ---------------------------------------------------------------------------
 # E11 risk release data-flow: each pyramid's OWN fill pnl (audit round 2)
 # ---------------------------------------------------------------------------
-
-import pytest
-
-from quant.decision.signal_builder import Signal
-from quant.execution.exits import ExitEngine, ExitDecision
-from quant.execution.oms import PaperOMS
-from quant.execution.portfolio_risk import PortfolioRiskAuthority
-from quant.execution.risk import SessionRisk
-from quant.position_manager import PositionManager
 
 
 class SpiedPortfolioRisk(PortfolioRiskAuthority):

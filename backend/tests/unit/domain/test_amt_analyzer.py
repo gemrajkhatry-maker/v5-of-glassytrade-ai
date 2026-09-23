@@ -7,11 +7,9 @@ import pytest
 from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
 from quant.amt.analyzer import (
     create_profile,
-    find_lvns,
     find_hvns,
     find_aggressive_prints,
     AMTAnalyzer,
-    AMTConfig,
     AcceptanceRejectionEngine,
 )
 from quant.amt import compute as mc
@@ -29,15 +27,15 @@ def _make_candle(
 ) -> OHLC:
     o = open_ or close
     h = high or max(close, o) * 1.001
-    l = low or min(close, o) * 0.999
+    lo = low or min(close, o) * 0.999
     return OHLC(
         time="2026-01-01T00:00:00Z",
         open=o,
         high=h,
-        low=l,
+        low=lo,
         close=close,
         volume=volume,
-        vwap=(h + l + close) / 3,
+        vwap=(h + lo + close) / 3,
         taker_buy_volume=(volume + delta) / 2,
         delta=delta,
     )
@@ -259,15 +257,15 @@ def _make_candle_timed(
     """Helper that creates a candle with a specific timestamp."""
     o = close
     h = high or close * 1.002
-    l = low or close * 0.998
+    lo = low or close * 0.998
     return OHLC(
         time=time_str,
         open=o,
         high=h,
-        low=l,
+        low=lo,
         close=close,
         volume=volume,
-        vwap=(h + l + close) / 3,
+        vwap=(h + lo + close) / 3,
         taker_buy_volume=(volume + delta) / 2,
         delta=delta,
     )
@@ -425,7 +423,7 @@ class TestIncrementalProfile:
         # Add candle at 120, well outside previous range
         outlier = _make_candle_timed(
             120,
-            f"2026-01-01T00:20:00Z",
+            "2026-01-01T00:20:00Z",
             volume=2000,
             delta=100,
             high=121,

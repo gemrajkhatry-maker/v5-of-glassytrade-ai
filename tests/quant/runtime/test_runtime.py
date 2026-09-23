@@ -376,7 +376,6 @@ def test_nse_contract_expiry_day_squares_off_by_1515():
 
 def test_engine_wires_nse_contract_expiry_from_symbol():
     """An NSE engine derives its contract expiry from its symbol too."""
-    from datetime import date
 
     eng = QuantEngine(SyntheticGateway([]), "NIFTY 11 DEC 24600 CALL",
                       interval_seconds=1, market="NSE")
@@ -389,7 +388,6 @@ def test_engine_wires_nse_contract_expiry_from_symbol():
 def test_engine_wires_contract_expiry_from_symbol():
     """An MCX engine derives its contract expiry from its symbol and passes it
     into the session gates."""
-    from datetime import date
 
     eng = QuantEngine(SyntheticGateway([]), "CRUDEOIL 11 DEC 7450 CALL",
                       interval_seconds=1, market="MCX")

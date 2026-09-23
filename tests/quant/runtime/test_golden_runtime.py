@@ -21,7 +21,6 @@ from quant.events import (
 )
 from quant.persistence import Journal
 from quant.runtime import QuantEngine
-from quant.ws_adapter import view_state_to_ws
 from tests.quant.runtime.test_runtime import _ticks
 
 
@@ -52,7 +51,6 @@ def test_journal_writes_and_replays(tmp_path):
     path = str(tmp_path / "journal.jsonl")
     eng = _engine("SYM_JOURNAL")
     eng._journal_path = path
-    from quant.persistence import Journal
     eng._journal = Journal(path=path)
     eng._journal_subscribed = True
     def _journal_subscriber(event):

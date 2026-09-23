@@ -111,7 +111,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     paths = sorted(glob.glob(os.path.join(args.journals_dir, "*.jsonl")))
     if not paths:
-        print("no journals found"); return 2
+        print("no journals found")
+        return 2
     rows, skipped = s13_determinism(paths[-args.limit:])
     stats = {}
     if rows:

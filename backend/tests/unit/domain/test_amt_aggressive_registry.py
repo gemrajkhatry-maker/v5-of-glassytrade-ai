@@ -1,5 +1,4 @@
-import pytest
-from quant.amt.analyzer import AMTAnalyzer, AggressivePrintRegistry, AMTConfig
+from quant.amt.analyzer import AMTAnalyzer, AggressivePrintRegistry
 from quant.contracts.value_objects import OHLC, AggressivePrint
 
 class TestAggressivePrintRegistry:

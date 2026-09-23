@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from quant.bars import Bar  # noqa: E402
 from quant.contracts.enums import MarketState  # noqa: E402
 from quant.decision.context import DecisionContext  # noqa: E402
-from quant.decision.decision_service import DecisionService, QuantDecision  # noqa: E402
+from quant.decision.decision_service import DecisionService  # noqa: E402
 from quant.decision.pipeline import GatePipeline  # noqa: E402
 from quant.decision.result import GateResult  # noqa: E402
 

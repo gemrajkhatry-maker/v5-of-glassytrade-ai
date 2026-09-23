@@ -8,7 +8,6 @@ the failure mode it guards against.
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 
 import pytest
 
@@ -157,9 +156,7 @@ def test_emergency_halt_actually_blocks_new_entries(monkeypatch, tmp_path):
     ``QuantCoordinator.emergency_halt()`` path exactly as the SIGTERM handler
     does, and assert the engine's real SessionRisk.can_trade() actually
     flips to False afterward."""
-    import threading
 
-    import quant.multi_engine as multi_engine
     from quant.multi_engine import QuantCoordinator
 
     monkeypatch.setattr("quant.amt_engine.AMTEngine.seed", lambda self: None)
@@ -336,9 +333,7 @@ def test_registry_does_not_default_known_bse_indices_to_mcx():
 
 def test_live_oms_enabled_with_broker_injects_live_oms(monkeypatch, tmp_path):
     """When live_oms_enabled=True and broker is wired, engines get LiveOMS."""
-    import threading
 
-    import quant.multi_engine as multi_engine
     from quant.multi_engine import QuantCoordinator
     from quant.execution.live_oms import LiveOMS
 
@@ -388,9 +383,7 @@ def test_live_oms_enabled_with_broker_injects_live_oms(monkeypatch, tmp_path):
 
 def _spawn_coord(monkeypatch, tmp_path, extra_config):
     """Spawn a single engine through QuantCoordinator with isolated files."""
-    import threading
 
-    import quant.multi_engine as multi_engine
     from quant.multi_engine import QuantCoordinator
 
     monkeypatch.setattr("quant.amt_engine.AMTEngine.seed", lambda self: None)

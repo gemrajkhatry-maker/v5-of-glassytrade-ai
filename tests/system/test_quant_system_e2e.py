@@ -14,10 +14,10 @@ _BACKEND = pathlib.Path(__file__).resolve().parents[2] / "backend"
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
-from quant.brokers.gateway import Tick
-from quant.events import AmtUpdated
-from quant.runtime import QuantEngine
-from tests.helpers.synthetic import SyntheticGateway
+from quant.brokers.gateway import Tick  # noqa: E402
+from quant.events import AmtUpdated  # noqa: E402
+from quant.runtime import QuantEngine  # noqa: E402
+from tests.helpers.synthetic import SyntheticGateway  # noqa: E402
 
 SYMBOL = "SYM"
 

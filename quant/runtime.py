@@ -54,17 +54,15 @@ engines). All access is guarded by ``PortfolioRiskAuthority._lock``.
 """
 
 from __future__ import annotations
-from quant.contracts.enums import MarketState
 
 import logging
 import os
-import random
 import threading
 import time
 from collections import deque
-from datetime import date, datetime, timedelta, timezone
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from datetime import datetime
+from dataclasses import asdict
+from typing import Any
 
 from quant.aggregator import BarAggregator
 from quant.contracts.constants import CVD_KILL_THRESHOLD
@@ -73,23 +71,14 @@ from quant.engine.tick_handler import TickHandler
 from quant.engine.decision_loop import DecisionLoop
 from quant.engine.exit_manager import ExitManager
 from quant.amt.dto import empty_amt_dto
-from quant.amt.session.context import get_session_info
-from quant.bars import Bar
 from quant.contracts.contracts import ContractRef
 from quant.contracts.value_objects import OrderBook, OrderBookLevel
-from quant.contracts.vocabulary import is_call_symbol, is_put_symbol
-from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
-from quant.decision.signal_builder import clamp_quantity
 from quant.decision.context_builder import DecisionContextBuilder
 from quant.hotpath import get_hotpath_tracer
 from quant.position_manager import PositionManager
 from quant.session_gates import (
-    bar_epoch_ms as _bar_epoch_ms,
-    ist_dt as _ist_dt,
     parse_contract_expiry,
-    session_allow_entry,
-    session_force_exit,
 )
 from quant.session_levels import SessionLevelStore
 from quant.strategy import TradingStrategy
@@ -113,7 +102,6 @@ from quant.events import (
 )
 from quant.execution.execution_model import (
     ExecutionModel,
-    signal_matches_contract,
     validate_execution_model,
 )
 from quant.execution.exits import ExitDecision, ExitEngine
@@ -122,7 +110,7 @@ from quant.execution.ports import IOMS
 from quant.execution.risk import SessionRisk
 from quant.contracts.timezones import IST
 from quant.persistence import Journal
-from quant.state import LiveQuoteCache, _decision_to_view, _epoch_to_iso
+from quant.state import LiveQuoteCache, _decision_to_view
 from quant.bars import DEFAULT_INTERVAL_SEC, BIAS_INTERVAL_SEC
 from quant.event_store import EventStore
 from quant.persistence_boundary import EventAppender, PersistenceHealth
@@ -218,7 +206,6 @@ def close_lingering_pyramids(pm, price: float, time_str: str, reason: str) -> in
 
     Returns the number of add-ons actually closed.
     """
-    from quant.execution.exits import ExitDecision
 
     # Detach the add-ons before closing them: _execute_full_close sweeps
     # ``pm.pyramid_positions`` as part of its own pyramid handling, so leaving
@@ -685,7 +672,6 @@ class QuantEngine:
         per-day directory. Subscribes lazily so late attachment (post
         constructor, pre-run) still captures every event.
         """
-        from quant.persistence import Journal
 
         path = (
             path
@@ -1611,8 +1597,8 @@ class QuantEngine:
             return None
         return OrderBook(
             bids=tuple(
-                OrderBookLevel(float(l["price"]), float(l["quantity"]))
-                for l in depth.get("bids", [])
+                OrderBookLevel(float(lv["price"]), float(lv["quantity"]))
+                for lv in depth.get("bids", [])
             ),
             asks=tuple(
                 OrderBookLevel(float(a["price"]), float(a["quantity"]))

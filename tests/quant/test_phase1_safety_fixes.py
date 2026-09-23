@@ -14,11 +14,10 @@ import threading
 import time
 from unittest.mock import MagicMock
 
-import pytest
 
 from quant.bars import Bar
 from quant.decision.signal_builder import Signal
-from quant.execution.exits import ExitDecision, ExitEngine
+from quant.execution.exits import ExitEngine
 from quant.execution.live_oms import LiveOMS
 from quant.execution.oms import PaperOMS
 from quant.execution.order import Order, Position

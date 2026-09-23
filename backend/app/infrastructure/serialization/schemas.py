@@ -8,10 +8,9 @@ these exclusively; the domain layer never imports Pydantic.
 from quant.contracts.enums import MarketState
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
-from shared.entities.models import Side as SharedSide, OrderSide, OrderStatus
 
 
 # ---------------------------------------------------------------------------
@@ -448,14 +447,14 @@ def footprint_to_dto(fp) -> dict:
         "time": fp.time,
         "levels": [
             {
-                "price": l.price,
-                "bid": l.bid,
-                "ask": l.ask,
-                "delta": l.delta,
-                "imbalance": l.imbalance,
-                "stacked": getattr(l, "stacked", False),
+                "price": lv.price,
+                "bid": lv.bid,
+                "ask": lv.ask,
+                "delta": lv.delta,
+                "imbalance": lv.imbalance,
+                "stacked": getattr(lv, "stacked", False),
             }
-            for l in fp.levels
+            for lv in fp.levels
         ],
         "pocPrice": fp.poc_price,
         "totalDelta": fp.total_delta,

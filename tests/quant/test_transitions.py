@@ -166,7 +166,7 @@ class TestApplyEvent:
     def test_apply_position_closed(self):
         """PositionClosed event clears position."""
         from quant.state_machine import EngineState, PositionState
-        from quant.events import PositionOpened, PositionClosed
+        from quant.events import PositionClosed
         
         pos = PositionState(
             id="abc-123",

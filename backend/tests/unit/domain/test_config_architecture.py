@@ -9,11 +9,9 @@ Tests:
 
 from __future__ import annotations
 
-import os
 import pytest
 
 from app.config_models import (
-    CostProfile,
     ExchangeConfig,
     FeatureFlags,
     MLThresholds,

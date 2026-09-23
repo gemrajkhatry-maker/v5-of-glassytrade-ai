@@ -9,14 +9,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from quant.brokers.gateway import Tick
 from quant.event_store import EventStore
-from quant.events import PositionOpened, RiskUpdated
-from quant.execution.order import Order, Position
+from quant.events import PositionOpened
 from quant.runtime import QuantEngine
 from quant.state_machine import PositionState, RiskState
 

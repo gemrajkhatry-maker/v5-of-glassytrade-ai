@@ -16,14 +16,11 @@ Tests the ExitManager in isolation using mock dependencies. Covers:
 
 from __future__ import annotations
 
-import logging
 import threading
-from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Optional
-from unittest.mock import MagicMock, call, patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from quant.engine.exit_manager import ExitManager, close_lingering_pyramids
 from quant.events import DecisionProduced

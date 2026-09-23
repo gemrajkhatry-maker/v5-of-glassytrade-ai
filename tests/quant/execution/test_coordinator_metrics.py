@@ -12,7 +12,6 @@ Phase 0.4 introduces:
 - Snapshot replaces the disconnected MetricsCollector
 """
 import time
-import pytest
 
 from quant.execution.coordinator_metrics import (
     CoordinatorMetricsProvider,

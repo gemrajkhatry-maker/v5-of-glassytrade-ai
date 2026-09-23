@@ -4,7 +4,6 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from quant.amt.session.scanner import OptionScannerService
 from quant.amt.session.selector import OptionSelector

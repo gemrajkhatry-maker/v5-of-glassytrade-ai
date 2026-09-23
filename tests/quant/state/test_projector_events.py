@@ -11,10 +11,8 @@ from quant.brokers.gateway import Tick
 from quant.event_store import EventStore
 from quant.events import (
     AmtUpdated,
-    BarClosed,
-    DepthUpdated,
 )
-from quant.state import LiveQuoteCache, project_state
+from quant.state import LiveQuoteCache
 
 
 @dataclass(frozen=True)

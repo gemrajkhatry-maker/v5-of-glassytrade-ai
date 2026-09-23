@@ -1,5 +1,4 @@
 # tests/quant/runtime/test_1min_trigger.py
-import pytest
 from quant.brokers.gateway import Tick
 from quant.events import BarClosed, DecisionProduced
 from quant.runtime import QuantEngine

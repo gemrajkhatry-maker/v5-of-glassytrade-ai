@@ -3,7 +3,6 @@
 
 from datetime import timedelta
 
-import pytest
 
 from quant.amt.session.selector import OptionSelector, OptionSelection
 from quant.contracts.timezones import today_ist

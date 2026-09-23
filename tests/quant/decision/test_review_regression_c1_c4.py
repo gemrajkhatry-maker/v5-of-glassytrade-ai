@@ -32,11 +32,10 @@ import pytest
 
 from quant.bars import Bar
 from quant.decision.context import DecisionContext
-from quant.decision.gates_edge import _check_guards, gate_triple_a_edge
+from quant.decision.gates_edge import _check_guards
 from quant.decision.signal_builder import Signal
 from quant.execution.exits import ExitEngine
 from quant.execution.oms import PaperOMS
-from quant.execution.order import Order
 from quant.execution.protective_stop import resolve_protective_stop
 from quant.execution.risk import SessionRisk
 from quant.position_manager import PositionManager

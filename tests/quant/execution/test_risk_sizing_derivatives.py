@@ -1,5 +1,4 @@
 """Derivative sizing must not zero out when stop-loss risk fits budget."""
-import pytest
 from quant.execution.risk import SessionRisk
 
 

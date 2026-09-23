@@ -1,6 +1,5 @@
 """T7: executor shutdown with coordinator."""
 
-import pytest
 from unittest.mock import MagicMock
 
 

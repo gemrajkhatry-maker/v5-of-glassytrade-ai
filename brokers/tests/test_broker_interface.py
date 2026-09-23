@@ -4,8 +4,6 @@ TDD Tests for Broker Interfaces.
 Run with: pytest brokers/tests/test_broker_interface.py -v
 """
 import pytest
-from datetime import datetime
-import sys
 
 
 class TestTypes:

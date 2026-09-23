@@ -20,7 +20,6 @@ Operational definition used here:
 
 from __future__ import annotations
 
-import pytest
 
 from quant.bars import Bar
 from quant.decision.context import DecisionContext

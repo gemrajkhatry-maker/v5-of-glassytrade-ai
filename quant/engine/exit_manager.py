@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.contracts.vocabulary import is_call_symbol, is_put_symbol

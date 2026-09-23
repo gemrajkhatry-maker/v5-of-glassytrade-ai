@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter
-from brokers.broker.types import OrderStatus, OrderType
+from brokers.broker.types import OrderStatus
 from quant.contracts.aggregates import Portfolio
 
 

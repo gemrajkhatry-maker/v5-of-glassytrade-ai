@@ -1,8 +1,9 @@
 from quant.amt_engine import AMTEngine
-from quant.amt.dto import amt_result_to_dto
 from quant.bars import Bar
 from quant.decision.decision_service import DecisionService
 from quant.decision.context_builder import DecisionContextBuilder
+from quant.session_levels import SessionLevelStore
+from quant.execution.risk import SessionRisk
 
 
 def _session():
@@ -19,10 +20,6 @@ def _session():
         out.append(Bar(time=f"t{i}", open=close - 0.2, high=close + 0.2,
                        low=close - 0.2, close=close, volume=100.0))
     return out
-
-
-from quant.session_levels import SessionLevelStore
-from quant.execution.risk import SessionRisk
 
 
 def test_kernel_to_signal_flow():

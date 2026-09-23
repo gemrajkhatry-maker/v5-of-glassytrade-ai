@@ -23,25 +23,25 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 # Enable faulthandler to print Python traceback on segfault
 faulthandler.enable()
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
-from app.api.dependencies import init_singletons, set_active_symbols
-from app.api.routers import (
+from app.api.dependencies import init_singletons, set_active_symbols  # noqa: E402
+from app.api.routers import (  # noqa: E402
     health_router,
     journal_router,
     market_router,
     testing_router,
     trading_router,
 )
-from app.api.routers.analysis import router as analysis_router
-from app.api.routers.observability import router as observability_router
-from app.api.websocket.gameloop import router as gameloop_router
-from app.config import settings as _settings
-from app.core.async_boundary import ensure_sync_adapter_result
-from app.core.correlation import CorrelationIdMiddleware
-from app.core.logging import get_logger, setup_logging
-from app.core.startup_telemetry import (
+from app.api.routers.analysis import router as analysis_router  # noqa: E402
+from app.api.routers.observability import router as observability_router  # noqa: E402
+from app.api.websocket.gameloop import router as gameloop_router  # noqa: E402
+from app.config import settings as _settings  # noqa: E402
+from app.core.async_boundary import ensure_sync_adapter_result  # noqa: E402
+from app.core.correlation import CorrelationIdMiddleware  # noqa: E402
+from app.core.logging import get_logger, setup_logging  # noqa: E402
+from app.core.startup_telemetry import (  # noqa: E402
     begin_phase,
     end_phase,
     mark_startup_failed,
@@ -49,11 +49,11 @@ from app.core.startup_telemetry import (
     mark_startup_started,
     record_startup_reconciliation,
 )
-from app.domain.ops.startup_reconciliation import ReconcilePolicy, StartupReconciliation
-from app.shared.mode import resolve_runtime_mode
-from quant.contracts.ports.broker import IBroker
-from quant.contracts.ports.market_data import IMarketData
-from quant.contracts.ports.storage import IStorage
+from app.domain.ops.startup_reconciliation import ReconcilePolicy, StartupReconciliation  # noqa: E402
+from app.shared.mode import resolve_runtime_mode  # noqa: E402
+from quant.contracts.ports.broker import IBroker  # noqa: E402
+from quant.contracts.ports.market_data import IMarketData  # noqa: E402
+from quant.contracts.ports.storage import IStorage  # noqa: E402
 
 
 def _build_startup_contracts(

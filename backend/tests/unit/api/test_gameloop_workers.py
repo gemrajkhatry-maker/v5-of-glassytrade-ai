@@ -1,10 +1,8 @@
 """Unit tests for gameloop worker functions (Lane C2 offload)."""
 
-import pytest
 from app.api.websocket.gameloop import (
     _build_initial_snapshots,
     _collect_symbol_deltas,
-    _compute_delta,
 )
 
 

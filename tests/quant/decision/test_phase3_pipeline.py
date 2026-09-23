@@ -9,11 +9,9 @@ Covers:
 
 from unittest.mock import MagicMock
 from quant.bars import Bar
-from quant.contracts.enums import MarketState
 from quant.decision.context import DecisionContext
 from quant.decision.context_builder import DecisionContextBuilder
 from quant.decision.gates_edge import gate_triple_a_edge
-from quant.decision.decision_service import DecisionService
 from quant.decision.setup_state import SetupEvidence
 from quant.session_levels import SessionLevelStore
 from quant.amt_engine import AMTEngine

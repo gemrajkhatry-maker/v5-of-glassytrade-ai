@@ -61,7 +61,7 @@ def test_va_fade_falls_back_to_bar_extreme_when_no_session_extreme():
               volume=1000, buy_volume=600, sell_volume=400,
               delta=200, oi=50000, vwap=97.0)
 
-    fields = set(DecisionContext.__dataclass_fields__.keys())
+    set(DecisionContext.__dataclass_fields__.keys())
     kwargs = dict(
         symbol="TEST", bar=bar, poc=100.0, val=98.0, vah=102.0,
         tick_size=0.05, cvd_slope=0.5,

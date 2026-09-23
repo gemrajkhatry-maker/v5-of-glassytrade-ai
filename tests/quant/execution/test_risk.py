@@ -18,20 +18,25 @@ def test_losses_shrink_risk():
 
 def test_win_resets_streak():
     r = SessionRisk()
-    r.record_trade(-200.0); r.record_trade(-300.0)
+    r.record_trade(-200.0)
+    r.record_trade(-300.0)
     r.record_trade(+500.0)
     assert r.state().consecutive_losses == 0
 
 def test_max_loss_halts():
     r = SessionRisk(starting_equity=100000.0, max_daily_loss_pct=0.03)
-    r.record_trade(-2500.0); r.record_trade(-2500.0); r.record_trade(-2500.0)
+    r.record_trade(-2500.0)
+    r.record_trade(-2500.0)
+    r.record_trade(-2500.0)
     s = r.state()
     # The hard 2% session kill switch fires before the configured 3% limit.
     assert s.halted is True and "kill switch" in s.halt_reason
 
 def test_max_streak_halts():
     r = SessionRisk(max_consecutive_losses=3)
-    r.record_trade(-100.0); r.record_trade(-100.0); r.record_trade(-100.0)
+    r.record_trade(-100.0)
+    r.record_trade(-100.0)
+    r.record_trade(-100.0)
     s = r.state()
     assert s.halted is True and "loss" in s.halt_reason
 
@@ -102,7 +107,8 @@ def test_partial_fills_do_not_inflate_trades_today():
 
 def test_partial_fills_do_not_reset_loss_streak():
     r = SessionRisk(storage=None, symbol="PARTIAL_STREAK_TEST")
-    r.record_trade(-1000.0); r.record_trade(-1000.0)          # 2 real losses
+    r.record_trade(-1000.0)
+    r.record_trade(-1000.0)          # 2 real losses
     r.record_trade(+500.0, count_as_trade=False)              # TP1 partial "win"
     st = r.state()
     assert st.consecutive_losses == 2, "partial must not reset the loss streak"

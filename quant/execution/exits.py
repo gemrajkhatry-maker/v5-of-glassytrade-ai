@@ -11,7 +11,6 @@ from quant.contracts.enums import MarketState
 from dataclasses import dataclass
 
 
-from quant.execution.exit_rules import get_session_time_stop
 from quant.execution.order import Position
 
 logger = logging.getLogger(__name__)

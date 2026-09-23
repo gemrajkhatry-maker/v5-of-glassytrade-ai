@@ -1,8 +1,7 @@
 # tests/quant/test_underlying_required.py
 """Tests for Underlying Feed Contract in Option Analysis (Task 9)."""
 
-import pytest
-from quant.amt.session.futures_provider import UnderlyingFuturesProvider, extract_option_date
+from quant.amt.session.futures_provider import extract_option_date
 
 
 def test_futures_provider_extracts_underlying_symbol():

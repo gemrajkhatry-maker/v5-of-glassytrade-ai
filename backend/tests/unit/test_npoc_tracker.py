@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock, call
 
 from quant.contracts.ports.npoc import INPOC, NPOCRecord, NPOCResult
 from quant.amt.session.npoc import NPOCTracker
@@ -131,7 +130,7 @@ class TestNPOCTracker:
     def test_check_and_fill_fills_within_zone(self):
         self.tracker.add_session_poc("NIFTY", "2026-03-19", 24500.0)
         tick_size = 0.05
-        zone = tick_size * 2  # 0.10
+        tick_size * 2  # 0.10
 
         # Price exactly at NPOC
         filled = self.tracker.check_and_fill("NIFTY", 24500.0, tick_size)
@@ -149,7 +148,7 @@ class TestNPOCTracker:
     def test_check_and_fill_fills_at_boundary(self):
         self.tracker.add_session_poc("NIFTY", "2026-03-19", 24500.0)
         tick_size = 0.05
-        zone = tick_size * 2  # 0.10
+        tick_size * 2  # 0.10
 
         # Price exactly 2 ticks away
         filled = self.tracker.check_and_fill("NIFTY", 24500.10, tick_size)
@@ -158,7 +157,7 @@ class TestNPOCTracker:
     def test_check_and_fill_does_not_fill_outside_zone(self):
         self.tracker.add_session_poc("NIFTY", "2026-03-19", 24500.0)
         tick_size = 0.05
-        zone = tick_size * 2  # 0.10
+        tick_size * 2  # 0.10
 
         # Price 3 ticks away — should NOT fill
         filled = self.tracker.check_and_fill("NIFTY", 24500.15, tick_size)

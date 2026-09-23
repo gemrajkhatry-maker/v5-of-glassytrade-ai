@@ -22,10 +22,9 @@ from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
 from quant.contracts.ports.market_data import IMarketData
 from quant.contracts.market_data_utils import compute_vwap_approx, estimate_tick_delta
 from quant.contracts.exchange_config import ExchangeConfig
+from quant.contracts.timezones import IST
 
 logger = logging.getLogger(__name__)
-
-from quant.contracts.timezones import IST
 
 
 def _delta_proxy(
@@ -326,18 +325,18 @@ class DhanMarketDataAdapter(IMarketData):
 
                     o = float(row["open"])
                     h = float(row["high"])
-                    l = float(row["low"])
+                    lo = float(row["low"])
                     c = float(row["close"])
                     v = float(row.get("volume", 0))
-                    delta = estimate_tick_delta(o, h, l, c, v)
-                    vwap = compute_vwap_approx(h, l, c)
+                    delta = estimate_tick_delta(o, h, lo, c, v)
+                    vwap = compute_vwap_approx(h, lo, c)
 
                     result.append(
                         OHLC(
                             time=time_str,
                             open=o,
                             high=h,
-                            low=l,
+                            low=lo,
                             close=c,
                             volume=v,
                             vwap=vwap,

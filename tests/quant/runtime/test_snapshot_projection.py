@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 
 from quant.multi_engine import QuantCoordinator
 

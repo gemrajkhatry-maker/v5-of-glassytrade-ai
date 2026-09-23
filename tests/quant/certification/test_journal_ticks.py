@@ -7,11 +7,11 @@ from tests.quant.certification.journal_ticks import (
 BAR_TIME = 1756200000  # any epoch-second aligned window
 
 
-def _row(bar_time, o, h, l, c, vol, delta=0.0):
+def _row(bar_time, o, h, lo, c, vol, delta=0.0):
     buy = (vol + delta) / 2
     return {
         "type": "BarClosed", "symbol": "X", "time": str(bar_time),
-        "bar": {"time": str(bar_time), "open": o, "high": h, "low": l,
+        "bar": {"time": str(bar_time), "open": o, "high": h, "low": lo,
                 "close": c, "volume": vol, "buy_volume": buy,
                 "sell_volume": vol - buy, "delta": delta, "oi": 0.0,
                 "vwap": c},
@@ -30,7 +30,6 @@ def test_bars_from_journal_filters_and_infers_interval():
 def test_ticks_reproduce_ohlc_through_aggregator():
     from copy import copy
     from quant.aggregator import BarAggregator
-    from quant.brokers.gateway import Tick
     # bars_from_journal requires >= 2 BarClosed rows (interval inference);
     # assertions below exercise bars[0] only.
     interval, bars = bars_from_journal(

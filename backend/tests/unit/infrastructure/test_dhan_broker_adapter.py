@@ -29,12 +29,12 @@ _project_root = os.path.normpath(
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter
-from quant.contracts.entities import Signal
-from quant.contracts.enums import SignalType, SetupType, Source
-from quant.contracts.aggregates import Portfolio
-from brokers.broker.dhan.domain.errors import DhanError
-from brokers.broker.types import OrderStatus, OrderType
+from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter  # noqa: E402
+from quant.contracts.entities import Signal  # noqa: E402
+from quant.contracts.enums import SignalType, SetupType, Source  # noqa: E402
+from quant.contracts.aggregates import Portfolio  # noqa: E402
+from brokers.broker.dhan.domain.errors import DhanError  # noqa: E402
+from brokers.broker.types import OrderStatus, OrderType  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

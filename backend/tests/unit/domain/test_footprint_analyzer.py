@@ -1,6 +1,5 @@
 """Unit tests for Footprint Analyzer domain service."""
 
-import pytest
 from quant.contracts.value_objects import OHLC
 from quant.amt.orderflow.footprint import FootprintAnalyzer
 from quant.contracts.timezones import epoch_to_iso
@@ -58,6 +57,6 @@ class TestFootprintAnalyzer:
         )
         result = self.analyzer.generate([candle])
         fc = result["t"]
-        has_imbalance = any(l.imbalance for l in fc.levels)
+        has_imbalance = any(lv.imbalance for lv in fc.levels)
         # With strong delta, some levels should show imbalance
         assert isinstance(has_imbalance, bool)

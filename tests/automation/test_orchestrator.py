@@ -1,4 +1,3 @@
-import pytest
 from automation.orchestrator import QualityOrchestrator, QualityGateReport
 
 

@@ -5,7 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
 
 _REPO = Path(__file__).resolve().parents[2]
 if str(_REPO) not in sys.path:
@@ -95,14 +94,13 @@ def test_engine_attach_journal_captures_events(tmp_path):
 
     eng.run(max_steps=10)
 
-    rows = [json.loads(l) for l in jpath.read_text().splitlines() if l.strip()]
+    rows = [json.loads(lv) for lv in jpath.read_text().splitlines() if lv.strip()]
     types = {r["type"] for r in rows}
     assert "BarClosed" in types, f"journal missing bars: {types}"
     assert any(r["type"] == "DecisionProduced" for r in rows)
 
 
 def test_attach_journal_is_idempotent(tmp_path):
-    from quant.brokers.gateway import Tick
     from quant.runtime import QuantEngine
 
     class GW:

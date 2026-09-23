@@ -3,7 +3,6 @@
 import pytest
 from quant.amt.orderflow.aggression import (
     AggressionScorer,
-    AggressionResult,
 )
 
 

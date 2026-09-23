@@ -1,7 +1,6 @@
 """Tests for slippage model validation."""
 
 import pytest
-from decimal import Decimal
 
 from quant.contracts.aggregates import Portfolio, PortfolioConfig
 from quant.contracts.enums import Side

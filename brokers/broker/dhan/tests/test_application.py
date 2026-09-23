@@ -6,12 +6,15 @@ This module tests all application layer components:
     - DhanConverter: Data conversion utilities
 """
 
+import asyncio
 import os
 import pytest
-from datetime import datetime, date
-from unittest.mock import patch
+from datetime import datetime, date, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from brokers.broker.dhan.application import DhanConfig, DhanConverter
+from brokers.broker.dhan.application.services.streaming_service import StreamingService
+from brokers.broker.dhan.domain.errors import DhanFeedNotSupportedError
 
 from brokers.broker.dhan.domain import (
     DhanInstrument,
@@ -19,12 +22,9 @@ from brokers.broker.dhan.domain import (
     DhanTick,
     DhanOrder,
     DhanPosition,
-    DhanOption,
     DhanOptionChain,
     ExchangeSegment,
-    InstrumentTypeEnum,
     OptionType,
-    DepthLevel,
 )
 
 from shared.entities.models import (
@@ -824,15 +824,6 @@ class TestDhanConverterEdgeCases:
 # =============================================================================
 # Streaming tests: MCX guard, exchange_segments, stream_full
 # =============================================================================
-
-import asyncio
-from datetime import timezone
-from unittest.mock import AsyncMock, MagicMock, patch
-
-from brokers.broker.dhan.application.services.streaming_service import StreamingService
-from brokers.broker.dhan.domain.errors import DhanFeedNotSupportedError
-from shared.entities.models import Instrument, MarketDepth, DepthLevel as BrokerDepthLevel
-from brokers.broker.types import Exchange
 
 
 def _make_ws_message(msg_type: str, data: dict):

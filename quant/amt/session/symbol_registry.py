@@ -16,14 +16,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time as dtime
-from typing import FrozenSet
+from typing import TYPE_CHECKING, FrozenSet
 from zoneinfo import ZoneInfo
 
 from quant.contracts.instrument_registry import (
     DEFAULT_REGISTRY,
     UnknownInstrumentError,
-    root_token,
 )
+from quant.contracts.timezones import NSE_SESSION_OPEN, NSE_SESSION_CLOSE, MCX_SESSION_OPEN, MCX_SESSION_CLOSE
+
+if TYPE_CHECKING:
+    from quant.contracts.exchange_config import ExchangeConfig
 
 IST_ZONE = ZoneInfo("Asia/Kolkata")
 
@@ -190,8 +193,6 @@ def parse_symbol_metadata(symbol: str, spot: float = 0.0) -> dict:
 # ---------------------------------------------------------------------------
 
 # NSE equity + options: Mon-Fri 09:15-15:30 IST
-from quant.contracts.timezones import NSE_SESSION_OPEN, NSE_SESSION_CLOSE, MCX_SESSION_OPEN, MCX_SESSION_CLOSE
-
 _NSE_OPENIST  = NSE_SESSION_OPEN
 _NSE_CLOSEIST = NSE_SESSION_CLOSE
 

@@ -6,13 +6,12 @@ short_signal_gates (out of scope for Track A4).
 
 from __future__ import annotations
 
-from quant.amt.session.ib_engine import IBLocation, IBState, InitialBalanceEngine
+from quant.amt.session.ib_engine import IBLocation, InitialBalanceEngine
 from quant.contracts.value_objects import OHLC
-from tests.quant.parity_harness import assert_parity
 
 
-def _make_candle(time: str, o: float, h: float, l: float, c: float) -> OHLC:
-    return OHLC.create(time=time, open=o, high=h, low=l, close=c, volume=100)
+def _make_candle(time: str, o: float, h: float, lo: float, c: float) -> OHLC:
+    return OHLC.create(time=time, open=o, high=h, low=lo, close=c, volume=100)
 
 
 class TestInitialBalanceEngine:

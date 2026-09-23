@@ -10,7 +10,7 @@ Enhanced with:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from quant.contracts.value_objects import OHLC
 from quant.amt import compute as mc

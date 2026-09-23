@@ -20,7 +20,7 @@ Implements two dedicated, role-swapping agents operating over Google TimesFM 3.0
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import numpy as np

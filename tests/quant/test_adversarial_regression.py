@@ -12,8 +12,6 @@ Proves remediation for all classes of defects identified in the adversarial audi
 """
 
 from __future__ import annotations
-from datetime import datetime, timezone
-from decimal import Decimal
 
 import pytest
 
@@ -23,17 +21,12 @@ from quant.contracts.exchange_config import ExchangeConfig
 from quant.contracts.value_objects import FloatOHLC
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
-from quant.decision.result import GateResult
 from quant.decision.signal_builder import Signal
-from quant.execution.exits import ExitEngine
 from quant.execution.oms import PaperOMS
-from quant.execution.order import Position, Order
 from quant.execution.portfolio_risk import PortfolioRiskAuthority
-from quant.execution.risk import SessionRisk
 from quant.amt.market.break_detector import check_ib_break_tick
 from quant.amt.orderflow.detectors import AbsorptionDetector
-from quant.amt.session.selector import OptionSelector, OptionSelectorConfig
-from quant.amt.session.scanner import ContractSwitchGuard
+from quant.amt.session.selector import OptionSelector
 
 
 def test_portfolio_risk_accumulates_realized_pnl_on_exits():
@@ -91,7 +84,7 @@ def test_absorption_delta_direction():
     # absorbing sellers. The detector's second parameter is H_range (spec §7.2
     # denominator), formerly passed as ATR.
     c_bullish = FloatOHLC(time="t1", open=100.0, high=100.1, low=99.9, close=100.0, volume=500.0, delta=-300.0)
-    res_pending = detector.detect(c_bullish, h_range=1.0, avg_vol=100.0)
+    detector.detect(c_bullish, h_range=1.0, avg_vol=100.0)
     assert detector._pending_side == "SELL_ABSORBED"  # Bullish support
 
     # Displacement bar closing above the absorption high confirms bullish absorption

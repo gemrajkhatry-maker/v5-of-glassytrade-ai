@@ -14,14 +14,12 @@ Tests the SubmissionHandler in isolation using mock dependencies. Covers:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 
 from quant.decision.signal_builder import Signal
 from quant.engine.submission_handler import SubmissionHandler, _as_counter
-from quant.events import PositionOpened, SignalApproved, SignalBlocked
+from quant.events import PositionOpened, SignalApproved
 
 
 # ---------------------------------------------------------------------------

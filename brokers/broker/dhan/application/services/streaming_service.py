@@ -423,7 +423,7 @@ class StreamingService(BaseDhanService):
         if not security_ids:
             return
 
-        exchange_segments = self._exchange_segments_for(security_ids, instrument_map)
+        self._exchange_segments_for(security_ids, instrument_map)
 
         feed_type = FEED_TYPE_FULL
         accepted_types = ("full", "quote", "tick")

@@ -13,7 +13,6 @@ import logging
 from quant.contracts.enums import MarketState
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from quant.contracts.instrument_registry import is_option_contract
 from quant.decision.context import DecisionContext
@@ -145,7 +144,7 @@ class DecisionService:
         fade = detect_va_fade(ctx)
         if fade:
             import logging
-            log = logging.getLogger(__name__)
+            logging.getLogger(__name__)
         if fade and (ctx.agent_direction in (fade.direction, None)) and fade.rr >= self.min_rr:
             # Option contracts are buy-only: never short naked options on VA-fade.
             # A bearish certificate needs a long put via OptionChainPort — without

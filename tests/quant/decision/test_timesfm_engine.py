@@ -172,7 +172,7 @@ def test_timesfm_engine_session_gate_allows():
             mock_model = Mock()
             mock_model.predict.side_effect = RuntimeError("inference error")
             mock_load.return_value = mock_model
-            res = engine.analyze(ctx)
+            engine.analyze(ctx)
             mock_gate.assert_called_once_with("10:30", "MCX")
 
 

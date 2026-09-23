@@ -7,7 +7,6 @@ Verifies that:
 3. Stale or incomplete evidence leaves setup_evidence incomplete.
 """
 
-import pytest
 from quant.decision.context_builder import DecisionContextBuilder
 from quant.contracts.enums import MarketState
 from quant.contracts.value_objects import AMTResult

@@ -1,7 +1,6 @@
 """Cert E7: balance-threshold drift between named constant and literal."""
 from __future__ import annotations
 
-import pytest
 
 from quant.amt.market.state_engine import detect_market_state
 from quant.contracts.constants import BALANCE_RATIO_THRESHOLD

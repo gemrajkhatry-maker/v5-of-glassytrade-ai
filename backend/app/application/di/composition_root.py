@@ -18,10 +18,9 @@ from app.config_models import SystemConfig as Configuration
 from app.config import settings as _settings
 
 from app.shared.mode import is_live_mode
+from app.application.di.container import DIContainer
 
 logger = logging.getLogger(__name__)
-
-from app.application.di.container import DIContainer
 
 
 def compose_container(config: "Configuration") -> DIContainer:

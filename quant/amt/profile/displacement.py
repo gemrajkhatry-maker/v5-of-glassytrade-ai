@@ -28,7 +28,7 @@ def find_lvns(profile, config):
         lvn_percentile=LVN_PERCENTILE,
         min_separation=LVN_MIN_SEPARATION,
     )
-    return [l.price for l in levels]
+    return [lv.price for lv in levels]
 
 if TYPE_CHECKING:
     from quant.contracts.value_objects import OHLC

@@ -4,7 +4,6 @@
 from datetime import date
 from unittest.mock import MagicMock
 
-import pytest
 
 from quant.amt.session.scanner import OptionScannerService
 from quant.multi_engine import QuantCoordinator

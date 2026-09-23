@@ -1,9 +1,8 @@
 """Unit tests for LayaDecisionAdvisor — High-Fidelity AMT Parameter Ingestion & MLX Heads."""
 
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from quant.decision.context import DecisionContext
-from quant.decision.laya_advisor import LayaDecisionAdvisor, get_laya_advisor
+from quant.decision.laya_advisor import LayaDecisionAdvisor
 from quant.bars import Bar
 
 

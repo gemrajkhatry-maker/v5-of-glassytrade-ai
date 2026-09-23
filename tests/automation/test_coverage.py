@@ -1,4 +1,3 @@
-import pytest
 from automation.coverage.analyzer import (
     CoverageAnalyzer,
     FileCoverage,
@@ -72,7 +71,7 @@ def test_analyzer_calculates_total_coverage():
 
 def test_analyzer_identifies_low_coverage():
     """Analyzer identifies files below threshold."""
-    analyzer = CoverageAnalyzer(coverage_threshold=80.0)
+    CoverageAnalyzer(coverage_threshold=80.0)
     
     files = [
         FileCoverage("a.py", 100, 90, [], 90.0),

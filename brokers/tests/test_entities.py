@@ -19,7 +19,7 @@ from shared.entities.models import (
     Tick,
     Order,
 )
-from brokers.broker.types import Exchange, OptionType, OrderSide, OrderType
+from brokers.broker.types import Exchange, OrderSide, OrderType
 
 
 class TestOption:

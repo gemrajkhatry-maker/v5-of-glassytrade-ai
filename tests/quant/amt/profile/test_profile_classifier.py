@@ -5,7 +5,6 @@ import math
 from quant.amt.profile.classifier import (
     classify_shape,
     POCMigrationTracker,
-    ProfileShape,
 )
 from quant.contracts.value_objects import VolumeProfileLevel
 

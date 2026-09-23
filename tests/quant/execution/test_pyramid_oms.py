@@ -1,11 +1,9 @@
 """Unit tests for Pyramiding OMS & Multi-Tier Partial Exits (spec §13.2, §13.3)."""
 
-import pytest
 
 from quant.decision.signal_builder import Signal
 from quant.execution.exits import ExitEngine
 from quant.execution.oms import PaperOMS
-from quant.execution.order import Position
 
 
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List
 
 from dotenv import load_dotenv
 
@@ -52,7 +52,7 @@ class SettingsAdapter:
         try:
             from config.mode_config import ModeConfigLoader
             # Set config_dir to backend/config/ (not app/config/)
-            config_dir = str(Path(__file__).resolve().parent.parent.parent / "config")
+            str(Path(__file__).resolve().parent.parent.parent / "config")
             self._mode_config = ModeConfigLoader.load_from_env()
             self._system_config = self._mode_config.system_config
             self._initialized = True

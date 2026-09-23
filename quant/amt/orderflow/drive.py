@@ -17,7 +17,7 @@ Session reset: All drives reset at session open (FR-05-08).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from quant.contracts.value_objects import OHLC
 

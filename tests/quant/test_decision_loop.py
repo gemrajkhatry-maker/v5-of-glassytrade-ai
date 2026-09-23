@@ -13,17 +13,14 @@ Tests the DecisionLoop in isolation using mock dependencies. Covers:
 
 from __future__ import annotations
 
-import logging
 from collections import deque
-from dataclasses import dataclass, field
-from typing import Any, Optional
-from unittest.mock import MagicMock, patch
+from dataclasses import dataclass
+from typing import Any
+from unittest.mock import MagicMock
 
-import pytest
 
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import QuantDecision
-from quant.decision.result import GateResult
 from quant.decision.signal_builder import Signal
 from quant.engine.decision_loop import DecisionLoop, _as_counter
 from quant.events import (

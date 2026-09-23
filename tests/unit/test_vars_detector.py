@@ -1,8 +1,7 @@
 """Unit tests for VARSDetector (Value Area Reversion Signals - LuxAlgo)."""
 
-import pytest
 from quant.contracts.value_objects import OHLC
-from quant.amt.market.vars_detector import VARSDetector, VARSResult
+from quant.amt.market.vars_detector import VARSDetector
 
 
 def _make_candle(

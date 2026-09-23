@@ -283,7 +283,7 @@ class DecisionContextBuilder:
         from quant.decision.setup_state import SetupEvidence
         setup_dir = str(agent_direction or "").upper()
         cvd_val = self._df(amt_dto, "cvdSlope")
-        cvd_agrees = bool(
+        bool(
             (setup_dir == "LONG" and cvd_val >= -0.2)
             or (setup_dir == "SHORT" and cvd_val <= 0.2)
         )

@@ -10,7 +10,6 @@ from quant.amt.orderflow.aggressive_prints import (
     compute_aggression_sigma,
     find_aggressive_prints,
     AggressivePrintRegistry,
-    AggressivePrintConfig,
 )
 from quant.contracts.value_objects import OHLC, AggressivePrint
 

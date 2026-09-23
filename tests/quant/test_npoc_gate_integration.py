@@ -14,13 +14,13 @@ from quant.decision.context import DecisionContext
 from quant.decision.signal_builder import SignalBuilder
 
 
-def _make_bar(time_str: str, o: float, h: float, l: float, c: float, vol: float = 1000.0, delta: float = 200.0) -> object:
+def _make_bar(time_str: str, o: float, h: float, lo: float, c: float, vol: float = 1000.0, delta: float = 200.0) -> object:
     from quant.bars import Bar
     return Bar(
         time=time_str,
         open=o,
         high=h,
-        low=l,
+        low=lo,
         close=c,
         volume=vol,
         buy_volume=vol * 0.6 if delta > 0 else vol * 0.4,

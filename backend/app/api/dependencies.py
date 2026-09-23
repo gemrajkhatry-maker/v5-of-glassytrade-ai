@@ -12,9 +12,15 @@ seeds when the scan is absent). Readers use ``get_active_symbols()`` (a
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends
+
+if TYPE_CHECKING:
+    from app.config import Configuration
+    from quant.contracts.ports.broker import IBroker
+    from quant.contracts.ports.market_data import IMarketData
+    from quant.contracts.ports.storage import IStorage
 
 # Module-level singletons (created by init_singletons() in main.py)
 _broker = None

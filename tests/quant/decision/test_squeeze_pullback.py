@@ -7,7 +7,6 @@ were never populated, so they passed trivially. Task 2b replaced them with the
 real detector output (``squeeze_direction`` / ``squeeze_trapped_level``) and
 defined pullback concretely as a retest of the trapped VA level (within 3 ticks).
 """
-import pytest
 
 from quant.bars import Bar
 from quant.decision.context import DecisionContext

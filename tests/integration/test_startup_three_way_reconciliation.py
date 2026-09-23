@@ -11,13 +11,10 @@ Verifies the 3-way startup state check prior to market feed connection:
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock
-import pytest
 
 from app.domain.ops.startup_reconciliation import (
     ReconcilePolicy,
-    ReconciliationResult,
     StartupReconciliation,
 )
 from quant.reconciliation_service import reconcile_sets

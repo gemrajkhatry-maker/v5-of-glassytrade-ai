@@ -1,14 +1,13 @@
 """Unit tests for DriveTracker — D1/D2/D3+ drive detection per Fabio FR-05."""
 
-import pytest
 from quant.amt.orderflow.drive import DriveTracker
 from quant.contracts.value_objects import OHLC
 
 
 def _candle(close=100, high=None, low=None, volume=500, time="t"):
     h = high or close * 1.01
-    l = low or close * 0.99
-    return OHLC(time=time, open=close, high=h, low=l, close=close,
+    lo = low or close * 0.99
+    return OHLC(time=time, open=close, high=h, low=lo, close=close,
                 volume=volume, vwap=0, delta=100)
 
 

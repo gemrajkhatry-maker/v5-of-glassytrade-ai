@@ -190,13 +190,13 @@ def extract_features(
         total_q1 = bid_q1 + ask_q1
         f["book_imbalance_l1"] = (bid_q1 - ask_q1) / total_q1 if total_q1 > 0 else 0.0
 
-        bid_q5 = sum(l.quantity for l in order_book.bids[:5])
-        ask_q5 = sum(l.quantity for l in order_book.asks[:5])
+        bid_q5 = sum(lv.quantity for lv in order_book.bids[:5])
+        ask_q5 = sum(lv.quantity for lv in order_book.asks[:5])
         total_q5 = bid_q5 + ask_q5
         f["book_imbalance_l5"] = (bid_q5 - ask_q5) / total_q5 if total_q5 > 0 else 0.0
 
-        bid_q20 = sum(l.quantity for l in order_book.bids[:20])
-        ask_q20 = sum(l.quantity for l in order_book.asks[:20])
+        bid_q20 = sum(lv.quantity for lv in order_book.bids[:20])
+        ask_q20 = sum(lv.quantity for lv in order_book.asks[:20])
 
         f["bid_depth_total"] = bid_q20
         f["ask_depth_total"] = ask_q20

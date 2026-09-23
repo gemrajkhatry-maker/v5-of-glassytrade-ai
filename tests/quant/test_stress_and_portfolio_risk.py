@@ -9,7 +9,6 @@ Proves:
 
 import threading
 
-import pytest
 
 from quant.brokers.gateway import Tick
 from quant.execution.portfolio_risk import PortfolioRiskAuthority
@@ -150,7 +149,6 @@ def test_concurrent_register_open_never_exceeds_ceiling():
 def test_engine_portfolio_gate_blocks_entry(monkeypatch):
     """An engine wired to a breached authority must refuse to open a position
     even when its own gates approve."""
-    from quant.decision.context import DecisionContext
 
     auth = PortfolioRiskAuthority(starting_equity=1_000_000.0,
                                   max_portfolio_risk_pct=0.0001)  # 100 rupees

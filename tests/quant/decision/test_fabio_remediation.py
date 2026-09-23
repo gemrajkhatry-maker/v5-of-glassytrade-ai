@@ -8,10 +8,8 @@ Validates:
 5. Gap #5: QuantEngine MCX CVD breakeven calibration.
 """
 
-import pytest
-from quant.execution.risk import SessionRisk
 from quant.session_levels import SessionLevelStore
-from quant.amt.dto import amt_result_to_dto, _derive_stacked_imbalance
+from quant.amt.dto import amt_result_to_dto
 from quant.contracts.value_objects import AMTResult, FootprintCandle, FootprintLevel
 from quant.contracts.enums import MarketState
 from quant.bars import Bar

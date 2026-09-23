@@ -1,4 +1,3 @@
-import pytest
 from automation.testing.runner import TestRunner, TestReport
 
 

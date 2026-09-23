@@ -7,7 +7,7 @@ fetches it by absolute path — immune to sys.path order.
 """
 
 import importlib.util as _ilu
-from pathlib import Path as _Path
+from pathlib import Path
 
 
 def load_generate_market_data():

@@ -6,17 +6,7 @@ testing phase gates, structural SL/TP, and order execution parity.
 
 from __future__ import annotations
 
-import json
-from dataclasses import asdict
 from quant.contracts.exchange_config import ExchangeConfig
-from quant.events import (
-    BarClosed,
-    AmtUpdated,
-    DecisionProduced,
-    PositionOpened,
-    PositionClosed,
-    RiskUpdated,
-)
 from quant.persistence import Journal
 from quant.runtime import QuantEngine
 from tests.helpers.synthetic import SyntheticGateway

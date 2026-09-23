@@ -1,19 +1,15 @@
 """Tests for TimesFMClient, TimesFMSnapshotBuffer, and TimesFMAdvisor."""
 
 import time
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 from quant.bars import Bar
 from quant.decision.context import DecisionContext
 from quant.decision.timesfm_advisor import TimesFMAdvisor, build_decision_payload
 from quant.decision.timesfm_client import (
-    TimesFMClient,
     TimesFMSnapshotBuffer,
     context_to_snapshot,
 )
-from quant.events import AgentDecisionProduced
 
 
 def test_context_to_snapshot_basic():

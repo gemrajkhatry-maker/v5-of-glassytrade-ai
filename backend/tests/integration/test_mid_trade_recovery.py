@@ -6,7 +6,7 @@ and recovering on startup.
 
 import pytest
 import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock
 from app.infrastructure.storage.database import SQLiteStorageAdapter
 
 

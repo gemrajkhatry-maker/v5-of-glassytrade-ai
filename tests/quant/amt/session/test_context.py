@@ -2,7 +2,6 @@
 
 from datetime import date, datetime, timezone, timedelta
 
-import pytest
 
 from quant.amt.session.context import (
     get_session,
@@ -13,7 +12,6 @@ from quant.amt.session.context import (
     is_expiry_day,
     get_sub_session,
 )
-from tests.quant.parity_harness import assert_parity
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 

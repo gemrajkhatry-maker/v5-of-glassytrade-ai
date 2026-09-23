@@ -44,7 +44,7 @@ def test_no_raw_market_state_literals_outside_allowlist():
     hits = _raw_state_literals()
     assert not hits, (
         "Raw MarketState string literals found — use MarketState members "
-        f"or route through amt/dto.py:\n" + "\n".join(hits)
+        "or route through amt/dto.py:\n" + "\n".join(hits)
     )
 
 

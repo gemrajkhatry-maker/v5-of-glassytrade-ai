@@ -1,9 +1,7 @@
 # tests/quant/amt/test_cold_start_prior_levels.py
 import pytest
-from unittest.mock import MagicMock
 from quant.amt_engine import AMTEngine
 from quant.session_levels import SessionLevelStore
-from quant.contracts.timezones import IST
 
 
 class _MultiDayHistorySource:

@@ -3,14 +3,8 @@
 Verifies that QuantCoordinator.start() runs PaperPositionReconciler and
 exposes quarantined positions via quarantined_positions().
 """
-import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
-from quant.execution.paper_reconciliation import (
-    PaperPositionStatus,
-    QuarantinedPosition,
-    ReconciliationResult,
-)
 
 
 class FakeStorage:
@@ -119,7 +113,6 @@ def test_coordinator_start_passes_open_positions_to_spawn():
         QuantCoordinator.start(coord)
 
     # _spawn_engine should be called with the open position row, not the stale one
-    call_args = coord._spawn_engine.call_args
     # The reconciler result should be stored
     assert hasattr(coord, "_reconciliation_result")
     result = coord._reconciliation_result

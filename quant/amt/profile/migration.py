@@ -10,7 +10,6 @@ whether the auction is expanding, contracting, or shifting as one body.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 
 from quant.contracts.value_objects import ValueMigration
 

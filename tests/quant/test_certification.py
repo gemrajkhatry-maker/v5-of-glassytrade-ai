@@ -13,10 +13,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tests.quant.test_golden_replay import (  # noqa: E402
-    replay,
     scenario_balanced_rotation,
     scenario_displacement_breakout,
-    scenario_stop_out,
 )
 
 
@@ -135,7 +133,7 @@ def test_s6_qualification_matrix_breakout_qualifies():
 
 def test_s9_position_size_matches_independent_risk_math():
     eng = _engine_from(scenario_displacement_breakout)
-    dec_recs = [r for r in eng.cert_records if r["stage"] == "decision"]
+    [r for r in eng.cert_records if r["stage"] == "decision"]
     opened = [e for e in eng.events if type(e).__name__ == "PositionOpened"]
     if not opened:
         pytest.skip("scenario did not fill; risk math covered by unit tests")
@@ -203,9 +201,7 @@ def _engine_with_pyramid_story():
     """Build a scenario that: (1) enters LONG on displacement, (2) becomes
     risk-free, (3) pulls back to the impulse-leg LVN with fresh absorption
     and a confirming candle — the exact pyramid authorization sequence."""
-    import hashlib
     from quant.brokers.gateway import Tick
-    from quant.runtime import QuantEngine
 
     t0 = 1_787_664_600  # in-session MCX evening anchor
     ticks = []
@@ -232,8 +228,6 @@ def test_s10_pyramid_adds_only_when_all_gates_align():
     """S10 certification: pyramid add requires (risk-free base + LVN retest +
     fresh absorption in direction + confirming candle). Verify via the
     PositionManager contract directly — each missing condition rejects."""
-    from quant.amt.orderflow.footprint import FootprintCandle, FootprintLevel
-    from quant.decision.result import GateResult
     from quant.bars import Bar
     from quant.execution.exits import ExitEngine
     from quant.execution.oms import PaperOMS
@@ -309,7 +303,6 @@ def test_s10_pyramid_cert_records_flow():
     The engine no longer owns a _check_pyramid wrapper (D-25): the only call
     site is manage_exit -> PositionManager.check_pyramid.
     """
-    from quant.runtime import QuantEngine
     eng = _engine_from(scenario_displacement_breakout)
     assert not hasattr(eng, "_check_pyramid"), "dead engine wrapper resurfaced"
 

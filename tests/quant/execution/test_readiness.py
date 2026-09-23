@@ -9,7 +9,6 @@ Phase 0.3 introduces:
 - QuantCoordinator.readiness_status() aggregates sub-checks
 - Backend health router integrates coordinator readiness
 """
-import pytest
 
 from quant.execution.readiness import (
     ReadinessStatus,

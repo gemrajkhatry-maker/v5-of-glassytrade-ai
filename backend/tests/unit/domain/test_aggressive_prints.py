@@ -4,11 +4,9 @@ Tests the detection algorithm, delta directionality filter, expiry,
 EMA variance warm-up, and SL placement from aggressive prints.
 """
 
-import pytest
 from quant.amt import compute as mc
 from quant.amt.analyzer import (
     find_aggressive_prints,
-    AMTConfig,
 )
 from quant.contracts.value_objects import OHLC, AggressivePrint, AMTResult
 

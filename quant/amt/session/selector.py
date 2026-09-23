@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date
 import logging
 
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY

@@ -12,7 +12,7 @@ Apple Silicon.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from quant.contracts.value_objects import OHLC
 from quant.amt import compute as mc

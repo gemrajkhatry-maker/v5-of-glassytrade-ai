@@ -2,7 +2,6 @@ import pytest
 
 from quant.contracts.contracts import ContractRef
 from quant.decision.signal_builder import Signal
-from quant.execution.order import Order, Position
 from quant.execution.oms import PaperOMS
 from quant.execution.paper_simulator import PaperExecutionSimulator
 

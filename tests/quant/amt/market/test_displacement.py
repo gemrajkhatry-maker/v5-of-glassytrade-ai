@@ -1,6 +1,5 @@
 """Tests for displacement_detector.py - displacement leg detection."""
 
-import pytest
 from quant.amt.market.displacement import (
     detect_displacement,
     detect_acceptance,

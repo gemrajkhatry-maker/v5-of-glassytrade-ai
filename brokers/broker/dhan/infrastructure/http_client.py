@@ -26,7 +26,7 @@ Example:
 import asyncio
 import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import aiohttp
 
@@ -43,7 +43,6 @@ from brokers.broker.dhan.domain import (
     DhanAuthError,
     DhanConnectionError,
     DhanError,
-    DhanInvalidDataError,
     DhanNetworkError,
     DhanRateLimitError,
     DhanTimeoutError,
@@ -485,7 +484,7 @@ class DhanHttpClient(IHttpClient):
                 # Cannot refresh or already retried - raise the error
                 raise
                 
-            except (DhanTimeoutError, DhanRateLimitError) as e:
+            except (DhanTimeoutError, DhanRateLimitError):
                 # These errors should not be retried
                 raise
                 
@@ -666,7 +665,7 @@ class DhanHttpClient(IHttpClient):
                     headers=response_headers,
                 )
                 
-        except asyncio.TimeoutError as e:
+        except asyncio.TimeoutError:
             raise DhanTimeoutError(
                 message="Request timed out",
                 code=ERROR_CODE_TIMEOUT,

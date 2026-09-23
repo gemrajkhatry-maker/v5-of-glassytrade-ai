@@ -69,7 +69,10 @@ def test_concurrent_switch_spawns_exactly_one_engine(monkeypatch):
                                            "CRUDEOIL 17 SEP 8300 CALL"))
 
     t1, t2 = threading.Thread(target=switch), threading.Thread(target=switch)
-    t1.start(); t2.start(); t1.join(); t2.join()
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
 
     engines_for_new = [s for s in coord.symbols() if s == "CRUDEOIL 17 SEP 8300 CALL"]
     assert results == [True, True] or results == [True] or results.count(True) >= 1

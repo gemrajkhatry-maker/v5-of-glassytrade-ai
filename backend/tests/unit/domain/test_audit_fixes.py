@@ -1,17 +1,13 @@
-from decimal import Decimal
 """Tests for production audit fixes — commission, slippage, SL watchdog, async persistence."""
 
-import asyncio
-import queue
-import threading
-import time as _time
+from decimal import Decimal
 
 import pytest
 
 from quant.contracts.enums import Side, Source, PositionStatus, SignalType, SetupType
 from quant.contracts.entities import Position, Signal
 from quant.contracts.aggregates import (
-    Portfolio, COMMISSION_PER_LOT, SLIPPAGE_PCT, DEFAULT_LOT_SIZE,
+    Portfolio, COMMISSION_PER_LOT, SLIPPAGE_PCT,
 )
 from quant.contracts.value_objects import OHLC
 
@@ -167,7 +163,6 @@ class TestSLWatchdogLogic:
         pos = p.open_position(sig, "SYM")
         assert pos is not None
 
-        initial_balance = p.balance
         closed = p.close_position(pos.id, 100.0, "WATCHDOG_Stop Loss")
         assert closed is not None
         # Net P&L should be negative (slippage + commission on a break-even trade)

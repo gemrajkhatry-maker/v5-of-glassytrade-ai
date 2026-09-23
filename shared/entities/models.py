@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, List, Any
 import uuid
 
 # =============================================================================

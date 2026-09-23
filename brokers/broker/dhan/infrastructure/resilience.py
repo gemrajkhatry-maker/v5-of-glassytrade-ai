@@ -27,18 +27,20 @@ Example:
 
 import asyncio
 import time
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from typing import Optional, Dict, Callable, TypeVar, Awaitable
 
 from brokers.broker.dhan.ports import (
     IRateLimiter,
 )
-from shared.resilience import CircuitBreaker as SharedCircuitBreaker, CircuitBreakerError
+from shared.resilience import (
+    CircuitBreaker as SharedCircuitBreaker,
+    CircuitBreakerError,
+    CircuitState,
+)
 from brokers.broker.logging import get_logger
 from brokers.broker.dhan.domain import (
     DhanNetworkError,
-    DhanRateLimitError,
     RATE_LIMIT_MARKET_DATA,
     RATE_LIMIT_HISTORICAL,
     RATE_LIMIT_ORDERS,
@@ -254,9 +256,6 @@ class TokenBucketRateLimiter(IRateLimiter):
         return (
             f"TokenBucketRateLimiter(categories={list(self._configs.keys())})"
         )
-
-
-from shared.resilience import CircuitState
 
 
 # =============================================================================

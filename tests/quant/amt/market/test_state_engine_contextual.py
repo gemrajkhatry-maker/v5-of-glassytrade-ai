@@ -4,7 +4,6 @@ A probe beyond VA that closes back inside is a rejected probe (mean-reversion
 context), NOT IMBALANCED.  Only acceptance (close beyond VA) triggers IMBALANCED.
 """
 
-import pytest
 from quant.amt.market.state_engine import detect_market_state
 from quant.contracts.enums import MarketState
 from quant.contracts.constants import BALANCE_RATIO_THRESHOLD

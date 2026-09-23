@@ -9,7 +9,6 @@ These tests are deterministic (no randomness) and fast (< 1s each).
 from __future__ import annotations
 
 import pytest
-from dataclasses import replace
 
 from quant.bars import Bar
 from quant.contracts.enums import MarketState

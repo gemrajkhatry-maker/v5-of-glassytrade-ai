@@ -3,7 +3,6 @@
 import pytest
 
 from quant.execution.trade_costs import (
-    TradeCosts,
     compute_fill_costs,
     compute_trade_costs,
 )

@@ -18,7 +18,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -177,8 +176,8 @@ class DualRunComparer:
         """Human-readable summary."""
         r = self.report()
         lines = [
-            f"Dual-Run Comparison Report",
-            f"==========================",
+            "Dual-Run Comparison Report",
+            "==========================",
             f"Ticks compared:  {r.total_ticks}",
             f"Mismatches:      {r.mismatches}",
             f"Max numeric err: {r.max_numeric_error:.6e}",

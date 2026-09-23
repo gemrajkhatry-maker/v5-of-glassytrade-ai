@@ -1,8 +1,6 @@
 from quant.decision.signal_builder import Signal
 from quant.execution.lots import snap_to_lot
 from quant.execution.order import Fill, Order, Position
-from quant.execution.ports import IOMS
-from quant.execution.paper_contracts import PaperContract
 from quant.execution.paper_simulator import PaperExecutionSimulator, PaperFill
 from quant.contracts.contracts import ContractRef
 

@@ -22,10 +22,9 @@ from quant.brokers.gateway import Tick
 from quant.decision.signal_builder import Signal
 from quant.events import PositionOpened, PositionReduced
 from quant.execution.order import Fill, Position
-from quant.execution.portfolio_risk import PortfolioRiskAuthority
 from quant.runtime import QuantEngine
-from quant.state_machine import EngineState, PositionState
-from quant.transitions import apply_event, _position_to_state
+from quant.state_machine import EngineState
+from quant.transitions import apply_event
 from tests.helpers.synthetic import SyntheticGateway
 
 
@@ -194,7 +193,7 @@ class TestEngineStateAndReconcile:
         """engine.state.position.size matches the reduced runner after a partial."""
         eng = _make_engine()
         position = _opened_position(size=4.0)
-        remaining = self._open_then_partial(eng, position)
+        self._open_then_partial(eng, position)
         assert eng.state.position is not None
         assert eng.state.position.size == pytest.approx(2.0)
         # The event-store fold agrees with the cached state.
@@ -204,7 +203,7 @@ class TestEngineStateAndReconcile:
         """No drift when the pm book and the folded state agree."""
         eng = _make_engine()
         position = _opened_position(size=4.0)
-        remaining = self._open_then_partial(eng, position)
+        self._open_then_partial(eng, position)
         result = eng.periodic_reconcile()
         assert result.has_drift is False, result.discrepancies
 
@@ -212,7 +211,7 @@ class TestEngineStateAndReconcile:
         """A pm book that diverges from state (e.g. missed event) is reported."""
         eng = _make_engine()
         position = _opened_position(size=4.0)
-        remaining = self._open_then_partial(eng, position)
+        self._open_then_partial(eng, position)
         # Tamper the execution book: it holds the FULL size while state holds
         # the reduced runner (the pre-fix PositionReduced staleness).
         pm = eng._get_position_manager()

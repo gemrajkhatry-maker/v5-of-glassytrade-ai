@@ -14,12 +14,9 @@ Bridges underlying futures structural analysis with option execution:
 
 from __future__ import annotations
 
-import math
-from typing import Optional
 
 from quant.contracts.tick_utils import (
     round_down_to_tick,
-    round_to_tick,
     round_up_to_tick,
 )
 

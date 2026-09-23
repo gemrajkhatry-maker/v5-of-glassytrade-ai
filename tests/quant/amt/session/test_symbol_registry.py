@@ -12,7 +12,6 @@ import pytest
 from quant.amt.session.symbol_registry import SymbolRegistry
 from quant.contracts.exchange_config import ExchangeConfig
 from quant.contracts.instrument_registry import UnknownInstrumentError
-from tests.quant.parity_harness import assert_parity
 
 
 # ======================================================================

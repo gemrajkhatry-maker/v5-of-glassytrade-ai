@@ -43,7 +43,7 @@ def test_engine_passes_no_candidate_direction_to_analyzer():
         cvd_source="underlying",
     )
     with patch.object(engine._amt_analyzer, "analyze", return_value=result) as analyze:
-        dto = engine.analyze(bar)
+        engine.analyze(bar)
 
     # candidate_direction parameter removed from analyzer call
     assert "candidate_direction" not in analyze.call_args.kwargs
@@ -106,7 +106,7 @@ def test_engine_dto_contains_aggression_components_for_rescoring():
         ofi_result=None,
         norm_delta=0.5,
     )
-    with patch.object(engine._amt_analyzer, "analyze", return_value=result) as analyze:
+    with patch.object(engine._amt_analyzer, "analyze", return_value=result):
         dto = engine.analyze(bar)
 
     assert "aggressionComponents" in dto

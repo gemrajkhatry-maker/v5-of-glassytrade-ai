@@ -40,7 +40,6 @@ from brokers.broker.dhan.domain import (
     DhanInstrument,
     InstrumentTypeEnum,
     OptionType,
-    DhanSymbolNotFoundError,
     DhanNetworkError,
     INSTRUMENT_CACHE_TTL_SECONDS,
 )
@@ -411,7 +410,6 @@ class DhanSymbolMapper(ISymbolMapper):
         Raises:
             DhanInvalidExchangeError: If exchange is not MCX
         """
-        from brokers.broker.dhan.domain import DhanInvalidExchangeError
 
         symbol = symbol.upper().strip()
 

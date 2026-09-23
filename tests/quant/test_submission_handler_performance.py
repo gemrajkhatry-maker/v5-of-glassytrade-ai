@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
 
 from quant.decision.signal_builder import Signal
 from quant.engine.submission_handler import SubmissionHandler
@@ -199,7 +198,7 @@ class TestSubmissionHandlerPerformance:
         def submit_order():
             handler.submit(signal, bar, {}, MagicMock(), "Triple-A")
 
-        result = benchmark(submit_order)
+        benchmark(submit_order)
         # Benchmark will report iterations and time
 
     def test_partial_fill_throughput(self, benchmark):
@@ -302,7 +301,7 @@ class TestSubmissionHandlerLatency:
         throughput = iterations / total_time
 
         print(f"\n{'='*70}")
-        print(f"SubmissionHandler Latency Profile")
+        print("SubmissionHandler Latency Profile")
         print(f"{'='*70}")
         print(f"Total time: {total_time:.3f}s")
         print(f"Iterations: {iterations}")
@@ -339,7 +338,7 @@ class TestSubmissionHandlerLatency:
         throughput = iterations / total_time
 
         print(f"\n{'='*70}")
-        print(f"SubmissionHandler Partial Fill Latency Profile")
+        print("SubmissionHandler Partial Fill Latency Profile")
         print(f"{'='*70}")
         print(f"Total time: {total_time:.3f}s")
         print(f"Iterations: {iterations}")
@@ -375,7 +374,7 @@ class TestSubmissionHandlerLatency:
         avg_latency_us = (total_time / iterations) * 1_000_000
 
         print(f"\n{'='*70}")
-        print(f"SubmissionHandler High-Frequency Sustainability Profile")
+        print("SubmissionHandler High-Frequency Sustainability Profile")
         print(f"{'='*70}")
         print(f"Total orders: {iterations}")
         print(f"Total time: {total_time:.3f}s")

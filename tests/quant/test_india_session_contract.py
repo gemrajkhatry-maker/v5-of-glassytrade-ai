@@ -1,9 +1,8 @@
 # tests/quant/test_india_session_contract.py
 """Tests for Indian Session Boundaries and Expiry Rules (Task 9)."""
 
-import pytest
 from quant.amt.session.context import get_session_info
-from quant.session_gates import session_allow_entry, session_force_exit
+from quant.session_gates import session_force_exit
 
 
 def test_opening_noise_blocks_new_entries():

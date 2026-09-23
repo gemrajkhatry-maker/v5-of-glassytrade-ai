@@ -14,7 +14,7 @@ it fully testable in isolation without constructing a QuantEngine.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from quant.decision.signal_builder import Signal, clamp_quantity
 from quant.events import Event, PositionOpened, SignalApproved

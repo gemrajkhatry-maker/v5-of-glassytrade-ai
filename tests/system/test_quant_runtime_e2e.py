@@ -9,9 +9,9 @@ projected state is the WS state the frontend would receive at that moment.
 """
 
 from tests.helpers.synthetic import SyntheticGateway
+from tests.system.test_paper_protocol import _session_ticks
 from quant.runtime import QuantEngine
 from quant.ws_adapter import view_state_to_ws
-from tests.quant.runtime.test_runtime import _ticks
 
 WS_CONTRACT_KEYS = (
     "_symbol", "portfolio", "amt", "quantDecision",
@@ -26,9 +26,6 @@ BACKEND_SNAPSHOT_KEYS = {
     "agentDecision", "riskState",
 }
 ENGINE_ADDED_KEYS = {"tick", "ltp", "oi", "depth"}
-
-
-from tests.system.test_paper_protocol import _session_ticks
 
 
 def _run_ws():

@@ -639,16 +639,26 @@ class DhanWebSocketClient(IWebSocketClient):
 
             elif rc == _RC_QUOTE and len(data) >= 50:
                 o = 8
-                ltp      = struct.unpack_from('<f', data, o)[0]; o += 4
-                ltq      = struct.unpack_from('<H', data, o)[0]; o += 2
-                ltt      = struct.unpack_from('<I', data, o)[0]; o += 4
-                atp      = struct.unpack_from('<f', data, o)[0]; o += 4
-                vol      = struct.unpack_from('<I', data, o)[0]; o += 4
-                tot_sell = struct.unpack_from('<I', data, o)[0]; o += 4
-                tot_buy  = struct.unpack_from('<I', data, o)[0]; o += 4
-                open_    = struct.unpack_from('<f', data, o)[0]; o += 4
-                close    = struct.unpack_from('<f', data, o)[0]; o += 4
-                high     = struct.unpack_from('<f', data, o)[0]; o += 4
+                ltp      = struct.unpack_from('<f', data, o)[0]
+                o += 4
+                ltq      = struct.unpack_from('<H', data, o)[0]
+                o += 2
+                ltt      = struct.unpack_from('<I', data, o)[0]
+                o += 4
+                atp      = struct.unpack_from('<f', data, o)[0]
+                o += 4
+                vol      = struct.unpack_from('<I', data, o)[0]
+                o += 4
+                tot_sell = struct.unpack_from('<I', data, o)[0]
+                o += 4
+                tot_buy  = struct.unpack_from('<I', data, o)[0]
+                o += 4
+                open_    = struct.unpack_from('<f', data, o)[0]
+                o += 4
+                close    = struct.unpack_from('<f', data, o)[0]
+                o += 4
+                high     = struct.unpack_from('<f', data, o)[0]
+                o += 4
                 low      = struct.unpack_from('<f', data, o)[0]
                 return WSMessage(
                     type="quote",
@@ -665,29 +675,49 @@ class DhanWebSocketClient(IWebSocketClient):
 
             elif rc == _RC_FULL and len(data) >= 162:
                 o = 8
-                ltp      = struct.unpack_from('<f', data, o)[0]; o += 4
-                ltq      = struct.unpack_from('<H', data, o)[0]; o += 2
-                ltt      = struct.unpack_from('<I', data, o)[0]; o += 4
-                atp      = struct.unpack_from('<f', data, o)[0]; o += 4
-                vol      = struct.unpack_from('<I', data, o)[0]; o += 4
-                tot_sell = struct.unpack_from('<I', data, o)[0]; o += 4
-                tot_buy  = struct.unpack_from('<I', data, o)[0]; o += 4
-                open_    = struct.unpack_from('<f', data, o)[0]; o += 4
-                close    = struct.unpack_from('<f', data, o)[0]; o += 4
-                high     = struct.unpack_from('<f', data, o)[0]; o += 4
-                low      = struct.unpack_from('<f', data, o)[0]; o += 4
-                oi       = struct.unpack_from('<I', data, o)[0]; o += 4
-                high_oi  = struct.unpack_from('<I', data, o)[0]; o += 4
-                low_oi   = struct.unpack_from('<I', data, o)[0]; o += 4
+                ltp      = struct.unpack_from('<f', data, o)[0]
+                o += 4
+                ltq      = struct.unpack_from('<H', data, o)[0]
+                o += 2
+                ltt      = struct.unpack_from('<I', data, o)[0]
+                o += 4
+                atp      = struct.unpack_from('<f', data, o)[0]
+                o += 4
+                vol      = struct.unpack_from('<I', data, o)[0]
+                o += 4
+                tot_sell = struct.unpack_from('<I', data, o)[0]
+                o += 4
+                tot_buy  = struct.unpack_from('<I', data, o)[0]
+                o += 4
+                open_    = struct.unpack_from('<f', data, o)[0]
+                o += 4
+                close    = struct.unpack_from('<f', data, o)[0]
+                o += 4
+                high     = struct.unpack_from('<f', data, o)[0]
+                o += 4
+                low      = struct.unpack_from('<f', data, o)[0]
+                o += 4
+                oi       = struct.unpack_from('<I', data, o)[0]
+                o += 4
+                high_oi  = struct.unpack_from('<I', data, o)[0]
+                o += 4
+                low_oi   = struct.unpack_from('<I', data, o)[0]
+                o += 4
                 # 5-level depth: each level = bid_qty(4) + ask_qty(4) + bid_orders(2) + ask_orders(2) + bid_price(4) + ask_price(4) = 20 bytes
                 depth_bids, depth_asks = [], []
                 for _ in range(5):
-                    bq  = struct.unpack_from('<I', data, o)[0]; o += 4
-                    aq  = struct.unpack_from('<I', data, o)[0]; o += 4
-                    bo  = struct.unpack_from('<H', data, o)[0]; o += 2
-                    ao  = struct.unpack_from('<H', data, o)[0]; o += 2
-                    bp  = struct.unpack_from('<f', data, o)[0]; o += 4
-                    ap  = struct.unpack_from('<f', data, o)[0]; o += 4
+                    bq  = struct.unpack_from('<I', data, o)[0]
+                    o += 4
+                    aq  = struct.unpack_from('<I', data, o)[0]
+                    o += 4
+                    bo  = struct.unpack_from('<H', data, o)[0]
+                    o += 2
+                    ao  = struct.unpack_from('<H', data, o)[0]
+                    o += 2
+                    bp  = struct.unpack_from('<f', data, o)[0]
+                    o += 4
+                    ap  = struct.unpack_from('<f', data, o)[0]
+                    o += 4
                     depth_bids.append({"price": round(bp, 2), "qty": bq, "orders": bo})
                     depth_asks.append({"price": round(ap, 2), "qty": aq, "orders": ao})
                 return WSMessage(

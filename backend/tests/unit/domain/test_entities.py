@@ -1,6 +1,5 @@
 """Unit tests for domain entities — Position lifecycle, Signal creation."""
 
-import pytest
 from quant.contracts.enums import (
     Side, SignalType, Source, SetupType, PositionStatus,
 )

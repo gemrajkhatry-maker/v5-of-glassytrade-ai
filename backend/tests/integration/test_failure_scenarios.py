@@ -302,7 +302,7 @@ class TestPerformance:
         start = time.perf_counter()
         
         for _ in range(1000):
-            pnl = (25050 - 25000) * 100
+            (25050 - 25000) * 100
         
         elapsed = (time.perf_counter() - start) * 1000
         assert elapsed < 10, f"1000 calculations should take < 10ms, took {elapsed}ms"
@@ -315,7 +315,7 @@ class TestPerformance:
             _ = i * 2
         
         elapsed = (time.perf_counter() - start) * 1000
-        assert elapsed < 5, f"10000 iterations should take < 5ms"
+        assert elapsed < 5, "10000 iterations should take < 5ms"
 
 
 # =============================================================================
@@ -360,12 +360,11 @@ class TestDecimalPrecision:
             float_total += 0.1
         
         # Float will have precision issues
-        has_error = abs(float_total - 10.0) > 0.0001
+        abs(float_total - 10.0) > 0.0001
         # This demonstrates the issue but may or may not fail depending on float precision
 
     def test_decimal_accuracy(self):
         """HIGH: Decimal provides accurate calculations."""
-        from decimal import Decimal
         
         decimal_total = Decimal("0.0")
         for _ in range(100):

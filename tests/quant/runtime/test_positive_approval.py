@@ -16,7 +16,7 @@ Triple-A → gate approval. Two properties are pinned here:
 
 from quant.brokers.gateway import Tick
 from tests.helpers.synthetic import SyntheticGateway
-from quant.events import DecisionProduced, PositionOpened, SignalApproved
+from quant.events import DecisionProduced
 from quant.execution.risk import SessionRisk
 from quant.runtime import QuantEngine
 

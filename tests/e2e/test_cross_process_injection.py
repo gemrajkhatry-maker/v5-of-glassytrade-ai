@@ -14,12 +14,6 @@ pytest.importorskip("fastapi")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "runtime_audit" / "e2e"))
 
 try:
-    from boot_helper import (  # noqa: E402
-        active_symbols,
-        start_backend,
-        stop_backend,
-        ws_connect,
-    )
     HAVE_BOOT = True
 except Exception:  # websockets missing etc.
     HAVE_BOOT = False

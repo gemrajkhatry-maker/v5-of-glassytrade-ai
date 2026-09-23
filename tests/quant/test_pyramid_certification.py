@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from quant.amt.orderflow.footprint import FootprintCandle, FootprintLevel
 from quant.bars import Bar
-from quant.decision.result import GateResult
 from quant.execution.exits import ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.order import Order, Position
@@ -160,7 +158,7 @@ def test_e11_pyramid_reserves_portfolio_risk():
     pm.check_pyramid(dto, _bar(100.05), pos, bar_index=5)
 
     assert len(pm.pyramid_positions) == 1, "P1 should have fired"
-    pyr = pm.pyramid_positions[0]
+    pm.pyramid_positions[0]
 
     # The pyramid's open risk must be registered with the portfolio authority.
     from quant.decision.stops import structural_stop
@@ -176,7 +174,7 @@ def test_e11_pyramid_reserves_portfolio_risk():
 def test_e11_portfolio_cap_blocks_over_pyramid_exposure():
     """E11 regression: if pyramids bypassed portfolio risk, two add-ons could
     push aggregate exposure past the cap. This test asserts the cap is honored."""
-    oms = PaperOMS(lot_size=1.0)
+    PaperOMS(lot_size=1.0)
 
     # Base position consumes 50% of a ₹10k cap (risk distance 1.0 × qty 10).
     portfolio_risk = PortfolioRiskAuthority(starting_equity=10_000.0, max_portfolio_risk_pct=0.04)

@@ -17,8 +17,8 @@ from quant.amt.market.half_trend import (
 from quant.contracts.value_objects import OHLC
 
 
-def _bar(h: float, l: float, c: float, t: str) -> OHLC:
-    return OHLC.create(time=t, open=c, high=h, low=l, close=c, volume=100)
+def _bar(h: float, lo: float, c: float, t: str) -> OHLC:
+    return OHLC.create(time=t, open=c, high=h, low=lo, close=c, volume=100)
 
 
 def _feed(det: HalfTrendDetector, bars: list[OHLC]):

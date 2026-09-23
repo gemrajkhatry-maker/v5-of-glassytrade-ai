@@ -227,9 +227,9 @@ def _compute_atr(bars: list, period: int = 14) -> float:
     trs: list[float] = []
     for i in range(1, len(bars)):
         h = float(bars[i].high)
-        l = float(bars[i].low)
+        lo = float(bars[i].low)
         pc = float(bars[i - 1].close)
-        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        trs.append(max(h - lo, abs(h - pc), abs(lo - pc)))
     window = trs[-period:]
     return sum(window) / max(len(window), 1)
 

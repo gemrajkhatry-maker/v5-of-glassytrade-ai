@@ -16,8 +16,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from quant.decision.context import DecisionContext
-from quant.decision.pipeline import GatePipeline
-from quant.decision.result import GateResult
 
 
 SYSTEM_PROMPT = (

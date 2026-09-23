@@ -8,8 +8,6 @@ import pytest
 from quant.amt.market.state_engine import (
     detect_market_state,
     classify_zone,
-    log_state_transition,
-    MarketStateResult,
 )
 from quant.amt.orderflow.aggression import AggressionScorer
 from quant.contracts.enums import MarketState

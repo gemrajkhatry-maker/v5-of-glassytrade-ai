@@ -29,7 +29,6 @@ from quant.events import (  # noqa: E402
     DecisionProduced,
     PositionClosed,
     PositionOpened,
-    RiskUpdated,
 )
 from quant.execution.risk import SessionRisk  # noqa: E402
 from quant.runtime import QuantEngine  # noqa: E402

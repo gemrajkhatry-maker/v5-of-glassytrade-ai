@@ -5,7 +5,6 @@ requires the close to exceed the micro-VAH (LONG) or micro-VAL (SHORT).
 A close inside the box is range rotation, not a breakout.
 """
 
-import pytest
 
 from quant.amt.triple_a import AGGRESSION
 from quant.bars import Bar

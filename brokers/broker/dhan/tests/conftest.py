@@ -13,8 +13,8 @@ Usage:
 import os
 import pytest
 from datetime import datetime, date
-from typing import Dict, Any, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Dict, Any
+from unittest.mock import AsyncMock
 
 # Domain imports
 from brokers.broker.dhan.domain import (
@@ -29,39 +29,28 @@ from brokers.broker.dhan.domain import (
     InstrumentTypeEnum,
     OptionType,
     DepthLevel,
-    OHLC,
-    Greeks,
 )
 
 # Infrastructure imports
 from brokers.broker.dhan.infrastructure import (
     DhanHttpClient,
     DhanWebSocketClient,
-    DhanSymbolMapper,
-    DhanAuthProvider,
     TokenBucketRateLimiter,
     DhanCircuitBreaker,
-    RetryConfig,
 )
 
 # Application imports
-from brokers.broker.dhan.application import DhanConfig, DhanConverter
+from brokers.broker.dhan.application import DhanConfig
 
 # Port imports
 from brokers.broker.dhan.ports import (
     IHttpClient,
     IWebSocketClient,
-    ISymbolMapper,
-    IAuthProvider,
-    IRateLimiter,
-    ICircuitBreaker,
-    HttpRequest,
     HttpResponse,
-    WSMessage,
 )
 
 # Broker-agnostic imports
-from shared.entities.models import Instrument, Quote, Tick, Order, Position
+from shared.entities.models import Instrument, Quote, Order, Position
 from brokers.broker.types import Exchange, OrderSide, OrderType, OrderStatus
 
 

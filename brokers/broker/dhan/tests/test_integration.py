@@ -14,18 +14,13 @@ Live tests are marked with @pytest.mark.integration and require:
 import os
 import pytest
 import asyncio
-from datetime import datetime, date
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from brokers.broker.dhan.domain import (
     DhanInstrument,
     DhanQuote,
-    DhanTick,
-    DhanOrder,
-    DhanPosition,
     ExchangeSegment,
     InstrumentTypeEnum,
-    OptionType,
     MARKETFEED_QUOTE,
     OPTIONCHAIN_EXPIRYLIST,
     ORDERS,
@@ -44,9 +39,7 @@ from brokers.broker.dhan.application import DhanConfig, DhanConverter
 from brokers.broker.dhan.ports import (
     IHttpClient,
     IWebSocketClient,
-    HttpRequest,
     HttpResponse,
-    WSMessage,
 )
 
 from shared.entities.models import (
@@ -61,7 +54,6 @@ from brokers.broker.types import (
     Exchange,
     OrderSide,
     OrderType,
-    OrderStatus,
 )
 
 

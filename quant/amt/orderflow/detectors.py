@@ -337,11 +337,9 @@ class AbsorptionDetector:
         #     active state with the pending cluster bounds so the Triple-A machine
         #     can track the ABSORBING phase before breakout.
         if self._pending_candle is not None:
-            side_now = self._pending_side if self._pending_side else ""
             ch = float(self._pending_candle.high)
             cl = float(self._pending_candle.low)
         else:
-            side_now = ""
             ch = 0.0
             cl = 0.0
 
