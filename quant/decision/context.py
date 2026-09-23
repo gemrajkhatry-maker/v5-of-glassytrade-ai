@@ -62,6 +62,10 @@ class DecisionContext:
     # previous balance area / prior POC). Carried from the AMT DTO; zeros mean
     # no structure is available and the fixed R-multiple placeholder applies.
     prior_poc: float = 0.0                  # previous session's POC
+    prior_vah: float = 0.0                  # previous session's VAH
+    prior_val: float = 0.0                  # previous session's VAL
+    gap_type: str = ""                      # opening gap type from AMT analyzer
+    opening_bias: str = ""                  # opening bias from AMT analyzer
     npoc_above: float = 0.0                 # nearest unfilled prior-session POC above
     npoc_below: float = 0.0                 # nearest unfilled prior-session POC below
     # Depth-derived order book imbalance ([-1, 1], +1 = bid-heavy). Carried
