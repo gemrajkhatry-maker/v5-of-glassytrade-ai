@@ -15,6 +15,7 @@ asserts the exact gate results and decision outcomes.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from quant.bars import Bar  # noqa: E402
 from quant.contracts.enums import MarketState  # noqa: E402
+from quant.decision import pipeline as pipeline_mod  # noqa: E402
 from quant.decision.context import DecisionContext  # noqa: E402
 from quant.decision.decision_service import DecisionService  # noqa: E402
 from quant.decision.pipeline import GatePipeline  # noqa: E402
@@ -222,6 +224,47 @@ class TestGate4RiskReward:
         # and tick_size=0.05, the cap is max(200, 100*0.0075/0.05) = max(200, 15) = 200 ticks
         # Structural stop should be well within 200 ticks
         assert _gate_passed(results, 4)
+
+
+# ---------------------------------------------------------------------------
+# Gate exceptions — GATE_ERROR is fail-closed and logged, not a silent veto
+# ---------------------------------------------------------------------------
+
+
+class TestGateErrorNotVeto:
+    def test_raising_gate_is_gate_error_logged_and_fail_closed(
+        self, monkeypatch, caplog
+    ):
+        """A gate that raises must be distinguishable from a normal veto:
+        reason prefix GATE_ERROR, ERROR log with exc_info, passed=False."""
+
+        def boom(_ctx):
+            raise RuntimeError("kaboom")
+
+        monkeypatch.setattr(pipeline_mod, "gate_session_phase", boom)
+        with caplog.at_level(logging.ERROR, logger="quant.decision.pipeline"):
+            results = GatePipeline().evaluate(_make_ctx())
+        r1 = next(r for r in results if r.gate == 1)
+        assert not r1.passed, "gate exception must still fail closed"
+        assert r1.reason.startswith("GATE_ERROR:"), r1.reason
+        assert "kaboom" in r1.reason
+        errors = [rec for rec in caplog.records if rec.levelno == logging.ERROR]
+        assert errors, "gate exception must log ERROR"
+        assert errors[0].exc_info is not None, "ERROR log must carry exc_info"
+
+    def test_raising_gate_blocks_decision(self, monkeypatch):
+        """Fail-closed end-to-end: a raising gate never approves a decision."""
+
+        def boom(_ctx):
+            raise RuntimeError("kaboom")
+
+        monkeypatch.setattr(pipeline_mod, "gate_session_phase", boom)
+        decision = DecisionService().evaluate(_make_ctx())
+        assert not decision.approved
+        assert decision.reason == "GATE_REJECTED"
+        assert any(
+            "GATE_ERROR" in br for br in decision.block_reasons
+        ), decision.block_reasons
 
 
 # ---------------------------------------------------------------------------

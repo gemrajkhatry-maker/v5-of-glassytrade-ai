@@ -80,6 +80,6 @@ def test_kernel_to_signal_flow():
     )
     error_reasons = [
         r.reason for d in decisions for r in d.gate_results
-        if r.reason.startswith("error:")
+        if r.reason.startswith("GATE_ERROR:")
     ]
     assert not error_reasons, f"gate pipeline raised internally: {error_reasons}"

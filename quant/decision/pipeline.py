@@ -7,12 +7,16 @@ R:R >= 1.5, and stop after the daily-loss limit (SessionRisk at execution).
 The LLM advisory never gates an entry — it feeds the journal and overseer.
 """
 
+import logging
+
 from quant.decision.context import DecisionContext
 from quant.decision.gate_position_cooldown import gate_position_cooldown
 from quant.decision.gate_session_phase import gate_session_phase
 from quant.decision.gates_edge import gate_triple_a_edge
 from quant.decision.gates_rr import gate_risk_reward
 from quant.decision.result import GateResult
+
+logger = logging.getLogger(__name__)
 
 
 class GatePipeline:
@@ -32,7 +36,14 @@ class GatePipeline:
             try:
                 results.append(run())
             except Exception as exc:
-                results.append(GateResult(gate_no, False, f"error: {exc}"))
+                # A raised gate is a crash, not a veto: fail closed but make it
+                # observable — distinct reason prefix + ERROR log with traceback.
+                logger.error(
+                    "GATE_ERROR: gate %d raised: %s", gate_no, exc, exc_info=True
+                )
+                results.append(
+                    GateResult(gate_no, False, f"GATE_ERROR: {exc}")
+                )
         return results
 
 
