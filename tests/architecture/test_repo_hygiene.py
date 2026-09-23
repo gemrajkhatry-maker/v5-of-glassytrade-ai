@@ -1,5 +1,6 @@
 """D-26/D-27: generated and throwaway paths must not be tracked."""
 
+import fnmatch
 import subprocess
 
 FORBIDDEN_PREFIXES = (
@@ -10,6 +11,12 @@ FORBIDDEN_PREFIXES = (
     ".kilo/",
     ".commandcode/",
     "quantv2/",
+    "automation/reports/",
+)
+
+# Glob patterns (fnmatch) for throwaway artifacts nested under live source dirs.
+FORBIDDEN_GLOBS = (
+    "quant/decision/*.workflow.*",
 )
 
 # runtime_audit/ is throwaway probe/fixture output *except* for the helper
@@ -30,7 +37,10 @@ def test_no_generated_or_throwaway_paths_are_tracked():
     offenders = [
         p
         for p in _tracked()
-        if p.startswith(FORBIDDEN_PREFIXES)
+        if (
+            p.startswith(FORBIDDEN_PREFIXES)
+            or any(fnmatch.fnmatch(p, g) for g in FORBIDDEN_GLOBS)
+        )
         and not p.startswith(RUNTIME_AUDIT_ALLOWED_PREFIXES)
     ]
     assert not offenders, f"{len(offenders)} tracked artifact paths, e.g. {offenders[:5]}"
