@@ -298,7 +298,7 @@ def _tick_epoch_seconds(tick) -> float | None:
     if ts_ms is not None:
         try:
             return int(ts_ms) / 1000.0
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # silent-except - non-numeric timestamp_ms falls through
             pass
     text = str(getattr(tick, "time", "") or "").strip()
     try:
@@ -307,14 +307,14 @@ def _tick_epoch_seconds(tick) -> float | None:
             val /= 1000.0
         if val > 1e9:
             return val
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # silent-except - unparseable time falls through to ISO
         pass
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=IST)
         return parsed.timestamp()
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # silent-except - non-ISO time → no wall-clock anchor
         return None
 
 

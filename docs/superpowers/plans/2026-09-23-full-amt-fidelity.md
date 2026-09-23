@@ -41,7 +41,7 @@
 - Consumes: `SessionRisk._starting_equity`, `_daily_pnl`, `_peak_daily_pnl`, `_halted`, `_macro_risk_cap`
 - Produces: same public API; `risk_per_trade_pct` in offensive mode = `min(0.0025 + 0.40*pnl/E0, 0.0050)` with retracement veto → `0.0025`; **no** `daily_pnl*0.30/E0` term
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```python
 # tests/quant/execution/test_risk_cushion_tiers.py
@@ -71,10 +71,10 @@ def test_retracement_veto_stays():
     assert abs(r._risk_per_trade_pct() - 0.0025) < 1e-9
 ```
 
-- [ ] **Step 2:** Run → FAIL
-- [ ] **Step 3: Minimal impl** in `_risk_per_trade_pct` CUSHION_TIER_1 branch — remove the `min(cushion_add, daily_pnl*0.30/E0)` block; keep `risk = min(base + cushion_add, 0.0050)` and retracement/consecutive/halt/macro caps. Update `_cushion_tier`/`_risk_per_trade_pct` docstrings to match §12.2 + “retracement veto is intentional safety rail, not in spec.”
-- [ ] **Step 4:** Run tests → PASS; run existing risk tests
-- [ ] **Step 5:** `git add quant/execution/risk.py tests/quant/execution/test_risk_cushion_tiers.py && git commit -m "fix(risk): literal §12.2 house-money, drop 30% profit cap"`
+- [x] **Step 2:** Run → FAIL
+- [x] **Step 3: Minimal impl** in `_risk_per_trade_pct` CUSHION_TIER_1 branch — remove the `min(cushion_add, daily_pnl*0.30/E0)` block; keep `risk = min(base + cushion_add, 0.0050)` and retracement/consecutive/halt/macro caps. Update `_cushion_tier`/`_risk_per_trade_pct` docstrings to match §12.2 + “retracement veto is intentional safety rail, not in spec.”
+- [x] **Step 4:** Run tests → PASS; run existing risk tests
+- [x] **Step 5:** `git add quant/execution/risk.py tests/quant/execution/test_risk_cushion_tiers.py && git commit -m "fix(risk): literal §12.2 house-money, drop 30% profit cap"`
 
 ---
 
@@ -88,7 +88,7 @@ def test_retracement_veto_stays():
 **Interfaces:**
 - Produces: `FABIO_CVD_THRESHOLD_NSE = 0.3`, `FABIO_CVD_THRESHOLD_MCX = 0.5` (matches `gates_edge.py:192-194` and `fabio_decision_pipeline.md:106-107`)
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```python
 def test_fabio_cvd_thresholds_match_pipeline_doc():
@@ -97,10 +97,10 @@ def test_fabio_cvd_thresholds_match_pipeline_doc():
     assert FABIO_CVD_THRESHOLD_MCX == 0.5  # looser MCX
 ```
 
-- [ ] **Step 2:** FAIL
-- [ ] **Step 3:** Swap constants to 0.3 / 0.5; comment “matches Gate-3 veto and pipeline doc; was inverted”
-- [ ] **Step 4:** PASS; grep no other hard-coded 0.5/0.3 pairs for CVD direction left inconsistent
-- [ ] **Step 5:** commit `fix(cvd): NSE 0.3 / MCX 0.5 direction thresholds (was inverted)`
+- [x] **Step 2:** FAIL
+- [x] **Step 3:** Swap constants to 0.3 / 0.5; comment “matches Gate-3 veto and pipeline doc; was inverted”
+- [x] **Step 4:** PASS; grep no other hard-coded 0.5/0.3 pairs for CVD direction left inconsistent
+- [x] **Step 5:** commit `fix(cvd): NSE 0.3 / MCX 0.5 direction thresholds (was inverted)`
 
 ---
 
@@ -114,7 +114,7 @@ def test_fabio_cvd_thresholds_match_pipeline_doc():
 - Consumes: `position` (qty/entry/sl or risk estimate), `PortfolioRiskAuthority.register_open(rupees, symbol=)`
 - Produces: restored book contributes real open risk, not `0.0`
 
-- [ ] **Step 1: Failing test** — construct engine, restore a position with known `|entry-sl|*qty`, assert `portfolio_risk` open-risk sum includes that risk (or mock `register_open` and assert first arg != 0.0 / equals computed).
+- [x] **Step 1: Failing test** — construct engine, restore a position with known `|entry-sl|*qty`, assert `portfolio_risk` open-risk sum includes that risk (or mock `register_open` and assert first arg != 0.0 / equals computed).
 
 ```python
 def test_restore_registers_nonzero_open_risk(mocker):
@@ -124,10 +124,10 @@ def test_restore_registers_nonzero_open_risk(mocker):
     assert spy.call_args[0][0] > 0.0
 ```
 
-- [ ] **Step 2:** FAIL
-- [ ] **Step 3:** Compute `risk = abs(entry - sl) * qty` (same basis as SessionRisk if available; else `abs(entry-sl)*qty`); `register_open(risk, symbol=self.symbol)`. If position lacks sl, fall back to `abs(entry)*qty*0.0025` only if documented — prefer sl-based.
-- [ ] **Step 4:** PASS
-- [ ] **Step 5:** commit `fix(risk): restore_position registers real open risk`
+- [x] **Step 2:** FAIL
+- [x] **Step 3:** Compute `risk = abs(entry - sl) * qty` (same basis as SessionRisk if available; else `abs(entry-sl)*qty`); `register_open(risk, symbol=self.symbol)`. If position lacks sl, fall back to `abs(entry)*qty*0.0025` only if documented — prefer sl-based.
+- [x] **Step 4:** PASS
+- [x] **Step 5:** commit `fix(risk): restore_position registers real open risk`
 
 ---
 
@@ -142,11 +142,11 @@ def test_restore_registers_nonzero_open_risk(mocker):
 - Consumes: DTO `priorVah`, `priorVal`, `gapType`, `openingBias` (already exported `quant/amt/dto.py`)
 - Produces: `ctx.prior_vah: float`, `ctx.prior_val: float`, `ctx.gap_type: str`, `ctx.opening_bias: str` (zeros/empty if missing)
 
-- [ ] **Step 1: Failing test** — builder with dto `{priorPoc: 100, priorVah: 105, priorVal: 95, gapType: "GAP_UP", openingBias: "ABOVE"}` → fields set.
-- [ ] **Step 2:** FAIL
-- [ ] **Step 3:** Add dataclass fields + builder `ds`/`_df` maps next to existing `prior_poc` mapping (~context_builder.py:712).
-- [ ] **Step 4:** PASS; architecture DTO contract still green
-- [ ] **Step 5:** commit `feat(decision): prior VAH/VAL/gapType/openingBias on DecisionContext`
+- [x] **Step 1: Failing test** — builder with dto `{priorPoc: 100, priorVah: 105, priorVal: 95, gapType: "GAP_UP", openingBias: "ABOVE"}` → fields set.
+- [x] **Step 2:** FAIL
+- [x] **Step 3:** Add dataclass fields + builder `ds`/`_df` maps next to existing `prior_poc` mapping (~context_builder.py:712).
+- [x] **Step 4:** PASS; architecture DTO contract still green
+- [x] **Step 5:** commit `feat(decision): prior VAH/VAL/gapType/openingBias on DecisionContext`
 
 ---
 
@@ -159,11 +159,11 @@ def test_restore_registers_nonzero_open_risk(mocker):
 **Interfaces:**
 - Produces: `slope = EMA(CVD, 3) - EMA(CVD, 9)` on update; keep sign-persistence filter (`CVD_SLOPE_PERSISTENCE_BARS`) if already present (applies to sign of the EMA-diff, not linreg)
 
-- [ ] **Step 1: Failing test** — feed synthetic CVD series; assert slope matches independent EMA3−EMA9 implementation; assert not equal to old linreg for a known series.
-- [ ] **Step 2:** FAIL
-- [ ] **Step 3:** Replace `mc.linreg_slope(window)` with EMA differences (alpha = 2/(n+1) for n=3 and n=9); seed EMAs from history; persistence sign logic unchanged.
-- [ ] **Step 4:** PASS; existing cvd tests green
-- [ ] **Step 5:** commit `fix(cvd): §6.2 slope is EMA3−EMA9 with sign persistence`
+- [x] **Step 1: Failing test** — feed synthetic CVD series; assert slope matches independent EMA3−EMA9 implementation; assert not equal to old linreg for a known series.
+- [x] **Step 2:** FAIL
+- [x] **Step 3:** Replace `mc.linreg_slope(window)` with EMA differences (alpha = 2/(n+1) for n=3 and n=9); seed EMAs from history; persistence sign logic unchanged.
+- [x] **Step 4:** PASS; existing cvd tests green
+- [x] **Step 5:** commit `fix(cvd): §6.2 slope is EMA3−EMA9 with sign persistence`
 
 ---
 
@@ -177,9 +177,9 @@ def test_restore_registers_nonzero_open_risk(mocker):
 
 **Interfaces:** docs only — no runtime.
 
-- [ ] **Step 1:** Grep stale claims; fix G4 → “stop cap (R:R enforced in SignalBuilder)”; fix Gate path to `quant/decision/gate_session_phase.py`; fix 0.75% → 0.50% ceiling.
-- [ ] **Step 2:** No code tests; `git diff` review
-- [ ] **Step 3:** commit `docs: fix AMT pipeline/architecture drift (G4, paths, risk ceiling)`
+- [x] **Step 1:** Grep stale claims; fix G4 → “stop cap (R:R enforced in SignalBuilder)”; fix Gate path to `quant/decision/gate_session_phase.py`; fix 0.75% → 0.50% ceiling.
+- [x] **Step 2:** No code tests; `git diff` review
+- [x] **Step 3:** commit `docs: fix AMT pipeline/architecture drift (G4, paths, risk ceiling)`
 
 ---
 
@@ -192,11 +192,11 @@ def test_restore_registers_nonzero_open_risk(mocker):
 **Interfaces:**
 - Produces: when `interval_seconds >= 300` (macro exists), also build `BarAggregator(interval_seconds=BIAS_INTERVAL_SEC)` for bias (and underlying bias if gateway present). Change condition from `interval_seconds > BIAS_INTERVAL_SEC` to `interval_seconds > MICRO_SEC` (or always if macro exists).
 
-- [ ] **Step 1: Failing test** — `QuantEngine(..., interval_seconds=300)` → `engine._bias_aggregator is not None` and `.interval_seconds == 900`.
-- [ ] **Step 2:** FAIL
-- [ ] **Step 3:** Change bias construction to run whenever macro micro-split exists (`interval_seconds > MICRO_SEC`), same for underlying bias.
-- [ ] **Step 4:** PASS; ensure no crash if bias never fed (None bar OK downstream — grep consumers of `_bias_aggregator`)
-- [ ] **Step 5:** commit `feat(amt): instantiate 15m bias layer on 5m macro engines`
+- [x] **Step 1: Failing test** — `QuantEngine(..., interval_seconds=300)` → `engine._bias_aggregator is not None` and `.interval_seconds == 900`.
+- [x] **Step 2:** FAIL
+- [x] **Step 3:** Change bias construction to run whenever macro micro-split exists (`interval_seconds > MICRO_SEC`), same for underlying bias.
+- [x] **Step 4:** PASS; ensure no crash if bias never fed (None bar OK downstream — grep consumers of `_bias_aggregator`)
+- [x] **Step 5:** commit `feat(amt): instantiate 15m bias layer on 5m macro engines`
 
 ---
 
@@ -220,7 +220,7 @@ def test_restore_registers_nonzero_open_risk(mocker):
   - `live_range_bars: int` on engine; `warmup_complete` for entries = `live_range_bars >= 15` and elapsed live minutes `>= 15` when range mode; time-bar path unchanged (`warm_bars >= 15`)
   - seed bars: `is_seed=True` on bar meta or separate counter not incrementing drive/Triple-A (drive already session-resets; explicitly skip `track_drives` for seed if needed)
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```python
 def test_synth_range_bars_conserve_volume():
@@ -243,16 +243,16 @@ def test_range_warmup_needs_15_live_and_15_min():
     ...
 ```
 
-- [ ] **Step 2:** FAIL
-- [ ] **Step 3:** Implement:
+- [x] **Step 2:** FAIL
+- [x] **Step 3:** Implement:
   1. Read flag → `self._range_bars_enabled`
   2. If enabled: `self._micro_aggregator = BarAggregator(interval_seconds=MICRO_SEC, range_size=h_range)` **or** replace micro with range-only aggregator (`range_size=h, interval_seconds=0` — check `_window` when range path used: `range_size is not None` bypasses interval — use `BarAggregator(interval_seconds=0, range_size=h)` carefully: `_bar_time` with interval 0 returns tick time — OK)
   3. `range_seed.synth_range_bars` for history seed when flag on
   4. Live counter increments on each closed range micro bar from ticks only
   5. `warmup_complete` branch in `context_builder` when range mode
   6. Skip drive tracking on seed bars if seed feeds analyzer
-- [ ] **Step 4:** PASS new tests + merge-gate suites
-- [ ] **Step 5:** commit `feat(amt): optional range-bar micro decisions with OHLCV synth seed`
+- [x] **Step 4:** PASS new tests + merge-gate suites
+- [x] **Step 5:** commit `feat(amt): optional range-bar micro decisions with OHLCV synth seed`
 
 ---
 

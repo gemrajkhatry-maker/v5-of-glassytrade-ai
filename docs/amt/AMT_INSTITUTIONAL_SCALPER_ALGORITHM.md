@@ -763,7 +763,7 @@ extends it with these hard rules:
 ## 16. Known Data Limitations
 
 ### Range Bars
-The spec describes range bars (fixed price height, ATR-quantized). The current implementation uses **time-based candles** (1-minute) for strategy decisions. Range bars are available via `quant/aggregator.py` but are not the primary decision driver. This is an architectural choice, not a bug — the strategy works correctly with time bars.
+The spec describes range bars (fixed price height, ATR-quantized). The default implementation uses **time-based micro candles** (1-minute) for strategy decisions. Range bars are available for **micro decisions only** when `range_bars_enabled` is on (`GLASSYTRADE_USE_RANGE_BARS=1` or `system.range_bars_enabled: true` in YAML); **default is off**. When enabled, micro decisions use `BarAggregator(range_size=H_range)` with `H_range` from ATR(14) quantized on the `{5,10,25,50,100,200}` ladder (fallback `max(tick, ATR14)`); the 5-minute macro stays time-based. OHLCV history is converted via `synth_range_bars` (`quant/amt/range_seed.py`) as a **non-live seed**: seed/synth bars do not count toward entry warmup, do not feed drive, and do not produce hard-absorption or Triple-A progress. Entry warmup in range mode requires **≥15 live range bars AND ≥15 minutes** of wall-clock time.
 
 ### Tick-Level Footprint
 The spec describes tick-level footprint data with trade-level aggression flags. The current implementation uses **candle delta** (close-to-close) as a proxy for buy/sell volume. True trade-level aggression flags require a tick feed not available from the current Dhan integration.
