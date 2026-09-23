@@ -799,7 +799,30 @@ class QuantEngine:
             PositionOpened(symbol=self.symbol, time=str(ts), position=position)
         )
         if self._portfolio_risk is not None:
-            self._portfolio_risk.register_open(0.0, symbol=self.symbol)
+            order = getattr(position, "order", None)
+            sig = getattr(order, "signal", None)
+            entry = float(
+                getattr(sig, "entry", 0.0)
+                or getattr(position, "entry", 0.0)
+                or getattr(position, "entry_price", 0.0)
+                or getattr(position, "open_price", 0.0)
+                or 0.0
+            )
+            sl = float(
+                getattr(sig, "sl", 0.0)
+                or getattr(position, "sl", 0.0)
+                or getattr(position, "stop_loss", 0.0)
+                or 0.0
+            )
+            size = float(getattr(position, "size", 0.0) or 0.0)
+            qty = abs(size) or float(
+                getattr(order, "quantity", 0.0)
+                or getattr(position, "qty", 0.0)
+                or getattr(position, "quantity", 0.0)
+                or 0.0
+            )
+            risk = abs(entry - sl) * qty if (entry and sl and qty) else 0.0
+            self._portfolio_risk.register_open(risk, symbol=self.symbol)
 
     def close(self) -> None:
         """Cleanly release attached resources (advisor, journal)."""
