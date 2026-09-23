@@ -50,6 +50,9 @@ class SetupEvidence:
     session_vwap: float = 0.0
     breakout_beyond_cluster: bool = False
     lvn_proximity_ok: bool = False
+    # Tracker-derived: DriveTracker recorded a leave-and-return (DTO `departed`
+    # = drive_count >= 2). context_builder passes it through — never re-derived
+    # from the entry-valid flags.
     departed_and_reapproached: bool = False
 
     def _lvn_near(self, max_ticks: float = 3.0) -> bool:

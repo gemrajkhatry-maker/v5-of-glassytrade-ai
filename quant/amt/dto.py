@@ -249,6 +249,12 @@ def amt_result_to_dto(r) -> dict:
         "lvnPlay": r.lvn_play,
         "isSecondDrive": r.drive_entry_valid,
         "driveEntryValid": bool(getattr(r, "drive_entry_valid", False)),
+        # Departure is a distinct tracker observation (not an alias of the
+        # entry-valid bool): DriveTracker only advances drive_count past D1
+        # after an observe()d leave-and-return, so drive_number >= 2 IS
+        # "departed and re-approached". SetupEvidence reads this key instead
+        # of re-asking isSecondDrive / driveEntryValid.
+        "departed": bool(getattr(r, "drive_number", 0) >= 2),
         # Phase 4: context_builder.py's drive-exhaustion guard reads
         # "driveNumber" but this key was never emitted here, so
         # gates_edge.py's "3+ drives -> exhausted" guard could never fire —

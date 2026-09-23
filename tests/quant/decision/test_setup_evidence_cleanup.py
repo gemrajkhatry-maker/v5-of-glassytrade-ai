@@ -60,10 +60,25 @@ class TestSetupEvidenceLiveKeys:
 
     def test_second_drive_fires_from_drive_keys(self):
         ev = _evidence({"isSecondDrive": True, "driveNumber": 2,
-                        "rejectionAtHigh": True})
+                        "rejectionAtHigh": True, "departed": True})
         assert ev is not None
         assert ev.setup_type == "SECOND_DRIVE"
         assert ev.drive_number == 2
+
+    def test_second_drive_departure_derives_from_tracker_observation(self):
+        """``departed_and_reapproached`` reads the tracker's ``departed`` DTO
+        observation (DriveTracker leave-and-return) — it is NOT re-asked from
+        the entry-valid aliases ``isSecondDrive`` / ``driveEntryValid``."""
+        ev = _evidence({"isSecondDrive": True, "driveNumber": 2,
+                        "rejectionAtHigh": True, "departed": True})
+        assert ev is not None and ev.is_complete() is True
+
+        # Entry-valid aliases alone — no departure observation — stay incomplete.
+        ev_no = _evidence({"isSecondDrive": True, "driveNumber": 2,
+                           "rejectionAtHigh": True})
+        assert ev_no is not None
+        assert ev_no.is_complete() is False
+        assert "departure" in ev_no.rejection_reason().lower()
 
     def test_triple_a_fires_from_aggression_plus_acceptance(self):
         ev = _evidence({"tripleAPhase": "AGGRESSION", "tripleASignal": "LONG",

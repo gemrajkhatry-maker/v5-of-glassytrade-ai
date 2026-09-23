@@ -35,11 +35,12 @@ class TestDriveTrackerBasic:
         assert result.rejection_detected is True
 
     def test_d2_after_rejection(self):
-        """D2 after D1 rejected → entry_valid=True."""
+        """D2 after D1 rejected → entry_valid=True (with a recorded leave)."""
         tracker = DriveTracker()
         # D1 with rejection
         candle1 = _candle(close=100.3, high=100.5, low=99.0)
         tracker.classify_touch(price=100.0, level=100.0, candle=candle1, direction="LONG")
+        tracker.observe(106.0)  # price path leaves the level
         # D2 re-touch
         candle2 = _candle(close=100.1, high=100.3, low=99.5)
         result = tracker.classify_touch(price=100.0, level=100.0, candle=candle2, direction="LONG")
@@ -52,6 +53,7 @@ class TestDriveTrackerBasic:
         # D1 without rejection (close below level = same side as SHORT test from below)
         candle1 = _candle(close=99.9, high=100.5, low=99.8)
         tracker.classify_touch(price=100.0, level=100.0, candle=candle1, direction="LONG")
+        tracker.observe(106.0)  # price path leaves the level
         # D2 re-touch
         candle2 = _candle(close=100.1, high=100.3, low=99.5)
         result = tracker.classify_touch(price=100.0, level=100.0, candle=candle2, direction="LONG")
@@ -64,9 +66,11 @@ class TestDriveTrackerBasic:
         # D1 with rejection
         candle1 = _candle(close=100.3, high=100.5, low=99.0)
         tracker.classify_touch(price=100.0, level=100.0, candle=candle1, direction="LONG")
+        tracker.observe(106.0)
         # D2
         candle2 = _candle(close=100.1, high=100.3, low=99.5)
         tracker.classify_touch(price=100.0, level=100.0, candle=candle2, direction="LONG")
+        tracker.observe(106.0)
         # D3
         candle3 = _candle(close=100.0, high=100.2, low=99.8)
         result = tracker.classify_touch(price=100.0, level=100.0, candle=candle3, direction="LONG")
@@ -103,10 +107,10 @@ class TestDriveTrackerSessionReset:
     """FR-05-08: Session reset."""
 
     def test_reset_clears_history(self):
-        """Session reset clears all level history."""
+        """Session reset clears all level history (public API, no _levels)."""
         tracker = DriveTracker()
         candle = _candle(close=100.3, high=100.5, low=99.0)
         tracker.classify_touch(price=100.0, level=100.0, candle=candle, direction="LONG")
-        assert len(tracker._levels) > 0
+        assert tracker.get_drive_count(100.0) == 1
         tracker.reset()
-        assert len(tracker._levels) == 0
+        assert tracker.get_drive_count(100.0) == 0

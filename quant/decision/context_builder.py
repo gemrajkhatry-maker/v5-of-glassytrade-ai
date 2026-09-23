@@ -319,9 +319,11 @@ class DecisionContextBuilder:
 
         cluster_high = self._df(amt_dto, "absorptionClusterHigh")
         cluster_low = self._df(amt_dto, "absorptionClusterLow")
-        # isSecondDrive / driveEntryValid are set by the drive tracker when a
-        # genuine Drive-2 re-approach is valid — that is the departure flag.
-        departed = bool(is_second_drive or self._db(amt_dto, "driveEntryValid"))
+        # Departure: one place answers — DriveTracker.observe() → AMTResult
+        # drive count → DTO `departed`. SetupEvidence derives from that
+        # observation; the entry-valid aliases (isSecondDrive/driveEntryValid)
+        # are not departure and must not be re-asked here.
+        departed = self._db(amt_dto, "departed")
 
         def _lvn_ok(level: float, max_ticks: float = 5.0) -> bool:
             if level <= 0 or close_px <= 0:

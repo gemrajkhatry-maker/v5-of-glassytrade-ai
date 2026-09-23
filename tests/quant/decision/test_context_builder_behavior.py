@@ -132,7 +132,7 @@ def test_va_fade_dto_rejection_maps_to_complete_setup():
 
 
 def test_second_drive_dto_maps_to_complete_setup():
-    """SECOND_DRIVE maps from real isSecondDrive + driveNumber DTO keys."""
+    """SECOND_DRIVE maps from real isSecondDrive + driveNumber + departed keys."""
     builder = DecisionContextBuilder()
     dto = {
         "marketState": "IMBALANCED",
@@ -141,6 +141,7 @@ def test_second_drive_dto_maps_to_complete_setup():
         "ofi": 0.5,
         "isSecondDrive": True,
         "driveNumber": 2,
+        "departed": True,
         "rejectionAtHigh": True,
         "cvdSlope": 1.5,
     }

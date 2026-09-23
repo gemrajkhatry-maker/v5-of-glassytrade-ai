@@ -4,11 +4,16 @@ Tracks how many times price has tested a key level (VAH, VAL, LVN) and
 whether each test was rejected (wick + close opposite side).
 
 Rules:
-  D1 (First Drive): Market's initial push to a level — suppress entry.
+  D1 (First drive): Market's initial push to a level — suppress entry.
   D1_REJECTED: Wick through level, close on opposite side — level holds.
-  D2 (Second Drive): Re-approach after D1 rejection — valid entry zone.
+  D2 (Second drive): Re-approach after D1 rejection — valid entry zone.
   D2_NO_REJECTION: D1 wasn't rejected — still suppress (no edge).
   D3+: Third+ drive — level exhausted, suppress entry.
+
+Departure is a first-class observation: ``observe(price)`` records that price
+left a tracked level; only then does a re-touch advance the drive count.
+``classify_touch`` alone cannot see leave-and-return (callers only feed it
+prices near the level), so ``observe()`` owns the leave half of the path.
 
 Momentum fade: D2 with lower volume/range than D1 = higher quality entry.
 Session reset: All drives reset at session open (FR-05-08).
@@ -55,6 +60,7 @@ class DriveTracker:
 
     Usage:
         tracker = DriveTracker()
+        tracker.observe(price)                      # departure (price away)
         result = tracker.classify_touch(price, level, candle, direction)
         if result.entry_valid:
             # D2 with D1 rejected — valid entry
@@ -74,6 +80,35 @@ class DriveTracker:
         self._levels: dict[float, DriveState] = {}
         self._alert_manager = alert_manager
         self._last_price_by_level: dict[float, float] = {}
+
+    def _departure_distance(self, tick_size: float) -> float:
+        """Price distance that counts as leaving a level (FR-05)."""
+        return self.DEPARTURE_TICKS * (tick_size if tick_size > 0 else 0.05)
+
+    def _is_away(self, price: float, level: float, tick_size: float) -> bool:
+        return abs(float(price) - float(level)) > self._departure_distance(tick_size)
+
+    def observe(self, price: float, tick_size: float = 0.05) -> bool:
+        """Record that *price* is away from tracked level(s) — the departure.
+
+        The single place that answers "did price leave?". Call it on every
+        price update (near or far from a level): ``classify_touch`` is only
+        ever fed prices near a level, so leave-and-return cannot be observed
+        from it alone. Returns True when a departure was newly recorded.
+        """
+        marked = False
+        for state in self._levels.values():
+            if not state.departed and self._is_away(price, state.level, tick_size):
+                state.departed = True
+                marked = True
+        return marked
+
+    def has_departed(self, level: float, tick_size: float = 0.05) -> bool:
+        """Public read of the departure flag for *level* (consumed on re-touch)."""
+        from quant.contracts.tick_utils import round_to_tick
+
+        state = self._levels.get(round_to_tick(level, tick_size))
+        return bool(state and state.departed)
 
     def classify_touch(
         self,
@@ -140,9 +175,8 @@ class DriveTracker:
 
         state = self._levels[bucket]
 
-        # Mark departure when price leaves the level by DEPARTURE_TICKS.
-        dep_dist = self.DEPARTURE_TICKS * (tick_size if tick_size > 0 else 0.05)
-        if abs(float(price) - float(level)) > dep_dist:
+        # Mark departure when price leaves the level (shared with observe()).
+        if self._is_away(price, level, tick_size):
             state.departed = True
             return DriveResult(
                 drive_number=state.drive_count,
