@@ -179,6 +179,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     from quant.contracts.ports.market_data import IMarketData
     from quant.contracts.ports.broker import IBroker
     from quant.contracts.ports.storage import IStorage
+    from app.core.metrics import metrics as _metrics
     from app.infrastructure.telemetry import PrometheusTelemetry
 
     market_data = container.resolve(IMarketData)
@@ -208,6 +209,9 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         # YAML or inventing brokerage/slippage defaults.
         "cost_profiles": _coordinator_cost_profiles(config),
         "advisor_enabled": _advisor_enabled_from_env(),
+        "trades_executed": _metrics.counter(
+            "trades_executed_total", "Trades successfully executed"
+        ),
         # C2: the configured per-trade risk must reach the engines' SessionRisk.
         # NO silent fallback: the effective value is whatever the loader + live
         # validator settled on (config_models), and boot fails if it is absent.

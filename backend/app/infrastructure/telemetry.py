@@ -30,5 +30,16 @@ class PrometheusTelemetry(ITelemetry):
     def record_tick(self) -> None:
         metrics.counter("ticks_processed_total", "Total ticks processed").inc()
 
+    def record_decision(self, approved: bool) -> None:
+        metrics.counter(
+            "decisions_evaluated_total", "Total entry decisions evaluated"
+        ).inc()
+        split = (
+            ("decisions_approved_total", "Entry decisions that passed gates")
+            if approved
+            else ("decisions_blocked_total", "Entry decisions blocked by gates")
+        )
+        metrics.counter(split[0], split[1]).inc()
+
     def record_signal(self, direction: str) -> None:
         metrics.counter("signals_generated_total", "Signals generated").inc()

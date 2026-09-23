@@ -209,6 +209,8 @@ def make_decision_loop(
     emit: Any = None,
     greeks: Any = None,
     symbol: str = "NIFTY24JAN100CE",
+    telemetry: Any = None,
+    trades_executed: Any = None,
 ) -> DecisionLoop:
     """Build a DecisionLoop with test-friendly defaults."""
     _bar_index = bar_index
@@ -245,6 +247,7 @@ def make_decision_loop(
             "execution_enabled": execution_enabled,
             "get_underlying_symbol": lambda: "NIFTY FUT",
             "greeks": greeks,
+            "trades_executed": trades_executed,
         },
         state={
             "get_bar_index": lambda: _bar_index,
@@ -268,6 +271,7 @@ def make_decision_loop(
         emit=emit or (lambda event: None),
         forecast_fn=forecast_fn,
         advisor=advisor,
+        telemetry=telemetry,
     )
 
 

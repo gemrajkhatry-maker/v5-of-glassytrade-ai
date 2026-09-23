@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
+from quant.contracts.ports.telemetry import NULL_TELEMETRY
 from quant.contracts.timezones import parse_bar_time
 
 if TYPE_CHECKING:
@@ -65,6 +66,9 @@ class TickHandler:
         # Range-mode live warmup (plan T8): only fires when micro is range-built
         range_tick_callback: Callable[[Any], None] | None = None,
         range_bar_closed_callback: Callable[[], None] | None = None,
+        # Host-installed sink: record_tick() moves ticks_processed_total
+        # once per real tick (default: no-op for bare embeddings).
+        telemetry: Any | None = None,
     ):
         self.symbol = symbol
         self._macro_aggregator = macro_aggregator
@@ -100,6 +104,9 @@ class TickHandler:
         self._merged_amt_emitter = merged_amt_emitter
         self._range_tick_callback = range_tick_callback
         self._range_bar_closed_callback = range_bar_closed_callback
+        if telemetry is None:
+            telemetry = NULL_TELEMETRY
+        self.telemetry = telemetry
         
         # Cached state (for option path)
         self._last_underlying_bar = None
@@ -163,6 +170,7 @@ class TickHandler:
         This is the main entry point called by QuantEngine._run_inner().
         Handles both option contracts (with underlying feed) and direct futures.
         """
+        self.telemetry.record_tick()
         state = self._get_state()
         
         # 0. Tick-level fast SL/TP protection

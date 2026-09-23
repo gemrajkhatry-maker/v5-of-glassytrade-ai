@@ -29,6 +29,20 @@ def test_record_tick_moves_the_served_counter():
     assert _served("ticks_processed_total") == before + 2
 
 
+def test_record_decision_moves_the_served_decision_counters():
+    before_eval = _served("decisions_evaluated_total")
+    before_appr = _served("decisions_approved_total")
+    before_blk = _served("decisions_blocked_total")
+
+    sink = PrometheusTelemetry()
+    sink.record_decision(approved=True)
+    sink.record_decision(approved=False)
+
+    assert _served("decisions_evaluated_total") == before_eval + 2
+    assert _served("decisions_approved_total") == before_appr + 1
+    assert _served("decisions_blocked_total") == before_blk + 1
+
+
 def test_record_signal_moves_the_served_counter():
     before = _served("signals_generated_total")
 

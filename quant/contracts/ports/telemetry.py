@@ -29,7 +29,7 @@ class ITelemetry(ABC):
 
     @abstractmethod
     def record_tick(self) -> None:
-        """Record one evaluated bar (the decision loop ran a full pass)."""
+        """Record one market tick handled by the engine's tick loop."""
 
     @abstractmethod
     def record_signal(self, direction: str) -> None:
@@ -38,6 +38,16 @@ class ITelemetry(ABC):
         ``direction``/``type`` is advisory — a sink that only keeps totals may
         ignore it; one that buckets per direction (LONG/SHORT) may not.
         """
+
+    def record_decision(self, approved: bool) -> None:
+        """Record one entry decision evaluation.
+
+        Default is a no-op so existing sinks stay valid; the host adapter
+        overrides this to move ``decisions_evaluated_total`` and the
+        approved/blocked split. Not abstract — the port's abstract surface
+        stays pinned to ``record_tick``/``record_signal``.
+        """
+        return None
 
 
 class NullTelemetry(ITelemetry):

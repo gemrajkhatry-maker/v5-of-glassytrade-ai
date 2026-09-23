@@ -84,6 +84,19 @@ def test_coordinator_gets_the_host_telemetry_adapter():
     assert "from app.infrastructure.telemetry import PrometheusTelemetry" in src
 
 
+def test_coordinator_config_wires_the_trades_executed_counter():
+    """B-6: config carries the real counter so SubmissionHandler.inc() moves
+    trades_executed_total on every paper/live fill (the chain is
+    coord_config -> QuantEngine -> DecisionLoop deps -> SubmissionHandler)."""
+    import inspect
+
+    from app.application.di import composition_root
+
+    src = inspect.getsource(composition_root._create_quant_coordinator)
+    assert '"trades_executed":' in src
+    assert "trades_executed_total" in src
+
+
 def test_market_data_adapter_gets_symbol_list_not_config(monkeypatch):
     """DhanMarketDataAdapter(symbols=...) must receive a list of symbol names.
 

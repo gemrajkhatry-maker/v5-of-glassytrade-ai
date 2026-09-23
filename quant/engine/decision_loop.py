@@ -263,7 +263,7 @@ class DecisionLoop:
         self._emit(DecisionProduced(
             symbol=self._symbol, time=bar.time, decision=decision,
         ))
-        self.telemetry.record_tick()
+        self.telemetry.record_decision(approved=decision.approved)
 
         # Notify advisor of the decision context
         self._notify_advisor_decision(ctx, amt_dto, execution_bar, cooldown_remaining_sec, risk_st)
@@ -360,6 +360,7 @@ class DecisionLoop:
             self._emit(DecisionProduced(
                 symbol=self._symbol, time=bar.time, decision=halted_decision,
             ))
+            self.telemetry.record_decision(approved=False)
             return True, 0.0
 
         # Guard 1: post-trade cooldown (bars since last close)
@@ -392,6 +393,7 @@ class DecisionLoop:
             self._emit(DecisionProduced(
                 symbol=self._symbol, time=bar.time, decision=cooldown_decision,
             ))
+            self.telemetry.record_decision(approved=False)
             return True, cooldown_remaining_sec
 
         return False, cooldown_remaining_sec

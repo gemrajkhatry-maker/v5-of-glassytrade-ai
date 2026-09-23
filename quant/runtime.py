@@ -961,6 +961,7 @@ class QuantEngine:
             merged_amt_emitter=self._emit_merged_amt,
             range_tick_callback=self._on_range_live_tick,
             range_bar_closed_callback=self._on_range_bar_closed,
+            telemetry=self.telemetry,
         )
 
     # --- Range-mode live warmup (plan T8) ---------------------------------

@@ -8,6 +8,13 @@ from app.core.startup_telemetry import RUNBOOK, crash_summary, startup_snapshot,
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
 
+def _counter_value(name: str) -> float:
+    """Read a counter without creating its family (absent series reads 0)."""
+    if name not in metrics._metrics:
+        return 0.0
+    return metrics.counter(name, "").value
+
+
 @router.get("/")
 async def prometheus_metrics(request: Request):
     """Export all metrics in Prometheus format."""
@@ -17,17 +24,13 @@ async def prometheus_metrics(request: Request):
 @router.get("/summary")
 async def metrics_summary(request: Request):
     """Return metrics summary as JSON for dashboard."""
-    pipeline_hist = metrics.histogram("amt_pipeline_duration_seconds", "")
-    pipeline_hist_count = pipeline_hist.count
     return {
-        "ticks_processed": metrics.counter("ticks_processed_total", "").value if metrics._metrics.get("ticks_processed_total") else 0,
-        "signals_generated": metrics.counter("signals_generated_total", "").value if metrics._metrics.get("signals_generated_total") else 0,
-        "errors_total": metrics.counter("errors_total", "").value if metrics._metrics.get("errors_total") else 0,
-        "pipeline_duration_avg": (
-            pipeline_hist.sum_val / pipeline_hist_count
-            if pipeline_hist_count
-            else 0
-        ),
+        "ticks_processed": _counter_value("ticks_processed_total"),
+        "signals_generated": _counter_value("signals_generated_total"),
+        "decisions_evaluated": _counter_value("decisions_evaluated_total"),
+        "decisions_approved": _counter_value("decisions_approved_total"),
+        "decisions_blocked": _counter_value("decisions_blocked_total"),
+        "trades_executed": _counter_value("trades_executed_total"),
         "startup": startup_snapshot(),
         "crash_summary": crash_summary(),
         "startup_unresolved_symbols": unresolved_count(),

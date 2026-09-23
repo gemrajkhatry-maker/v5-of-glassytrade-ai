@@ -196,14 +196,10 @@ class MetricsRegistry:
 metrics = MetricsRegistry()
 
 
-# Convenience functions for common metrics
+# Convenience functions for common metrics — declared ONLY what has a real
+# increment/observe site (B-6: no series that lie green at 0).
 ticks_processed = metrics.counter("ticks_processed_total", "Total ticks processed")
-amt_duration = metrics.histogram("amt_pipeline_duration_seconds", "AMT pipeline execution time")
 signals_generated = metrics.counter("signals_generated_total", "Signals generated")
-errors_total = metrics.counter("errors_total", "Total errors")
-active_positions = metrics.gauge("positions_active", "Currently open positions")
-
-# Dashboard metrics — decision pipeline and trade execution tracking
 decisions_evaluated = metrics.counter("decisions_evaluated_total", "Total entry decisions evaluated")
 decisions_approved = metrics.counter("decisions_approved_total", "Entry decisions that passed gates")
 decisions_blocked = metrics.counter("decisions_blocked_total", "Entry decisions blocked by gates")
