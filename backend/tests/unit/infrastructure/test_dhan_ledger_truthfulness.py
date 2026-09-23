@@ -95,11 +95,18 @@ def _last_row_status(storage: _RecordingStorage) -> str:
 
 
 def test_cancel_failure_after_timeout_persists_unknown_not_cancelled():
+    """Honest durable row UNKNOWN AND raise so ExposureState.unknown_entry
+    stamps (Sep-18 live-safety). None-return would unwind risk without the
+    intraday exposure latch."""
+    import pytest
+    from quant.execution.live_oms import ReconciliationRequiredError
+
     broker = _broker_poll_timeout()
     broker.cancel_order.side_effect = RuntimeError("circuit down")
     adapter = _adapter(broker)
 
-    assert adapter.execute_order(_signal(), Portfolio.create_default(), "CRUDEOIL") is None
+    with pytest.raises(ReconciliationRequiredError):
+        adapter.execute_order(_signal(), Portfolio.create_default(), "CRUDEOIL")
     assert _last_row_status(adapter._storage) == "UNKNOWN"
 
 
@@ -115,6 +122,10 @@ def test_fill_racing_cancel_is_honored_not_cancelled():
 
 
 def test_partial_fill_frozen_by_cancel_is_persisted():
+    """Durable FILLED with fractional qty AND raise (exposure latch)."""
+    import pytest
+    from quant.execution.live_oms import ReconciliationRequiredError
+
     broker = _broker_poll_timeout()
     broker.cancel_order.return_value = None
     # Still OPEN with 2/4 filled at the moment of the post-cancel read.
@@ -123,7 +134,8 @@ def test_partial_fill_frozen_by_cancel_is_persisted():
     )
     adapter = _adapter(broker)
 
-    assert adapter.execute_order(_signal(), Portfolio.create_default(), "CRUDEOIL") is None
+    with pytest.raises(ReconciliationRequiredError):
+        adapter.execute_order(_signal(), Portfolio.create_default(), "CRUDEOIL")
     order_id, status, broker_order_id, filled, avg = adapter._storage.updates[-1]
     assert status == "FILLED"
     assert filled == 2.0

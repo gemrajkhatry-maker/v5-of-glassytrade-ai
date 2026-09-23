@@ -12,15 +12,21 @@ pinned the sink contracts; this record locks the dispositions.
 
 ## Decision
 
-1. **Metrics: KEEP SPLIT.** `backend/app/infrastructure/metrics.py`
+1. **Metrics: KEEP SPLIT.** Originally `backend/app/infrastructure/metrics.py`
    (`MetricsCollector`, a thread-safe singleton emitting a business-KPI dict
    for `GET /api/v1/metrics`: ticks, signals, PnL, cache hit-rate, regime
    changes, uptime) and `backend/app/core/metrics.py` (`MetricsRegistry`,
-   Prometheus counters/gauges/histograms for infra observability) serve
-   different consumers with different shapes. Both modules already document
-   the split ("do not merge — different purpose"). Merging would force one
-   consumer to pay for the other's shape. Contracts pinned in
-   `tests/quant/contracts/test_telemetry_standards.py`. Close.
+   Prometheus counters/gauges/histograms for infra observability) served
+   different consumers with different shapes. **Amendment 2026-09-23
+   (predeploy remediation Task 9 / D7):** `MetricsCollector` /
+   `infrastructure/metrics.py` was deleted (zero live importers after dead
+   counters were removed); business-KPI values that remain are served by
+   `MetricsRegistry` via `observability.py` (`/api/metrics/summary`) with
+   canary increments (ticks/decisions/trades). The **split disposition
+   stands**: do not merge a second sink; if a business-KPI dict shape is
+   reintroduced, add it as a separate consumer of `MetricsRegistry`, not a
+   resurrected singleton. `shared/conversion.py` already deleted (item 3).
+   Close.
 2. **Logging: facade for new code, grandfather the rest.** New code uses the
    facades — `brokers/broker/logging.get_logger` (named + correlation) and
    `backend/app/core/logging.get_logger` (correlation-ID adapter) — never raw
