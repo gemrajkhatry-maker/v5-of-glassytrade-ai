@@ -10,6 +10,10 @@ system:
   db_path: "glassytrade.db"
   log_level: "INFO"
   capital: 5000000.0
+  # Plan T8: ATR-dynamic range bars for MICRO decisions only (5m macro stays
+  # time-based). Documented default is off; GLASSYTRADE_USE_RANGE_BARS env
+  # (see Operator Environment block) overrides at runtime.
+  range_bars_enabled: false
 
 # ── Operator Environment Variables ──
 # These env vars override config values at runtime (no code changes needed):

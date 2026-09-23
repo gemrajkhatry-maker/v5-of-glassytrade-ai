@@ -661,6 +661,9 @@ class DecisionContextBuilder:
         buy_wall_below, sell_wall_above, recent_decisions, session_info,
         vwap_std_override=None,
         contract_symbol: str | None = None,
+        range_bars_enabled: bool = False,
+        live_range_bars: int = 0,
+        live_minutes: float = 0.0,
     ) -> dict:
         """Build the keyword-argument dict for the DecisionContext constructor."""
         df, ds, db, di = self._df, self._ds, self._db, self._di
@@ -678,7 +681,14 @@ class DecisionContextBuilder:
             market=market,
             bar_index=bar_index,
             session_open=session_open,
-            warmup_complete=(bar_index + warm_bars) >= warmup_bars,
+            # Range mode (plan T8): entry warmup = 15 live range closes AND
+            # 15 wall-clock minutes from the first live tick. Seed/synth bars
+            # (warm_bars / bar_index) never satisfy it. Time path unchanged.
+            warmup_complete=(
+                (live_range_bars >= warmup_bars) and (live_minutes >= warmup_bars)
+                if range_bars_enabled
+                else (bar_index + warm_bars) >= warmup_bars
+            ),
             position_open=pos["pos_open"],
             position_side=pos["pos_side"],
             position_entry_price=pos["pos_entry"],
@@ -800,6 +810,9 @@ class DecisionContextBuilder:
         entry_bar_index: int = 0,
         recent_decisions: list | None = None,
         contract_symbol: str | None = None,
+        range_bars_enabled: bool = False,
+        live_range_bars: int = 0,
+        live_minutes: float = 0.0,
     ) -> DecisionContext:
         """Build a DecisionContext from the given inputs.
         
@@ -816,6 +829,9 @@ class DecisionContextBuilder:
             amt_dto: AMT analysis DTO (fallback when snapshot is absent)
             snapshot: Typed analysis snapshot (preferred over amt_dto)
             interval_seconds: Bar interval in seconds
+            range_bars_enabled: Micro decisions use range bars (plan T8)
+            live_range_bars: Closed range micro bars from live ticks only
+            live_minutes: Wall-clock minutes since first live range-mode tick
             
         Returns:
             A fully-populated DecisionContext
@@ -898,5 +914,8 @@ class DecisionContextBuilder:
             recent_decisions=recent_decisions, session_info=session_info,
             vwap_std_override=vwap_std_override,
             contract_symbol=contract_symbol,
+            range_bars_enabled=range_bars_enabled,
+            live_range_bars=live_range_bars,
+            live_minutes=live_minutes,
         )
         return DecisionContext(**ctx_kwargs)

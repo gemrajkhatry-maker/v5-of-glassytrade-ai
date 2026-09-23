@@ -135,6 +135,8 @@ class AMTEngine:
         get_risk_pnl: Callable[[], float] | None = None,
         interval_seconds: int = 60,
         seed_scheduler: Any = None,
+        range_bars_enabled: bool = False,
+        tick_size: float = 0.05,
     ) -> None:
         self.symbol = symbol
         self._market = market
@@ -145,6 +147,11 @@ class AMTEngine:
         self._get_depth = get_depth or (lambda: None)
         self._get_risk_pnl = get_risk_pnl or (lambda: 0.0)
         self._interval_seconds = interval_seconds
+        self._tick_size = float(tick_size)
+        # Plan T8: range mode seeds synth range bars; seed-only analyze never
+        # emits drive / hard absorption / Triple-A progress (seed ≠ live).
+        self._range_bars_enabled = range_bars_enabled
+        self._last_range_h: float = 0.0
         # Optional callback: timesfm_seed_fn(symbol, closes) is called after
         # AMT candle seeding so the TimesFM price buffer is pre-warmed.
         self._timesfm_seed_fn: Any = None
@@ -201,6 +208,50 @@ class AMTEngine:
 
     def _underlying(self) -> str:
         return self._underlying_fn()
+
+    def _scrub_seed_side_effects(self) -> None:
+        """Seed bars must not leave drive / hard-absorption / Triple-A state.
+
+        ``analyze`` is shared with the live path, so the one-shot seed call
+        can advance those machines; reset them immediately after seed so a
+        seed-only history never presents as live evidence (plan T8).
+        """
+        try:
+            self._amt_analyzer._drive_tracker.reset()
+        except Exception:
+            logger.debug("seed drive-tracker reset failed", exc_info=True)
+        try:
+            self._amt_analyzer._triple_a.reset()
+        except Exception:
+            logger.debug("seed triple-a reset failed", exc_info=True)
+        det = getattr(self._amt_analyzer, "_absorption_detector", None)
+        clear = getattr(det, "_clear_pending", None)
+        if callable(clear):
+            try:
+                clear()
+            except Exception:
+                logger.debug("seed absorption clear failed", exc_info=True)
+
+    @staticmethod
+    def _scrub_seed_result(result):
+        """Zero drive / hard-abs / Triple-A fields on a seed ``AMTResult``."""
+        from dataclasses import replace
+
+        agg = dict(getattr(result, "aggression_components", None) or {})
+        agg["absorption_detected"] = False
+        return replace(
+            result,
+            drive_number=0,
+            drive_entry_valid=False,
+            absorption_side="",
+            absorption_cluster_high=0.0,
+            absorption_cluster_low=0.0,
+            absorption_range_ratio=0.0,
+            absorption_vol_ratio=0.0,
+            triple_a_phase="WAITING",
+            triple_a_signal="",
+            aggression_components=agg,
+        )
 
     @property
     def _cvd_source(self) -> str:
@@ -338,6 +389,10 @@ class AMTEngine:
                             prev_candles,
                             incremental_profile=prev_inc,
                         )
+                        # Prior-session cold start is also seed-only: strip
+                        # drive / hard-abs / Triple-A before levels are read.
+                        prev_res = self._scrub_seed_result(prev_res)
+                        self._scrub_seed_side_effects()
                         if prev_res.poc > 0:
                             self._prior = {
                                 "poc": float(prev_res.poc),
@@ -368,6 +423,25 @@ class AMTEngine:
             if self._amt_candles:
                 return  # live bars already flowing — keep them
             ohlcs = [to_float_ohlc(c) for c in scoped]
+            if self._range_bars_enabled and ohlcs:
+                # Plan T8: range mode seeds SYNTH range bars (span ≤ H) into
+                # the profile ring; they stay non-live for warmup/drive.
+                from quant.amt.range_seed import h_range_from_ohlcs, synth_range_bars
+                h = h_range_from_ohlcs(ohlcs, self._tick_size)
+                self._last_range_h = h
+                try:
+                    synth = synth_range_bars(ohlcs, h)
+                except ValueError:
+                    synth = []
+                if synth:
+                    ohlcs = [
+                        FloatOHLC(
+                            time=b.time, open=b.open, high=b.high, low=b.low,
+                            close=b.close, volume=b.volume, vwap=b.vwap,
+                            taker_buy_volume=b.buy_volume, delta=b.delta,
+                        )
+                        for b in synth
+                    ]
             self._amt_candles = ohlcs
             inc = IncrementalVolumeProfile()
             for c in ohlcs:
@@ -403,6 +477,12 @@ class AMTEngine:
                         gex=self._gex,
                         cvd_source=self._cvd_source,
                     )
+                    # Seed-only: scrub evidence + reset trackers so seed bars
+                    # never present as drive / hard-abs / Triple-A (plan T8).
+                    # Self-contained in amt_engine (does not require analyzer
+                    # is_seed kwarg — analyzer may be reverted externally).
+                    result = self._scrub_seed_result(result)
+                    self._scrub_seed_side_effects()
                     iso_time = _epoch_to_iso(last_ohlc.time)
                     snap = analysis_snapshot_from_result(result, asof_time=iso_time)
                     dto = amt_result_to_dto(result)
@@ -415,6 +495,7 @@ class AMTEngine:
         logger.info(
             "AMT seeded %d session candles for %s (initial DTO: %s)", len(scoped), self.symbol, bool(self._last_amt_dto)
         )
+        # Session candles remain available for H_range / range-seed synth (T8).
 
         # Push historical closes into TimesFM price buffer so model starts warm.
         if self._timesfm_seed_fn is not None and ohlcs:
@@ -549,6 +630,17 @@ class AMTEngine:
     @property
     def warm_bars(self) -> int:
         return self._warm_bars
+
+    @property
+    def last_range_h(self) -> float:
+        """H_range derived during a range-mode seed (0.0 when never set)."""
+        return self._last_range_h
+
+    @property
+    def session_candles(self) -> list:
+        """Seed/live session OHLC snapshot (H_range + range-seed synth input)."""
+        with self._amt_lock:
+            return list(self._amt_candles)
 
     def export_kernel_state(self) -> dict:
         """Order-flow warmth snapshot for mid-session restart."""

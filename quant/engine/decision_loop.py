@@ -143,6 +143,10 @@ class DecisionLoop:
         self._get_startup_block = state.get("get_startup_block", lambda: False)
         self._set_exposure_state = state.get("set_exposure_state")
         self._set_entry_time_epoch = state.get("set_entry_time_epoch")
+        self._get_range_warmup = state.get(
+            "get_range_warmup",
+            lambda: (False, 0, 0.0),
+        )
 
         # --- Event emission ---
         self._emit = emit
@@ -487,6 +491,7 @@ class DecisionLoop:
         active_pos = pm.current_position
         snap = getattr(self._amt_engine, "last_snapshot", None)
         greeks = getattr(self, "_greeks", None)
+        range_on, live_range_bars, live_minutes = self._get_range_warmup()
         return DecisionContextBuilder(greeks=greeks).build(
             bar=bar,
             symbol=eval_symbol,
@@ -504,6 +509,9 @@ class DecisionLoop:
             entry_bar_index=self._get_entry_bar_index(),
             recent_decisions=list(self._get_recent_decisions()),
             contract_symbol=contract_symbol,
+            range_bars_enabled=bool(range_on),
+            live_range_bars=int(live_range_bars),
+            live_minutes=float(live_minutes),
         )
 
     def _translate_signal_for_option(

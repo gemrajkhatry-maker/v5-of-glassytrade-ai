@@ -62,6 +62,9 @@ class TickHandler:
         bar_index_increaser: Callable[[], None] | None = None,
         bar_closed_emitter: Callable[[str, str, Any], None] | None = None,
         merged_amt_emitter: Callable[[dict, str], None] | None = None,
+        # Range-mode live warmup (plan T8): only fires when micro is range-built
+        range_tick_callback: Callable[[Any], None] | None = None,
+        range_bar_closed_callback: Callable[[], None] | None = None,
     ):
         self.symbol = symbol
         self._macro_aggregator = macro_aggregator
@@ -95,11 +98,21 @@ class TickHandler:
         self._bar_index_increaser = bar_index_increaser
         self._bar_closed_emitter = bar_closed_emitter
         self._merged_amt_emitter = merged_amt_emitter
+        self._range_tick_callback = range_tick_callback
+        self._range_bar_closed_callback = range_bar_closed_callback
         
         # Cached state (for option path)
         self._last_underlying_bar = None
         self._underlying_amt_dto = None
         self._option_amt_dto = None
+
+    def _range_micro(self) -> bool:
+        return getattr(self._micro_aggregator, "range_size", None) is not None
+
+    def _note_range_close(self, micro_bar: Any) -> None:
+        """Count live range closes only — seed/synth bars never arrive here."""
+        if micro_bar is not None and self._range_micro() and self._range_bar_closed_callback is not None:
+            self._range_bar_closed_callback()
 
     def _decide_if_macro_fresh(
         self,
@@ -144,6 +157,10 @@ class TickHandler:
         if state.position is not None:
             self._manage_tick_exit(float(tick.price), str(tick.time))
         
+        # Range-mode wall-clock start: first live tick anchors live_minutes
+        if self._range_micro() and self._range_tick_callback is not None:
+            self._range_tick_callback(tick)
+        
         # Hotpath tracing
         if self._hotpath_callback is not None:
             self._hotpath_callback(
@@ -186,6 +203,7 @@ class TickHandler:
         # 1. Micro-trigger: option's own ticks feed 1-min micro aggregator
         if self._micro_aggregator is not None:
             micro_bar = self._micro_aggregator.add_tick(tick)
+            self._note_range_close(micro_bar)
             if micro_bar is not None and state.position is None:
                 if self._underlying_amt_dto and self._last_underlying_bar is not None:
                     self._decide_if_macro_fresh(
@@ -274,6 +292,7 @@ class TickHandler:
         # 2. Micro-trigger evaluation (using fresh macro analysis if macro closed)
         if self._micro_aggregator is not None:
             micro_bar = self._micro_aggregator.add_tick(tick)
+            self._note_range_close(micro_bar)
             if micro_bar is not None and state.position is None:
                 amt_dto = self._amt_engine.last_amt_dto
                 if amt_dto:

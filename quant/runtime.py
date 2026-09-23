@@ -280,6 +280,44 @@ def close_lingering_pyramids(pm, price: float, time_str: str, reason: str) -> in
     return closed
 
 
+def _resolve_range_bars_flag(explicit: bool | None) -> bool:
+    """Plan T8 range flag: explicit kwarg wins, else env, else False.
+
+    Env accepts 1/true/yes/on (and 0/false/no/off) per base.yaml docs.
+    Single env-sniff site for GLASSYTRADE_USE_RANGE_BARS.
+    """
+    if explicit is not None:
+        return bool(explicit)
+    raw = os.environ.get("GLASSYTRADE_USE_RANGE_BARS", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _tick_epoch_seconds(tick) -> float | None:
+    """Best-effort unix seconds from a tick (timestamp_ms, numeric time, ISO)."""
+    ts_ms = getattr(tick, "timestamp_ms", None)
+    if ts_ms is not None:
+        try:
+            return int(ts_ms) / 1000.0
+        except (TypeError, ValueError):
+            pass
+    text = str(getattr(tick, "time", "") or "").strip()
+    try:
+        val = float(text)
+        if val > 100_000_000_000:
+            val /= 1000.0
+        if val > 1e9:
+            return val
+    except (TypeError, ValueError):
+        pass
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=IST)
+        return parsed.timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
 class QuantEngine:
     # =========================================================================
     # 1. LIFECYCLE — construction, run loop, startup/shutdown
@@ -317,8 +355,19 @@ class QuantEngine:
         max_lots: int | None = None,
         trades_executed=None,
         telemetry=None,
+        range_bars_enabled: bool | None = None,
     ) -> None:
         self._gateway = gateway
+        # Plan T8: range micro behind GLASSYTRADE_USE_RANGE_BARS (default off).
+        # Explicit kwarg wins (live wiring may pass YAML); else read env once
+        # here — the single env-sniff site for this flag (F4 noted; the plan
+        # explicitly requires the env var).
+        self.range_bars_enabled = _resolve_range_bars_flag(range_bars_enabled)
+        # Live range warmup: counters advance only on live-tick range closes.
+        self._live_range_bars = 0
+        self._range_mode_started_at: float | None = None
+        self._last_range_tick_epoch: float | None = None
+        self._seed_range_bars: list = []
         # Independent mode is the production default. Legacy dual-feed
         # construction remains identifiable and is never implicit in the
         # coordinator path.
@@ -366,13 +415,20 @@ class QuantEngine:
         # an ITM option never devolves into a futures position at expiry.
         self._contract_expiry = parse_contract_expiry(symbol)
         self._aggregator = BarAggregator(interval_seconds=interval_seconds)
-        # ponytail: 60s micro aggregator drives 1-min entry triggers while 5-min aggregator retains macro AMT context
+        # ponytail: 60s micro aggregator drives 1-min entry triggers while 5-minute aggregator retains macro AMT context
         MICRO_SEC = 60
-        self._micro_aggregator = (
-            BarAggregator(interval_seconds=MICRO_SEC)
-            if interval_seconds > MICRO_SEC
-            else None
-        )
+        if interval_seconds > MICRO_SEC and self.range_bars_enabled:
+            # Range mode: micro is range-built (interval 0 → bar time = tick
+            # time; add_tick bypasses windowing when range_size is set).
+            # Provisional H = tick until seed refreshes via ATR(14).
+            self._micro_aggregator = BarAggregator(
+                interval_seconds=0,
+                range_size=max(float(self._tick_size), 1e-12),
+            )
+        elif interval_seconds > MICRO_SEC:
+            self._micro_aggregator = BarAggregator(interval_seconds=MICRO_SEC)
+        else:
+            self._micro_aggregator = None
         self._underlying_aggregator = (
             BarAggregator(interval_seconds=interval_seconds)
             if self._underlying_gateway is not None
@@ -451,6 +507,8 @@ class QuantEngine:
                 get_risk_pnl=lambda: self._risk.state().daily_pnl if hasattr(self, '_risk') else 0.0,
                 interval_seconds=interval_seconds,
                 seed_scheduler=seed_scheduler,
+                range_bars_enabled=self.range_bars_enabled,
+                tick_size=self._tick_size,
             )
             # 2. Option contract AMT engine (option volume profile, POC, VAH, VAL)
             self._option_amt_engine = AMTEngine(
@@ -463,6 +521,8 @@ class QuantEngine:
                 get_risk_pnl=lambda: self._risk.state().daily_pnl if hasattr(self, '_risk') else 0.0,
                 interval_seconds=interval_seconds,
                 seed_scheduler=seed_scheduler,
+                range_bars_enabled=self.range_bars_enabled,
+                tick_size=self._tick_size,
             )
         else:
             self._amt_engine = AMTEngine(
@@ -475,6 +535,8 @@ class QuantEngine:
                 get_risk_pnl=lambda: self._risk.state().daily_pnl if hasattr(self, '_risk') else 0.0,
                 interval_seconds=interval_seconds,
                 seed_scheduler=seed_scheduler,
+                range_bars_enabled=self.range_bars_enabled,
+                tick_size=self._tick_size,
             )
         self._decision_service = DecisionService(min_rr=min_rr)
         # IOMS port: the engine never constructs its own OMS — the coordinator
@@ -897,7 +959,66 @@ class QuantEngine:
             bar_index_increaser=lambda: setattr(self, "_bar_index", self._bar_index + 1),
             bar_closed_emitter=lambda sym, t, bar: self._emit(BarClosed(symbol=sym, time=t, bar=bar)),
             merged_amt_emitter=self._emit_merged_amt,
+            range_tick_callback=self._on_range_live_tick,
+            range_bar_closed_callback=self._on_range_bar_closed,
         )
+
+    # --- Range-mode live warmup (plan T8) ---------------------------------
+    @property
+    def live_range_bars(self) -> int:
+        """Closed range micro bars from live ticks — seed/synth never count."""
+        return self._live_range_bars
+
+    @property
+    def range_start_epoch(self) -> float | None:
+        """Epoch of the first live tick in range mode (wall-clock anchor)."""
+        return self._range_mode_started_at
+
+    def live_range_minutes(self) -> float:
+        """Minutes elapsed since the first live range-mode tick."""
+        if self._range_mode_started_at is None:
+            return 0.0
+        now = (
+            self._last_range_tick_epoch
+            if self._last_range_tick_epoch is not None
+            else time.time()
+        )
+        return max(0.0, (now - self._range_mode_started_at) / 60.0)
+
+    # Private alias — tests/contract readers use the underscore form.
+    _live_range_minutes = live_range_minutes
+
+    def _on_range_live_tick(self, tick) -> None:
+        epoch = _tick_epoch_seconds(tick)
+        if self._range_mode_started_at is None and epoch is not None:
+            self._range_mode_started_at = epoch
+        if epoch is not None:
+            self._last_range_tick_epoch = epoch
+        elif self._range_mode_started_at is None:
+            self._range_mode_started_at = time.time()
+
+    def _on_range_bar_closed(self) -> None:
+        self._live_range_bars += 1
+
+    def _refresh_range_h_after_seed(self) -> None:
+        """Recompute H_range from seed candles + build non-live synth seed bars."""
+        if not self.range_bars_enabled or self._micro_aggregator is None:
+            return
+        from quant.amt.range_seed import h_range_from_ohlcs, synth_range_bars
+
+        # Prefer the H the AMT engine derived during its range-mode seed.
+        h = float(getattr(self._amt_engine, "last_range_h", 0.0) or 0.0)
+        candles = list(getattr(self._amt_engine, "session_candles", ()) or ())
+        if h <= 0 and candles:
+            h = h_range_from_ohlcs(candles, self._tick_size)
+        if h > 0:
+            self._micro_aggregator.range_size = h
+        # Synth range bars from seed OHLCV — stored, never counted live.
+        if candles and h > 0:
+            try:
+                self._seed_range_bars = synth_range_bars(candles, h)
+            except ValueError:
+                self._seed_range_bars = []
 
     def _create_decision_loop(self) -> DecisionLoop:
         """Build a DecisionLoop wired to this engine's state and dependencies.
@@ -952,6 +1073,11 @@ class QuantEngine:
             ),
             "set_exposure_state": lambda v: setattr(self, "exposure_state", v),
             "set_entry_time_epoch": lambda v: setattr(self, "_entry_time_epoch", v),
+            "get_range_warmup": lambda: (
+                bool(self.range_bars_enabled),
+                int(self._live_range_bars),
+                float(self.live_range_minutes()),
+            ),
         }
         return DecisionLoop(
             config=config,
@@ -1042,6 +1168,7 @@ class QuantEngine:
         elif self._amt_engine.last_amt_dto:
             self._underlying_amt_dto = self._amt_engine.last_amt_dto
             self._emit(AmtUpdated(symbol=self.symbol, time=self._amt_engine.last_amt_dto.get("time", ""), amt=self._amt_engine.last_amt_dto))
+        self._refresh_range_h_after_seed()
 
         initial_amt = self._option_amt_dto or self._amt_engine.last_amt_dto
         if initial_amt and hasattr(self, "_advisor") and self._advisor is not None:
