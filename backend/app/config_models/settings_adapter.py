@@ -20,8 +20,6 @@ import os
 from pathlib import Path
 from typing import Any, List, Optional
 
-import yaml
-
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -41,8 +39,6 @@ class SettingsAdapter:
     
     Example usage (existing code - no changes needed):
         >>> from app.config import settings
-        >>> print(settings.SCANNER_MODE)
-        'mcx_options'
         >>> print(settings.DEFAULT_EXCHANGE)
         'MCX'
     """
@@ -99,13 +95,6 @@ class SettingsAdapter:
     # =========================================================================
     
     @property
-    def SCANNER_MODE(self) -> str:
-        """Get scanner mode from YAML config."""
-        if self._mode_config:
-            return self._mode_config.scanner_config.get("mode", "mcx_options")
-        return os.getenv("SCANNER_MODE", "mcx_options")
-    
-    @property
     def DEFAULT_EXCHANGE(self) -> str:
         """Get default exchange from YAML config."""
         if self._mode_config:
@@ -153,13 +142,6 @@ class SettingsAdapter:
         return int(os.getenv("SCANNER_TOP_N", "4"))
     
     @property
-    def SCANNER_TOP_PER_UNDERLYING(self) -> int:
-        """Get scanner top per underlying from YAML config."""
-        if self._mode_config:
-            return int(self._mode_config.scanner_config.get("top_per_underlying", 2))
-        return int(os.getenv("SCANNER_TOP_PER_UNDERLYING", "2"))
-    
-    @property
     def STRIKES_AROUND_ATM(self) -> int:
         """Get strikes around ATM from YAML config."""
         if self._mode_config:
@@ -181,81 +163,6 @@ class SettingsAdapter:
         return os.getenv("SCANNER_OPTION_TYPE", "")
     
     @property
-    def AGGRESSION_SIGMA(self) -> float:
-        """Get aggression sigma from YAML config."""
-        if self._mode_config:
-            return float(self._mode_config.system_config.risk.risk_per_trade_pct)
-        return float(os.getenv("AGGRESSION_SIGMA", "2.0"))
-    
-    @property
-    def DISPLACEMENT_MULTIPLIER(self) -> float:
-        """Get displacement multiplier from YAML config."""
-        if self._mode_config:
-            return 1.2 if self._mode_config.strategy == "mcx_options" else 1.5
-        return float(os.getenv("DISPLACEMENT_MULTIPLIER", "1.2"))
-    
-    @property
-    def BALANCE_RATIO_THRESHOLD(self) -> float:
-        """Get balance ratio threshold from YAML config."""
-        return float(os.getenv("BALANCE_RATIO_THRESHOLD", "0.55"))
-    
-    @property
-    def ALLOW_SHORT(self) -> bool:
-        """Get allow short from YAML config."""
-        if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
-            return flags.get("allow_short", True)
-        return os.getenv("ALLOW_SHORT", "true").lower() == "true"
-    
-    @property
-    def RISK_TIER_ENGINE(self) -> bool:
-        """Get risk tier engine flag from YAML config."""
-        if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
-            return flags.get("risk_tier_engine", True)
-        return os.getenv("RISK_TIER_ENGINE", "true").lower() == "true"
-    
-    @property
-    def SHORT_SIGNALS_ENABLED(self) -> bool:
-        """Get short signals flag from YAML config."""
-        if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
-            return flags.get("short_signals_enabled", True)
-        return os.getenv("SHORT_SIGNALS_ENABLED", "true").lower() == "true"
-    
-    @property
-    def LLM_PRE_CANDLE_ADVISORY(self) -> bool:
-        """Get LLM pre-candle advisory flag from YAML config."""
-        if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
-            return flags.get("llm_pre_candle_advisory", True)
-        return os.getenv("LLM_PRE_CANDLE_ADVISORY", "true").lower() == "true"
-    
-    @property
-    def SCALP_ENGINE_ENABLED(self) -> bool:
-        """Get scalp engine flag from YAML config."""
-        if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
-            return flags.get("scalp_engine_enabled", False)
-        return os.getenv("SCALP_ENGINE_ENABLED", "false").lower() == "true"
-    
-    @property
-    def SCALP_IB_BREAKOUT(self) -> bool:
-        """Get scalp IB breakout flag from YAML config."""
-        if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
-            return flags.get("scalp_ib_breakout", False)
-        return os.getenv("SCALP_IB_BREAKOUT", "false").lower() == "true"
-
-    @property
-    def QUANT_DECISION_ENABLED(self) -> bool:
-        """Get the quant decision engine-of-record flag from YAML config."""
-        if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
-            return flags.get("quant_decision_enabled", False)
-        return os.getenv("QUANT_DECISION_ENABLED", "false").lower() == "true"
-
-    @property
     def CORS_ORIGINS(self) -> List[str]:
         """Get allowed CORS origins from env (comma-separated)."""
         raw = os.getenv(
@@ -264,67 +171,6 @@ class SettingsAdapter:
         )
         return [o.strip() for o in raw.split(",") if o.strip()]
 
-    @property
-    def QUANT_EXECUTION_MODE(self) -> str:
-        """Get the quant decision execution gate: ``off|shadow|paper|live``.
-
-        Resolution order:
-        1. ``QUANT_EXECUTION_MODE`` env var (highest priority).
-        2. ``quant_execution_mode`` key in ``feature_flags.yaml``.
-        3. Back-compat ``QUANT_DECISION_ENABLED`` alias (true -> shadow).
-        4. Default ``off`` — byte-identical to today's flag-off behaviour.
-        """
-        env_mode = os.getenv("QUANT_EXECUTION_MODE", "").strip().lower()
-        if env_mode:
-            return env_mode
-        yaml_raw = self._feature_flags_yaml().get("quant_execution_mode")
-        yaml_mode = yaml_raw.strip().lower() if isinstance(yaml_raw, str) else ""
-        if yaml_mode:
-            return yaml_mode
-        return "shadow" if self.QUANT_DECISION_ENABLED else "off"
-
-    def _feature_flags_yaml(self) -> dict:
-        """Load the ``features`` mapping from ``feature_flags.yaml`` (cached).
-
-        Returns ``{}`` on any read/parse failure so callers degrade to their
-        defaults instead of raising.
-        """
-        cached = getattr(self, "_feature_flags_yaml_cache", None)
-        if cached is not None:
-            return cached
-        flags: dict = {}
-        config_path = Path(__file__).resolve().parent.parent.parent / "config"
-        flags_path = config_path / "feature_flags.yaml"
-        try:
-            if flags_path.exists():
-                with open(flags_path) as f:
-                    data = yaml.safe_load(f) or {}
-                flags = data.get("features", data) or {}
-        except Exception:
-            logger.warning("Failed to read %s — using defaults", flags_path, exc_info=True)
-        self._feature_flags_yaml_cache = flags
-        return flags
-    
-    @property
-    def REALISTIC_COST_MODEL(self) -> bool:
-        """Get realistic cost model flag from YAML config."""
-        if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
-            return flags.get("realistic_cost_model", True)
-        return os.getenv("REALISTIC_COST_MODEL", "true").lower() == "true"
-    
-    @property
-    def LLM_TIMEOUT_SECONDS(self) -> float:
-        """Get LLM timeout from YAML config."""
-        if self._mode_config:
-            return float(self._mode_config.scanner_config.get("llm", {}).get("timeout_seconds", 60))
-        return float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
-    
-    @property
-    def LLM_EXECUTION_ENABLED(self) -> bool:
-        """Get LLM execution enabled from env (not in YAML for safety)."""
-        return os.getenv("LLM_EXECUTION_ENABLED", "true").lower() == "true"
-    
     @property
     def CAPITAL(self) -> float:
         """Get trading capital from YAML config."""
@@ -338,55 +184,6 @@ class SettingsAdapter:
         if self._mode_config:
             return f"{self._mode_config.system_config.candle_timeframe_minutes}m"
         return os.getenv("STREAM_INTERVAL", "5m")
-    
-    @property
-    def TICK_POLL_SECONDS(self) -> float:
-        """Get tick poll seconds from env."""
-        return float(os.getenv("TICK_POLL_SECONDS", "5.0"))
-
-    @property
-    def SIGNAL_STALE_SECONDS(self) -> int:
-        """Stale-signal TTL in seconds (B-13). Default 60s; env override."""
-        return int(os.getenv("SIGNAL_STALE_SECONDS", "60"))
-    
-    # =========================================================================
-    # Gap Fill Configuration
-    # =========================================================================
-    
-    @property
-    def GAP_FILL_ENABLED(self) -> bool:
-        """Get gap fill enabled flag from YAML config."""
-        if self._mode_config:
-            return self._mode_config.system_config.gap_fill.enabled
-        return os.getenv("GAP_FILL_ENABLED", "true").lower() == "true"
-    
-    @property
-    def GAP_FILL_INTERVAL(self) -> int:
-        """Get gap fill interval in seconds from YAML config."""
-        if self._mode_config:
-            return self._mode_config.system_config.gap_fill.interval_seconds
-        return int(os.getenv("GAP_FILL_INTERVAL", "300"))
-    
-    @property
-    def GAP_FILL_MIN_GAP_SECONDS(self) -> int:
-        """Get minimum gap size in seconds from YAML config."""
-        if self._mode_config:
-            return self._mode_config.system_config.gap_fill.min_gap_seconds
-        return int(os.getenv("GAP_FILL_MIN_GAP_SECONDS", "60"))
-    
-    @property
-    def GAP_FILL_MAX_LOOKBACK(self) -> int:
-        """Get max lookback in seconds from YAML config."""
-        if self._mode_config:
-            return self._mode_config.system_config.gap_fill.max_lookback_seconds
-        return int(os.getenv("GAP_FILL_MAX_LOOKBACK", "600"))
-    
-    @property
-    def GAP_FILL_MAX_FILL_AGE(self) -> int:
-        """Get max fill age in seconds from YAML config."""
-        if self._mode_config:
-            return self._mode_config.system_config.gap_fill.max_fill_age_seconds
-        return int(os.getenv("GAP_FILL_MAX_FILL_AGE", "120"))
     
     # =========================================================================
     # Fallback mechanism for any attribute not explicitly defined

@@ -1,7 +1,7 @@
 """Dependency Injection package.
 
 Provides a lightweight DI container with factory registration,
-circular dependency detection, and singleton/transient scopes.
+circular dependency detection, and singleton scoping.
 """
 
 from app.application.di.container import (

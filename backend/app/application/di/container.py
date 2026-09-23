@@ -20,7 +20,6 @@ ports.IBrokerPort`` is the broker-library-internal contract implemented by
 from __future__ import annotations
 
 import threading
-from contextlib import contextmanager
 from typing import Any, Callable, TypeVar
 
 T = TypeVar("T")
@@ -44,7 +43,6 @@ class DIContainer:
         - Singleton by default: instance cached after first creation
         - Circular dependency detection: raises at resolution time
         - Thread-safe: uses RLock for concurrent resolution
-        - Transient scope support: for per-request scopes
 
     Design:
         Factories receive the container as their only argument, enabling
@@ -112,37 +110,6 @@ class DIContainer:
             finally:
                 self._building.discard(interface)
 
-    def resolve_transient(self, interface: type[T]) -> T:
-        """Resolve a dependency without caching (always creates new instance)."""
-        with self._lock:
-            if interface not in self._factories:
-                raise DependencyNotFoundError(
-                    f"No factory registered for {getattr(interface, '__name__', interface)}"
-                )
-            factory = self._factories[interface]
-            return factory(self)
-
-    @contextmanager
-    def transient_scope(self):
-        """Create a transient resolution scope.
-
-        Within the context, all resolutions are transient (no caching).
-        Useful for request-scoped or tick-scoped objects.
-
-        Usage:
-            with container.transient_scope():
-                handler = container.resolve(TickHandler)
-                handler.process(tick)
-        """
-        with self._lock:
-            cached = self._singletons.copy()
-            self._singletons = {}
-        try:
-            yield self
-        finally:
-            with self._lock:
-                self._singletons = cached
-
     def reset(self) -> None:
         """Reset all singletons. Useful for testing.
 
@@ -156,7 +123,3 @@ class DIContainer:
     def has(self, interface: type) -> bool:
         """Check if a factory is registered for the interface."""
         return interface in self._factories
-
-    def registered_types(self) -> list[type]:
-        """Return all registered interface types."""
-        return list(self._factories.keys())

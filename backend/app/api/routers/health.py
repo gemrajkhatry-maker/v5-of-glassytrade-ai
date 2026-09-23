@@ -1,11 +1,7 @@
 """Health check, metrics, and system info router."""
 
 import asyncio
-import gc
 import logging
-import resource
-import sys
-import tracemalloc
 
 from app.core.async_boundary import ensure_sync_adapter_result
 
@@ -25,7 +21,6 @@ from app.api.dependencies import (
     get_storage,
 )
 from app.config import settings
-from app.infrastructure.metrics import MetricsCollector
 from quant.probability.features import (
     FEATURE_NAMES,
     PROBABILITY_FEATURE_SCHEMA_VERSION,
@@ -298,34 +293,6 @@ async def readiness_check(request: Request):
     return {"status": status, "checks": checks}
 
 
-@router.get("/v1/metrics")
-async def metrics(request: Request):
-    """Return current pipeline metrics.
-
-    Uses CoordinatorMetricsProvider to read per-engine activity from the
-    coordinator's engines, replacing the disconnected MetricsCollector that
-    reported 0 ticks while WebSocket showed live market flow.
-    """
-    coordinator = getattr(request.app.state, "coordinator", None)
-    if coordinator is not None:
-        from quant.execution.coordinator_metrics import coordinator_metrics_provider
-        provider = coordinator_metrics_provider(coordinator)
-        return provider.snapshot()
-    # Fallback: no coordinator — return empty but well-formed payload
-    from quant.execution import exits as _exits_mod
-    return {
-        "engines": {},
-        "totals": {
-            "decision_count": 0,
-            "approved_count": 0,
-            "blocked_count": 0,
-            "engine_count": 0,
-            "model_risk_failures": _exits_mod.MODEL_RISK_FAILURES,
-            "model_sizing_failures": _exits_mod.MODEL_SIZING_FAILURES,
-        },
-    }
-
-
 @router.get("/system/config")
 async def system_config(request: Request):
     """Return backend configuration for frontend auto-detection."""
@@ -436,31 +403,3 @@ async def scanner_rescan(request: Request):
             ],
         }
     return {"count": 0, "contracts": []}
-
-
-@router.get("/debug/memory")
-async def debug_memory():
-    """Return process memory and GC stats for debugging leaks."""
-    rusage = resource.getrusage(resource.RUSAGE_SELF)
-    gc_stats = gc.get_stats()
-
-    result = {
-        # macOS ru_maxrss is bytes, Linux is KB
-        "rss_mb": round(rusage.ru_maxrss / ((1024 * 1024) if sys.platform == "darwin" else 1024), 2),
-        "gc_stats": [
-            {
-                "collections": s["collections"],
-                "collected": s["collected"],
-                "uncollectable": s["uncollectable"],
-            }
-            for s in gc_stats
-        ],
-        "gc_objects": len(gc.get_objects()),
-    }
-
-    if tracemalloc.is_tracing():
-        current, peak = tracemalloc.get_traced_memory()
-        result["tracemalloc_current_mb"] = round(current / (1024 * 1024), 2)
-        result["tracemalloc_peak_mb"] = round(peak / (1024 * 1024), 2)
-
-    return result

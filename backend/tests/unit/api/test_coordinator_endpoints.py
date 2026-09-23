@@ -92,7 +92,13 @@ def client():
         yield TestClient(fastapi_app), fastapi_app, fake
     finally:
         if previous is None:
-            fastapi_app.state.__dict__.pop("coordinator", None)
+            # Starlette State stores attrs in _state, not __dict__ — popping
+            # __dict__ is a no-op and leaks the fake coordinator into later
+            # tests (deadlocks test_valid_token_passes_auth's first frame).
+            try:
+                del fastapi_app.state.coordinator
+            except AttributeError:
+                pass
         else:
             fastapi_app.state.coordinator = previous
 

@@ -4,7 +4,7 @@ This module provides backward-compatible configuration access for all existing c
 
 OLD WAY (still works - 25+ files use this):
     from app.config import settings
-    print(settings.SCANNER_MODE)  # Reads from YAML
+    print(settings.DEFAULT_EXCHANGE)  # Reads from YAML
 
 NEW WAY (recommended for new code - uses dependency injection):
     from app.api.dependencies import get_system_config

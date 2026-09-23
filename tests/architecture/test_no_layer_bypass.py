@@ -15,7 +15,6 @@ def test_no_import_of_app_main_in_routers():
         "backend/app/api/routers/trading.py",
         "backend/app/api/routers/health.py",
         "backend/app/api/routers/market.py",
-        "backend/app/api/routers/metrics.py",
     ):
         src = _read(rel)
         assert "from app.main import" not in src, rel

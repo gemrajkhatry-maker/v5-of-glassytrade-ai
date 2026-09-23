@@ -1,6 +1,6 @@
 """Prometheus-style metrics registry for trading system.
 
-Counterpart: app/infrastructure/metrics.py (business KPI dict for /api/v1/metrics).
+Counterpart: quant.contracts.ports.telemetry (host adapter feeds these counters).
 Backed by ``prometheus_client`` (v0.26+). The public surface is identical to
 the previous hand-rolled registry: the module exposes ``metrics`` (a
 ``MetricsRegistry`` singleton), the ``Metric``/``Counter``/``Histogram``/

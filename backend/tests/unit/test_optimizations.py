@@ -1,12 +1,8 @@
-"""Optimization Tests — candle cap, delta compression, memory endpoint, LLM semaphore.
+"""Optimization Tests — candle cap, delta compression, LLM semaphore.
 
-Validates the four performance optimizations added to the trading system.
+Validates the performance optimizations added to the trading system.
 """
 
-import gc
-import threading
-
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -59,54 +55,4 @@ class TestComputeDelta:
         assert result["a"] == 10
         assert result["b"] == 20
         assert result["_type"] == "delta"
-
-
-# ---------------------------------------------------------------------------
-# 2. /api/debug/memory endpoint
-# ---------------------------------------------------------------------------
-
-class TestDebugMemoryEndpoint:
-    """Verify the debug memory endpoint returns expected fields."""
-
-    @pytest.fixture
-    def client(self):
-        pytest.importorskip("httpx")
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from app.api.routers.health import router
-
-        app = FastAPI()
-        app.include_router(router)
-        return TestClient(app)
-
-    def test_memory_endpoint_returns_rss(self, client):
-        """OPT-09: /debug/memory returns rss_mb as a float."""
-        resp = client.get("/debug/memory")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "rss_mb" in data
-        assert isinstance(data["rss_mb"], (int, float))
-        assert data["rss_mb"] > 0
-
-    def test_memory_endpoint_returns_gc_stats(self, client):
-        """OPT-10: /debug/memory returns gc_stats as a list of 3 generations."""
-        resp = client.get("/debug/memory")
-        data = resp.json()
-        assert "gc_stats" in data
-        assert isinstance(data["gc_stats"], list)
-        assert len(data["gc_stats"]) == 3  # Python has 3 GC generations
-        for gen in data["gc_stats"]:
-            assert "collections" in gen
-            assert "collected" in gen
-            assert "uncollectable" in gen
-
-    def test_memory_endpoint_returns_gc_objects(self, client):
-        """OPT-11: /debug/memory returns gc_objects count."""
-        resp = client.get("/debug/memory")
-        data = resp.json()
-        assert "gc_objects" in data
-        assert isinstance(data["gc_objects"], int)
-        assert data["gc_objects"] > 0
-
-
 
