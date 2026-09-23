@@ -2,14 +2,13 @@
 
 This module contains the unified circuit breaker implementation that replaces the
 previously fragmented implementations. It provides a single interface that
-supports both synchronous (context manager) and asynchronous patterns, and
-manages multiple circuit breakers keyed by entity (e.g., trading symbols).
+supports both synchronous (context manager) and asynchronous patterns.
 """
 
 import time
 import asyncio
 import logging
-from typing import TypeVar, Awaitable, Callable, Optional, Dict
+from typing import TypeVar, Awaitable, Callable, Optional
 from dataclasses import dataclass
 from enum import Enum
 
@@ -148,45 +147,3 @@ class CircuitBreaker:
         except Exception:
             self.record_failure()
             raise
-
-class PerEntityCircuitBreaker:
-    """Manages multiple circuit breakers keyed by entity (e.g., Symbol)."""
-    def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 60.0):
-        self._failure_threshold = failure_threshold
-        self._recovery_timeout = recovery_timeout
-        self._breakers: Dict[str, CircuitBreaker] = {}
-
-    def _get_breaker(self, key: str) -> CircuitBreaker:
-        if key not in self._breakers:
-            self._breakers[key] = CircuitBreaker(
-                failure_threshold=self._failure_threshold,
-                recovery_timeout=self._recovery_timeout
-            )
-        return self._breakers[key]
-
-    def record_failure(self, key: str):
-        self._get_breaker(key).record_failure()
-
-    def record_success(self, key: str):
-        self._get_breaker(key).record_success()
-
-    def is_open(self, key: str) -> bool:
-        return self._get_breaker(key).state == CircuitState.OPEN
-
-
-# Global circuit breakers for backward compatibility
-_session_circuit = CircuitBreaker(failure_threshold=3, recovery_timeout=300.0)
-_amt_circuit = CircuitBreaker(failure_threshold=5, recovery_timeout=120.0)
-_position_circuit = CircuitBreaker(failure_threshold=3, recovery_timeout=600.0)
-
-
-def get_session_circuit() -> CircuitBreaker:
-    return _session_circuit
-
-
-def get_amt_circuit() -> CircuitBreaker:
-    return _amt_circuit
-
-
-def get_position_circuit() -> CircuitBreaker:
-    return _position_circuit

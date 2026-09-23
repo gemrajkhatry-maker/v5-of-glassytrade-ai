@@ -145,7 +145,6 @@ class FeatureFlags:
     realistic_cost_model: bool = False
 
     # Phase 2 flags
-    short_signals_enabled: bool = False
     risk_tier_engine: bool = False
 
     # Phase 3 flags
@@ -154,17 +153,6 @@ class FeatureFlags:
     # Phase 4 flags
     scalp_engine_enabled: bool = False
     ib_breakout_scalp: bool = False
-
-
-@dataclass(frozen=True)
-class GapFillConfig:
-    """Configuration for gap detection and filling in streaming data."""
-    
-    enabled: bool = True
-    interval_seconds: int = 300  # Check every 5 minutes
-    min_gap_seconds: int = 60  # Only fill gaps > 60 seconds
-    max_lookback_seconds: int = 600  # Look back 10 minutes
-    max_fill_age_seconds: int = 120  # Don't fill gaps newer than 2 minutes
 
 
 @dataclass(frozen=True)
@@ -188,7 +176,6 @@ class SystemConfig:
     risk: RiskConfig = field(default_factory=RiskConfig)
     paper: PaperConfig = field(default_factory=PaperConfig)
     flags: FeatureFlags = field(default_factory=FeatureFlags)
-    gap_fill: GapFillConfig = field(default_factory=GapFillConfig)
 
     def symbol_config(self, symbol_name: str) -> SymbolConfig | None:
         """Find SymbolConfig by name across all exchanges."""

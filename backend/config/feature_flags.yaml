@@ -14,7 +14,6 @@ features:
   realistic_cost_model: true           # true activates full NSE cost model in PaperBroker
 
   # ── Phase 2 flags ──
-  short_signals_enabled: true          # enables PE / SHORT gate logic
   risk_tier_engine: true               # enables A/B/C dynamic risk tiers
 
   # ── Phase 3 flags ──

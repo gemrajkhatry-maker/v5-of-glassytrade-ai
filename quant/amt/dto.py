@@ -249,8 +249,6 @@ def amt_result_to_dto(r) -> dict:
         "lvnPlay": r.lvn_play,
         "isSecondDrive": r.drive_entry_valid,
         "driveEntryValid": bool(getattr(r, "drive_entry_valid", False)),
-        "departedAndReapproached": bool(getattr(r, "drive_entry_valid", False)),
-        "driveDepartedAndReapproached": bool(getattr(r, "drive_entry_valid", False)),
         # Phase 4: context_builder.py's drive-exhaustion guard reads
         # "driveNumber" but this key was never emitted here, so
         # gates_edge.py's "3+ drives -> exhausted" guard could never fire —

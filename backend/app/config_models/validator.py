@@ -193,13 +193,8 @@ def _validate_symbols(config: "SystemConfig") -> tuple[list[str], list[str]]:
 
 
 def _validate_features(config: "SystemConfig") -> tuple[list[str], list[str]]:
-    """WARN-2, WARN-3."""
+    """WARN-3."""
     warnings = []
-
-    if config.flags.short_signals_enabled and not config.flags.walk_forward_validation:
-        warnings.append(
-            "WARN-2: short_signals_enabled but walk_forward_validation is false."
-        )
 
     if config.flags.risk_tier_engine and config.risk.bootstrap_trade_count < 30:
         warnings.append(

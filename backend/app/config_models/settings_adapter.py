@@ -51,8 +51,6 @@ class SettingsAdapter:
         # Load mode config (this loads YAML hierarchy)
         try:
             from config.mode_config import ModeConfigLoader
-            # Set config_dir to backend/config/ (not app/config/)
-            str(Path(__file__).resolve().parent.parent.parent / "config")
             self._mode_config = ModeConfigLoader.load_from_env()
             self._system_config = self._mode_config.system_config
             self._initialized = True

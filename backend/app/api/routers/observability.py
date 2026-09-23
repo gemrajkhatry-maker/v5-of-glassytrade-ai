@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter, Request
 from app.core.metrics import metrics
-from shared.resilience import get_amt_circuit, get_session_circuit
 from app.core.startup_telemetry import RUNBOOK, crash_summary, startup_snapshot, unresolved_count
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
@@ -34,15 +33,6 @@ async def metrics_summary(request: Request):
         "startup": startup_snapshot(),
         "crash_summary": crash_summary(),
         "startup_unresolved_symbols": unresolved_count(),
-    }
-
-
-@router.get("/circuit-breakers")
-async def circuit_breakers(request: Request):
-    """Return circuit breaker states."""
-    return {
-        "amt": get_amt_circuit().get_metrics(),
-        "session": get_session_circuit().get_metrics(),
     }
 
 

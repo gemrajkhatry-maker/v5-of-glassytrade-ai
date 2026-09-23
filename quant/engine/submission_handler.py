@@ -345,7 +345,7 @@ class SubmissionHandler:
                 setup_key=setup,
                 rr=float(getattr(signal, "rr", 0.0) or 0.0),
                 absorption_vol_ratio=float(dto.get("absorptionVolRatio") or 0.0),
-                drive_entry_valid=bool(dto.get("driveEntryValid") or dto.get("isSecondDrive")),
+                drive_entry_valid=bool(dto.get("driveEntryValid")),
                 spread_quality=spread_q,
                 lvn_ticks=lvn_ticks,
                 cvd_agrees=bool(dto.get("cvdAgrees")),

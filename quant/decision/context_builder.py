@@ -319,13 +319,9 @@ class DecisionContextBuilder:
 
         cluster_high = self._df(amt_dto, "absorptionClusterHigh")
         cluster_low = self._df(amt_dto, "absorptionClusterLow")
-        departed = self._db(amt_dto, "driveDepartedAndReapproached") or self._db(
-            amt_dto, "departedAndReapproached"
-        )
-        # isSecondDrive / drive_entry_valid is only set by the drive tracker when
-        # a genuine Drive-2 re-approach is valid — treat that as the departure flag.
-        if is_second_drive or self._db(amt_dto, "driveEntryValid"):
-            departed = True
+        # isSecondDrive / driveEntryValid are set by the drive tracker when a
+        # genuine Drive-2 re-approach is valid — that is the departure flag.
+        departed = bool(is_second_drive or self._db(amt_dto, "driveEntryValid"))
 
         def _lvn_ok(level: float, max_ticks: float = 5.0) -> bool:
             if level <= 0 or close_px <= 0:
@@ -783,9 +779,6 @@ class DecisionContextBuilder:
             compression_box_vah=df(amt_dto, "compressionBoxVah"),
             compression_box_val=df(amt_dto, "compressionBoxVal"),
             compression_box_bars=di(amt_dto, "compressionBoxBars"),
-            gap_profile_poc=df(amt_dto, "gapProfilePoc"),
-            gap_profile_vah=df(amt_dto, "gapProfileVah"),
-            gap_profile_val=df(amt_dto, "gapProfileVal"),
             # VA_Fade stop placement (C2): the analyzer tracks the full session
             # probe extremes; mapping them lets va_fade put the stop beyond the
             # true probe instead of falling back to the last bar's wick.

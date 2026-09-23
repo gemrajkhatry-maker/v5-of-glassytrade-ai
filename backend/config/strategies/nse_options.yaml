@@ -56,7 +56,6 @@ amt_thresholds:
 # Feature Flags
 feature_flags:
   risk_tier_engine: true
-  short_signals_enabled: true
   llm_pre_candle_advisory: false
   scalp_engine_enabled: false
   scalp_ib_breakout: false

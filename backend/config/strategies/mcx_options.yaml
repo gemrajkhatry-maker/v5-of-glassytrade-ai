@@ -75,7 +75,6 @@ amt_thresholds:
 # Feature Flags
 feature_flags:
   risk_tier_engine: true
-  short_signals_enabled: true
   llm_pre_candle_advisory: false
   scalp_engine_enabled: true
   scalp_ib_breakout: true
@@ -92,10 +91,3 @@ risk:
   capital_deployment_pct: 0.50
   max_portfolio_daily_loss_pct: 0.02
   max_portfolio_risk_pct: 0.25
-
-gap_fill:
-  enabled: true
-  interval_seconds: 300  # Check every 5 minutes
-  min_gap_seconds: 60  # Only fill gaps > 60 seconds
-  max_lookback_seconds: 600  # Look back 10 minutes for gaps
-  max_fill_age_seconds: 120  # Don't fill gaps newer than 2 minutes (avoid current candle)

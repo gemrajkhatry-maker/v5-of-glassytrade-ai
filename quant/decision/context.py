@@ -153,10 +153,6 @@ class DecisionContext:
     compression_box_vah: float = 0.0
     compression_box_val: float = 0.0
     compression_box_bars: int = 0
-    # Layer 4 Gap Profile (spec §5.2): gap-POC/VAH/VAL from overnight gap
-    gap_profile_poc: float = 0.0
-    gap_profile_vah: float = 0.0
-    gap_profile_val: float = 0.0
     # LuxAlgo Value Area Reversion Signals (VARS)
     vars_result: Any | None = None
     # Rolling history of recent decisions and rationales (last 3-5 bars)

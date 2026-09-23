@@ -222,7 +222,6 @@ def load_config(
     flags_raw = flags_data.get("features", flags_data)
     flags = FeatureFlags(
         realistic_cost_model=flags_raw.get("realistic_cost_model", False),
-        short_signals_enabled=flags_raw.get("short_signals_enabled", False),
         risk_tier_engine=flags_raw.get("risk_tier_engine", False),
         walk_forward_validation=flags_raw.get("walk_forward_validation", False),
         scalp_engine_enabled=flags_raw.get("scalp_engine_enabled", False),
@@ -322,7 +321,6 @@ def _log_startup_summary(config: SystemConfig) -> None:
     logger.info("  Feature flags:")
     for fname in (
         "realistic_cost_model",
-        "short_signals_enabled",
         "risk_tier_engine",
         "walk_forward_validation",
         "scalp_engine_enabled",
