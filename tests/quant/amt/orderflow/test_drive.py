@@ -196,3 +196,4 @@ class TestDriveTrackerTickSizeRegression:
             price=100.0, level=100.0, candle=candle, direction="LONG",
         )
         assert tracker.get_drive_count(100.0) == 1
+

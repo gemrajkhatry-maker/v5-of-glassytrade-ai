@@ -250,6 +250,14 @@ def track_drives(
     drive_entry_valid: bool = False
     all_levels: list[float] = [poc] + list(lvns) + ([vah, val] if vah > 0 and val > 0 else [])
     if all_levels and live_price > 0:
+        # Observe leave on EVERY price update (near or far). classify_touch is
+        # proximity-gated below, so without this the departure branch is
+        # unreachable live and driveNumber sticks at 1 (SECOND_DRIVE never fires).
+        if drive_tracker is not None:
+            try:
+                drive_tracker.observe(live_price, tick_size)
+            except Exception:
+                logger.debug("Drive observe failed", exc_info=True)
         nearest = min(all_levels, key=lambda _l: abs(_l - live_price))
         proximity_ticks = abs(live_price - nearest) / max(tick_size, 0.001)
         if proximity_ticks <= 5:
