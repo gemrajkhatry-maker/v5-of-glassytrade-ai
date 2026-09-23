@@ -287,10 +287,10 @@ Every trading decision must pass through a strict, sequential gating sequence ex
                      └───────────────┬──────┘
                                      ▼
                      ┌───────────────────────────────┐
-                     │  GATE 4: Risk:Reward Gate     │
+                     │  GATE 4: Stop-Cap Gate        │
                      │  (gate_risk_reward)           │
-                     │  - Stop distance >= min tick? │─── FAIL ──> REJECT: "RR_INVALID"
-                     │  - Target / Stop R:R >= 1.5?  │
+                     │  - Stop distance >= min tick? │─── FAIL ──> VA-fade fallback
+                     │  - Stop within cap?           │
                      └───────────────┬───────────────┘
                                      │ PASS
                                      ▼
@@ -303,10 +303,10 @@ Every trading decision must pass through a strict, sequential gating sequence ex
 ```
 
 ### The 4 Canonical Gates:
-1. **Gate 1: Session Phase & Spread Gate** (`quant/decision/gates/gate_session_phase.py`):
+1. **Gate 1: Session Phase & Spread Gate** (`quant/decision/gate_session_phase.py`):
    - Validates that the exchange clock is inside the active window: NSE 09:30–15:15 IST, MCX 09:15–23:15 IST (opening blackouts included).
    - Enforces bid-ask spread limits (`max(2× tick, 0.1% of price, ₹0.40)`) to prevent executing on illiquid option strikes.
-2. **Gate 2: Position & Cooldown Gate** (`quant/decision/gates/gate_position_cooldown.py`):
+2. **Gate 2: Position & Cooldown Gate** (`quant/decision/gate_position_cooldown.py`):
    - Enforces the rule: *One position per contract at any time*.
    - Requires a minimum bar cooldown after trade exit (default 2 bars) to prevent immediate emotional whipsaw re-entries.
    - Exception: Skipped if `allow_positioned=True` during thesis-flip emergency reversals.
@@ -326,10 +326,10 @@ Every trading decision must pass through a strict, sequential gating sequence ex
    - The entry authority is single: `AmtScalpingStrategy` → `DecisionService` →
      `GatePipeline`. TimesFM is a forecast provider for exits/UI only and never
      approves an entry.
-4. **Gate 4: Risk-to-Reward (R:R) Gate** (`quant/decision/gates_rr.py`):
+4. **Gate 4: Structural Stop-Cap Gate** (`quant/decision/gates_rr.py`, `gate_risk_reward`):
    - Structural Stop Loss is pinned behind the invalidation level (e.g., behind the absorption bar or outside VAL/VAH).
    - Target 1 (TP1) is anchored to the opposite Value Area boundary or VPOC.
-   - Mathematical check: $\frac{\text{Target} - \text{Entry}}{\text{Entry} - \text{Stop}} \ge 1.5$. If $R:R < 1.5$, the trade is discarded regardless of signal quality.
+   - Stop-cap check: stop risk (entry − stop) must fit within `max(200 ticks, 0.75% of price)` for futures (options: 30% of premium). **R:R ≥ 1.5 is enforced downstream by `SignalBuilder`** (`quant/decision/signal_builder.py`), not by this gate — a trade whose structural targets cannot reach 1.5 falls back to a synthetic 2R target there.
 
 ---
 
@@ -421,9 +421,9 @@ Risk management is organized in a hierarchical, multi-tiered architecture that p
 
 ### Valentini Cushioning & House Money Protocol (§12.2)
 Governed by [`SessionRisk`](file:///Users/apple/Documents/v5-of-glassytrade-ai/quant/execution/risk.py#L59):
-- **Base State (No Profit):** Trades execute at minimum fractional risk ($0.5\%$ of equity).
-- **Cushion Tier 1 (Profit $> 1.5R$):** The trader is now trading with "house money." Risk per trade scales to $0.75\%$, funding larger breakout targets.
-- **Cushion Tier 2 (Profit $> 3.0R$):** Risk scales to normal $1.0\%$, enabling pyramiding (additive entries) on confirmed AggressionScorer $> 3.0$ prints.
+- **Base State (No Profit):** Trades execute at conservative fractional risk ($0.25\%$ of equity).
+- **Cushion Tier 1 (Profit $> 1.5R$):** The trader is now trading with "house money." Risk per trade scales up but is capped at the **$0.50\%$ absolute ceiling** (`risk = min(risk, 0.0050)` in `risk.py`), funding larger breakout targets.
+- **Cushion Tier 2 (Profit $> 3.0R$):** Risk still held under the same $0.50\%$ absolute ceiling (momentum-day base is $0.40\%$), enabling pyramiding (additive entries) on confirmed AggressionScorer $> 3.0$ prints.
 - **Drawdown Retracement:** If session profits retrace by $50\%$ of the daily peak, the engine immediately reverts to Tier 0 defensive sizing or executes a session halt.
 
 ---
@@ -660,7 +660,7 @@ sequenceDiagram
         AMT-->>E: AMTResult (VPOC, VAH, VAL, VWAP, Delta)
         
         E->>D_SVC: evaluate(DecisionContext)
-        Note over D_SVC: Gate 1: Session Phase & Spread<br/>Gate 2: Position & Cooldown<br/>Gate 3: Triple-A Edge / LVN / Fade<br/>Gate 4: Risk:Reward >= 1.5
+        Note over D_SVC: Gate 1: Session Phase & Spread<br/>Gate 2: Position & Cooldown<br/>Gate 3: Triple-A Edge / LVN / Fade<br/>Gate 4: Stop-cap (R:R >= 1.5 in SignalBuilder)
         
         alt All 4 Gates Pass
             D_SVC-->>E: QuantDecision(Approved=True, Signal)

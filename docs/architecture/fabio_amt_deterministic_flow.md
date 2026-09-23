@@ -100,7 +100,7 @@ DecisionService.evaluate(ctx)
       │     ├── Gate 1: gate_session_phase     — session clock valid?
       │     ├── Gate 2: gate_position_cooldown  — no open position, cooldown elapsed?
       │     ├── Gate 3: gate_triple_a_edge      — absorption → accumulation → aggression?
-      │     └── Gate 4: gate_risk_reward        — R:R >= 1.5?
+      │     └── Gate 4: gate_risk_reward        — stop-cap gate? (R:R >= 1.5 in SignalBuilder)
       │
       ├── All gates pass → SignalBuilder.build_or_reason(ctx)
       │     → Triple-A or LVN_Sniper signal → APPROVED

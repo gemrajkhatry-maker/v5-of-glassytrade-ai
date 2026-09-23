@@ -41,7 +41,7 @@ DecisionContext
 
 ## Gate 1: Session Phase
 
-**File**: `quant/decision/gates/gate_session_phase.py` → `gate_session_phase(ctx)`
+**File**: `quant/decision/gate_session_phase.py` → `gate_session_phase(ctx)`
 
 **Purpose**: Ensure the market is open, warmed up, in a tradeable session phase, and spread is acceptable.
 
@@ -66,7 +66,7 @@ DecisionContext
 
 ## Gate 2: Position / Cooldown
 
-**File**: `quant/decision/gates/gate_position_cooldown.py` → `gate_position_cooldown(ctx, allow_positioned)`
+**File**: `quant/decision/gate_position_cooldown.py` → `gate_position_cooldown(ctx, allow_positioned)`
 
 **Purpose**: Prevent duplicate entries and enforce post-trade cooldown.
 
