@@ -316,6 +316,7 @@ class QuantEngine:
         seed_scheduler=None,
         max_lots: int | None = None,
         trades_executed=None,
+        telemetry=None,
     ) -> None:
         self._gateway = gateway
         # Independent mode is the production default. Legacy dual-feed
@@ -343,6 +344,7 @@ class QuantEngine:
         self._contract = contract
         self._portfolio_risk = portfolio_risk  # shared PortfolioRiskAuthority | None
         self._execution_enabled = execution_enabled  # ponytail: False for underlying observer feeds in options mode
+        self.telemetry = telemetry
         self.symbol = symbol
         self._tick_size = tick_size
         self._max_lots = max_lots
@@ -935,6 +937,7 @@ class QuantEngine:
             emit=self._emit,
             forecast_fn=self._fresh_forecast,
             advisor=getattr(self, "_advisor", None),
+            telemetry=getattr(self, "telemetry", None),
         )
 
     def _create_exit_manager(self) -> ExitManager:

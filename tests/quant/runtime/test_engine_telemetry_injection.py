@@ -1,7 +1,8 @@
-"""The engine no longer carries a telemetry sink on the decision loop.
+"""The decision loop has no private ``_telemetry`` attribute.
 
-The telemetry injection path was removed from the DecisionLoop — the loop
-has no ``_telemetry`` attribute. These tests verify the absence.
+The B3 sink is injected as a public ``telemetry`` attribute (from
+``quant.contracts.ports.telemetry`` / the coordinator's host adapter).
+These tests pin the absence of ``_telemetry``.
 """
 
 from __future__ import annotations

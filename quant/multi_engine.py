@@ -2029,6 +2029,7 @@ class QuantCoordinator:
                 else (2 if self._session_profile_for(symbol) == "MCX" else 10)
             ),
             trades_executed=self.config.get("trades_executed"),
+            telemetry=self.telemetry,
         )
         # Stamp scan Greek so option translation keys off the contract.
         d = self._option_deltas.get(symbol)

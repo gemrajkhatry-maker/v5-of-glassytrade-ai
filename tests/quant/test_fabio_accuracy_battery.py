@@ -219,12 +219,6 @@ def test_fabio_accuracy_battery():
         f"label={label_from_setup_key('SQUEEZE')!r}",
     )
 
-    print()
-    print(
-        f"=== {sum(1 for _, ok, _ in results if ok)} passed, "
-        f"{sum(1 for _, ok, _ in results if not ok)} failed ==="
-    )
-
     assert results, "battery produced no checks"
     failures = [(n, d) for n, ok, d in results if not ok]
     assert not failures, f"accuracy failures: {failures}"

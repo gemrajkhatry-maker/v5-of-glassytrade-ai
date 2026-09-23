@@ -1,8 +1,8 @@
 """The coordinator manages engine lifecycle and symbol rotation.
 
-The QuantCoordinator does not currently carry a telemetry sink —
-telemetry is handled at the engine level (see
-tests/quant/runtime/test_engine_telemetry_injection.py).
+The QuantCoordinator carries a public ``telemetry`` sink (B3 host wiring);
+tests pin the absence of a private ``_telemetry`` attribute. The sink is
+forwarded into each spawned engine at construction.
 """
 
 from __future__ import annotations
@@ -23,9 +23,10 @@ def _coordinator(tmp_path, **kwargs) -> QuantCoordinator:
 
 
 def test_coordinator_constructs_without_telemetry(tmp_path):
-    """QuantCoordinator has no telemetry parameter — engine-level only."""
+    """Coordinator has no private ``_telemetry`` attribute (public sink only)."""
     coord = _coordinator(tmp_path)
     assert not hasattr(coord, "_telemetry")
+    assert hasattr(coord, "telemetry")
 
 
 def test_coordinator_constructs_with_config(tmp_path):

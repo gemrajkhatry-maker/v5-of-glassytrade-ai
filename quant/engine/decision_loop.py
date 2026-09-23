@@ -96,6 +96,9 @@ class DecisionLoop:
         forecast_fn: Callable[[], Any] | None = None,
         # Optional: advisor for context notifications
         advisor: Any | None = None,
+        # Optional: host-installed ITelemetry sink (public name; tests pin
+        # absence of ``_telemetry`` on this class)
+        telemetry: Any | None = None,
     ) -> None:
         # --- Static configuration ---
         self._symbol: str = config["symbol"]
@@ -147,6 +150,11 @@ class DecisionLoop:
         # --- Optional ---
         self._forecast_fn = forecast_fn
         self._advisor = advisor
+        if telemetry is None:
+            from quant.contracts.ports.telemetry import NULL_TELEMETRY
+
+            telemetry = NULL_TELEMETRY
+        self.telemetry = telemetry
 
         # --- Internal tracking ---
         # Debounce: tracks the bar index of the last rejection so repeated
@@ -241,6 +249,7 @@ class DecisionLoop:
         self._emit(DecisionProduced(
             symbol=self._symbol, time=bar.time, decision=decision,
         ))
+        self.telemetry.record_tick()
 
         # Notify advisor of the decision context
         self._notify_advisor_decision(ctx, amt_dto, execution_bar, cooldown_remaining_sec, risk_st)
@@ -262,6 +271,9 @@ class DecisionLoop:
                     symbol=self._symbol, time=bar.time, decision=demoted,
                 ))
                 return demoted
+            self.telemetry.record_signal(
+                getattr(decision.signal, "type", None) or "UNKNOWN",
+            )
         else:
             # Market state changed — all open blocking episodes are stale.
             self._clear_latch()
