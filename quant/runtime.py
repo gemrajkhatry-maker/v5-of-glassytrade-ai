@@ -104,7 +104,7 @@ from quant.execution.execution_model import (
     ExecutionModel,
     validate_execution_model,
 )
-from quant.execution.exits import ExitDecision, ExitEngine
+from quant.execution.exits import ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.ports import IOMS
 from quant.execution.risk import SessionRisk
@@ -184,100 +184,6 @@ def _as_counter(value) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
-
-
-def close_lingering_pyramids(pm, price: float, time_str: str, reason: str) -> int:
-    """Close pyramid add-ons whose base position is already gone.
-
-    Routes every add-on through ``PositionManager._execute_full_close`` — the
-    ONLY full-close release path — so the exit-source stamp, the
-    ``[POSITION CLOSED]`` log, the double-close guard and the portfolio-risk
-    release all happen exactly as they do for the base position. A previous
-    direct OMS close loop here skipped all four.
-
-    Add-ons are closed with ``count_as_trade=False``: a pyramid-only flatten
-    is bookkeeping on an already-realized round-trip, so it must not consume
-    the session's trade budget (``trades_today``) nor move the win/loss
-    streaks the consecutive-loss halt is built on — the same intent the old
-    direct-OMS loop encoded. Each add-on is closed inside its own try/except
-    so one failure cannot orphan the rest, and risk is released only for
-    add-ons that actually produced a fill (the double-close guard returns
-    ``None`` and must not be read as a close).
-
-    Returns the number of add-ons actually closed.
-    """
-
-    # Detach the add-ons before closing them: _execute_full_close sweeps
-    # ``pm.pyramid_positions`` as part of its own pyramid handling, so leaving
-    # the list attached would close each add-on twice (once as the primary
-    # close, once in that sweep). The sweep does not register add-on ids in
-    # ``_closed_ids``, so the second close would slip past the double-close
-    # guard and double-count P&L/risk. Detaching keeps exactly one close per
-    # add-on, all through the single release path.
-    #
-    # Detached order is kept so a failed add-on can be restored to the book
-    # (see the except branch) — dropping it would silently lose an open
-    # position the broker still holds. ``pyramid_count`` is intentionally not
-    # zeroed here: the authoritative value is re-derived from the surviving
-    # book at the end of the loop, and _execute_full_close already zeroes it
-    # per successful close.
-    lingering = list(pm.pyramid_positions)
-    pm.pyramid_positions = []
-    closed = 0
-    failed: list[object] = []
-    for pyr_pos in lingering:
-        # Same id accessor the release path uses (position_manager.py:260) so
-        # the two agree on what "id-less" means; an id-less add-on would raise
-        # ValueError out of _execute_full_close, which must not escape
-        # force_close_position. Skip it loudly instead.
-        pos_id = getattr(pyr_pos, "_id", None) or getattr(pyr_pos, "id", None)
-        if pos_id is None:
-            logger.error(
-                "❌ [EOD PYRAMID CLOSE] %s: add-on without an id cannot be closed "
-                "through the release path — skipped (type=%s)",
-                pm.symbol, type(pyr_pos).__name__,
-            )
-            failed.append(pyr_pos)
-            continue
-        try:
-            fill = pm._execute_full_close(
-                pyr_pos, ExitDecision(True, reason, float(price)), time_str,
-                count_as_trade=False,
-            )
-        except Exception:
-            # One bad add-on must not orphan the rest: log and continue.
-            logger.error(
-                "❌ [EOD PYRAMID CLOSE] %s: add-on %s failed to close — continuing",
-                pm.symbol, str(pos_id)[:8], exc_info=True,
-            )
-            failed.append(pyr_pos)
-            continue
-        if fill is None:
-            # Double-close guard refused this add-on: nothing executed at the
-            # broker, so we cannot prove it is flat. Treat it as a FAILED close
-            # (D-15): keep it in the book so the next EOD/force-close pass
-            # retries it instead of silently orphaning a possibly-live position.
-            logger.error(
-                "❌ [EOD PYRAMID CLOSE] %s: add-on %s refused by the close guard "
-                "— it may still be open at the broker; retrying next pass",
-                pm.symbol, str(pos_id)[:8],
-            )
-            failed.append(pyr_pos)
-            continue
-        closed += 1
-        # Because we detached the add-on, _execute_full_close's own E11 sweep
-        # did not see it — release its reserved aggregate risk here so the
-        # portfolio ceiling is not leaked, exactly as the base close does.
-        risk_i = pm._pyramid_open_risk.pop(pos_id, 0.0)
-        portfolio_risk = getattr(pm, "_portfolio_risk", None)
-        if portfolio_risk is not None:
-            portfolio_risk.record_close(risk_i, float(fill.pnl))
-    # Leave the bookkeeping consistent: only add-ons that genuinely closed are
-    # gone. A failed one stays in the book so the next force-close/EOD pass
-    # retries it rather than silently dropping a live position.
-    pm.pyramid_positions = failed
-    pm.pyramid_count = len(failed)
-    return closed
 
 
 def _resolve_range_bars_flag(explicit: bool | None) -> bool:

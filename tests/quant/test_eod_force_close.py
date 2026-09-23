@@ -66,8 +66,8 @@ def test_pyramid_only_close_stamps_exit_source():
     pm.pyramid_positions = [_pyramid()]
     pm.current_position = None
 
-    # The runtime helper under test (extracted so it is callable in isolation).
-    from quant.runtime import close_lingering_pyramids
+    # The exit_manager helper under test (extracted so it is callable in isolation).
+    from quant.engine.exit_manager import close_lingering_pyramids
 
     bar = Bar("2026-09-10T15:20:00", 100.0, 101.0, 99.0, 100.0, 10, 10)
     closed = close_lingering_pyramids(pm, 100.0, bar.time, "EOD_SQUARE_OFF")
@@ -98,7 +98,7 @@ def test_pyramid_only_close_does_not_count_as_trade():
     ]
     pm.current_position = None
 
-    from quant.runtime import close_lingering_pyramids
+    from quant.engine.exit_manager import close_lingering_pyramids
 
     closed = close_lingering_pyramids(pm, 98.0, "2026-09-10T15:20:00", "EOD_SQUARE_OFF")
 
@@ -122,7 +122,7 @@ def test_pyramid_only_close_releases_risk_per_add_on():
     pm._pyramid_open_risk = {"pyr-1": 0.6, "pyr-2": 1.0}
     pm.current_position = None
 
-    from quant.runtime import close_lingering_pyramids
+    from quant.engine.exit_manager import close_lingering_pyramids
 
     closed = close_lingering_pyramids(pm, 103.0, "t3", "EOD_SQUARE_OFF")
 
@@ -144,7 +144,7 @@ def test_pyramid_only_close_survives_double_close_guard():
     pm._closed_ids.add("already-closed")
     pm.current_position = None
 
-    from quant.runtime import close_lingering_pyramids
+    from quant.engine.exit_manager import close_lingering_pyramids
 
     closed = close_lingering_pyramids(pm, 98.0, "t4", "EOD_SQUARE_OFF")
 
@@ -167,7 +167,7 @@ def test_guarded_skip_keeps_addon_in_book_for_retry():
     pm._closed_ids.add("dup-1")
     pm.current_position = None
 
-    from quant.runtime import close_lingering_pyramids
+    from quant.engine.exit_manager import close_lingering_pyramids
 
     closed = close_lingering_pyramids(pm, 98.0, "t", "EOD_SQUARE_OFF")
 
@@ -196,7 +196,7 @@ def test_pyramid_only_close_one_failure_does_not_orphan_the_rest():
 
     pm._execute_full_close = flaky
 
-    from quant.runtime import close_lingering_pyramids
+    from quant.engine.exit_manager import close_lingering_pyramids
 
     closed = close_lingering_pyramids(pm, 100.0, "t5", "EOD_SQUARE_OFF")
 
