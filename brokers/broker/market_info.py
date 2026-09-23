@@ -10,10 +10,14 @@ Provides:
 String-based API — no Instrument objects required.
 """
 
-from datetime import datetime, time
+from datetime import datetime
 from typing import Any, Dict, Optional
 
+from quant.amt.session.symbol_registry import (
+    is_market_open as registry_is_market_open,
+)
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+from quant.contracts.timezones import NSE_SESSION_CLOSE, NSE_SESSION_OPEN
 
 try:
     import pytz
@@ -94,13 +98,14 @@ ASSET_NAME_MAP: Dict[str, str] = {
 
 
 # =============================================================================
-# MARKET TIMING (IST)
+# MARKET TIMING (IST) — derived from the SessionClock authority
+# (quant/contracts/timezones.py); NSE equity + options hours.
 # =============================================================================
 
-MARKET_OPEN_HOUR: int = 9
-MARKET_OPEN_MINUTE: int = 15
-MARKET_CLOSE_HOUR: int = 15
-MARKET_CLOSE_MINUTE: int = 30
+MARKET_OPEN_HOUR: int = NSE_SESSION_OPEN.hour
+MARKET_OPEN_MINUTE: int = NSE_SESSION_OPEN.minute
+MARKET_CLOSE_HOUR: int = NSE_SESSION_CLOSE.hour
+MARKET_CLOSE_MINUTE: int = NSE_SESSION_CLOSE.minute
 EXPIRY_DAY_CUTOFF_HOUR: int = 12
 
 
@@ -209,20 +214,23 @@ def get_time_to_expiry(symbol: str = "NIFTY") -> Optional[float]:
     return delta.total_seconds() / 3600
 
 
-def is_market_open() -> bool:
+def is_market_open(exchange: str = "NSE", ts: str | None = None) -> bool:
     """
-    Check if market is currently open (9:15 AM - 3:30 PM IST, Mon-Fri).
+    Check if the exchange is currently open (IST, Mon-Fri).
+
+    Delegates to ``quant.amt.session.symbol_registry.is_market_open`` — the
+    SessionClock registry hours (NSE 09:15–15:30, MCX 09:00–23:30 from
+    quant/contracts/timezones.py) — so MCX is handled correctly instead of
+    the old NSE-only private clock.
+
+    Args:
+        exchange: "NSE" (default) or "MCX" (aliases resolved by the registry).
+        ts: optional ISO-8601 timestamp; defaults to now.
 
     Returns:
-        True if within market hours
+        True if within live trading hours (fail-closed on parse errors).
     """
-    now = datetime.now(IST)
-    if now.weekday() >= 5:
-        return False
-
-    market_open = time(MARKET_OPEN_HOUR, MARKET_OPEN_MINUTE)
-    market_close = time(MARKET_CLOSE_HOUR, MARKET_CLOSE_MINUTE)
-    return market_open <= now.time() <= market_close
+    return registry_is_market_open(ts=ts, exchange=exchange)
 
 
 def is_expiry_cutoff(symbol: str = "NIFTY") -> bool:

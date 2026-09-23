@@ -15,8 +15,17 @@ MCX sessions:
   Pre-open (09:00–09:15 IST): DO NOT TRADE
   Morning  (09:15–14:00 IST): ALL MODELS ACTIVE
   Afternoon (14:00–18:00 IST): ALL MODELS ACTIVE
-  Evening  (18:00–23:00 IST): Reduced liquidity — be selective
+  Evening  (18:00–23:00 IST): US/COMEX overlap — ALL MODELS ACTIVE
   Close    (23:00–23:30 IST): EXIT ONLY
+
+SessionClock owner rule (Wave 4 / D19): THIS phase table (built from
+``quant/contracts/timezones.py`` constants) is the single entry-window
+authority — session_allow_entry, Gate 1 and session_force_exit all read it.
+  - force-exit / close protection starts 23:00 IST (MCX_EVENING_END);
+  - the market itself stays open until 23:30 IST (MCX_SESSION_CLOSE, owned
+    by ``symbol_registry.is_market_open``) so square-off can complete;
+  - there is no independent Gate-1 clock (the old 09:15–23:15 gate window
+    and the old MCX_SUB_SESSIONS 09:00/13:00/19:30 table are gone).
 """
 
 from __future__ import annotations
@@ -577,14 +586,11 @@ def opening_inventory_bias(
 # Session-Aware IB & VWAP Anchors (NSE vs MCX)
 # ---------------------------------------------------------------------------
 
-# MCX sub-sessions for late-day trading
-MCX_SUB_SESSIONS = {
-    "MORNING": (9, 0, 13, 0),      # 09:00 - 13:00 IST
-    "AFTERNOON": (13, 0, 19, 30),   # 13:00 - 19:30 IST  
-    "US_SESSION": (19, 30, 23, 30), # 19:30 - 23:30 IST (US-driven)
-}
-
-MCX_US_OPEN_IST = (19, 30)  # 7:30 PM IST = US market influence
+# US-session VWAP re-anchor — an anchor reset time for energy commodities,
+# NOT a session boundary. Session boundaries live only in the phase table
+# above (_get_mcx_phase); the contradictory MCX_SUB_SESSIONS table
+# (09:00/13:00/19:30 edges, D19) was deleted in favour of that table.
+MCX_US_OPEN_IST = (19, 30)  # 19:30 IST = US market influence
 
 
 def get_ib_window(exchange: str, current_time: datetime | None = None) -> tuple[int, int, int, int]:
@@ -654,29 +660,17 @@ def get_vwap_anchors(exchange: str, current_time: datetime | None = None,
 
 
 def get_sub_session(exchange: str, current_time: datetime | None = None) -> str:
-    """Get the current sub-session name for MCX.
-    
-    Returns: "MORNING", "AFTERNOON", "US_SESSION", or "NSE" for NSE.
+    """Current sub-session name, derived from the phase table (authority).
+
+    Returns "NSE" for the NSE exchange; for MCX returns the phase-table
+    session name (MCX_PRE_MARKET / MCX_PRE_OPEN / MCX_MORNING /
+    MCX_AFTERNOON / MCX_EVENING / MCX_CLOSE / MCX_POST_MARKET). The old
+    MCX_SUB_SESSIONS "MORNING"/"AFTERNOON"/"US_SESSION" table contradicted
+    the phase table and was deleted (D19) — derive names from here instead.
     """
     if exchange.upper() == "NSE":
         return "NSE"
-    
-    if current_time is None:
-        current_time = datetime.now(IST)
-    else:
-        current_time = _to_ist(current_time)
-    
-    hour = current_time.hour
-    minute = current_time.minute
-    t = hour * 60 + minute
-    
-    for name, (sh, sm, eh, em) in MCX_SUB_SESSIONS.items():
-        start = sh * 60 + sm
-        end = eh * 60 + em
-        if start <= t < end:
-            return name
-    
-    return "UNKNOWN"
+    return get_session_info(current_time, market="MCX").session
 
 
 def is_late_session(exchange: str, current_time: datetime | None = None) -> bool:

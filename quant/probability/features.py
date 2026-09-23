@@ -12,6 +12,7 @@ from quant.contracts.enums import MarketState
 from typing import TYPE_CHECKING
 
 from quant.contracts.enums import MarketStateCodec, ProfileShapeCodec
+from quant.contracts.timezones import MCX_SESSION_OPEN, NSE_SESSION_OPEN
 
 if TYPE_CHECKING:
     from quant.contracts.value_objects import OHLC, AMTResult, OrderBook
@@ -381,18 +382,25 @@ def _parse_time(time_str: str):
 
 
 def _minutes_since_open(time_str: str, is_mcx: bool = False) -> float:
-    """Minutes since market open. NSE=09:15, MCX=09:00 IST."""
+    """Minutes since market open. Open times from quant/contracts/timezones.py
+    (NSE 09:15, MCX 09:00 IST) — the SessionClock authority."""
     parsed = _parse_time(time_str)
     if not parsed:
         return 0.0
     hour, minute, _ = parsed
-    if is_mcx:
-        return max(0.0, (hour - 9) * 60 + minute)
-    return max(0.0, (hour - 9) * 60 + (minute - 15))
+    open_t = MCX_SESSION_OPEN if is_mcx else NSE_SESSION_OPEN
+    open_minutes = open_t.hour * 60 + open_t.minute
+    return max(0.0, (hour * 60 + minute) - open_minutes)
 
 
 def _session_flag(time_str: str, is_mcx: bool = False) -> float:
-    """NSE/MCX session flags based on market structure."""
+    """NSE/MCX session flags based on market structure.
+
+    NOTE: these bucket edges (10:00/12:00/14:00 NSE, 14:00/17:00 MCX) are
+    model-feature bands for the trained probability schema — they are NOT
+    exchange session boundaries. Exchange open/close/phase times live in
+    quant/contracts/timezones.py + the phase table (quant/amt/session/context.py).
+    """
     parsed = _parse_time(time_str)
     if not parsed:
         return 0.0
