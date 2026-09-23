@@ -383,15 +383,15 @@ class QuantEngine:
             if (self._underlying_gateway is not None and interval_seconds > MICRO_SEC)
             else None
         )
-        # ponytail: 15-min bias layer (Fabio's top-down: 15m direction → 5m location → 1m execution)
+        # ponytail: 15-min bias layer coexists with the micro split on 5m macro (15m → 5m → 1m top-down)
         self._bias_aggregator = (
             BarAggregator(interval_seconds=BIAS_INTERVAL_SEC)
-            if interval_seconds > BIAS_INTERVAL_SEC
+            if interval_seconds > MICRO_SEC
             else None
         )
         self._bias_underlying_aggregator = (
             BarAggregator(interval_seconds=BIAS_INTERVAL_SEC)
-            if (self._underlying_gateway is not None and interval_seconds > BIAS_INTERVAL_SEC)
+            if (self._underlying_gateway is not None and interval_seconds > MICRO_SEC)
             else None
         )
         self._history_source = history_source
