@@ -98,6 +98,7 @@ async def health_check(
 
     # Greenfield QuantCoordinator check (additive — does not gate overall health)
     feed_degraded = False
+    integrity_flags: list[str] = []
     if coordinator is not None:
         try:
             started = bool(getattr(coordinator, "started", False))
@@ -114,12 +115,20 @@ async def health_check(
                     stale = coordinator.stale_engines()
                 except Exception:
                     logger.exception("Health check: stale_engines failed")
+            if hasattr(coordinator, "integrity_flags"):
+                try:
+                    integrity_flags = list(coordinator.integrity_flags() or [])
+                except Exception:
+                    logger.exception("Health check: integrity_flags failed")
             checks["coordinator"] = {
                 "started": started,
                 "symbols": symbols,
                 "crashedEngines": crashed,
                 "staleEngines": stale,
-                "status": "degraded" if (crashed or stale) else ("ok" if started else "not_started"),
+                "integrityFlags": integrity_flags,
+                "status": "degraded"
+                if (crashed or stale or integrity_flags)
+                else ("ok" if started else "not_started"),
             }
         except Exception as e:
             logger.warning("Health check: coordinator check failed: %s", e)
@@ -150,15 +159,20 @@ async def health_check(
                     "silentSymbols": silent,
                     "dropCounts": drops,
                     "pollFallback": poll_fb,
+                    "pollFallbackAgeSec": poll_age,
                     "producerAlive": producer_alive,
                 }
             except Exception as e:
+                # Snapshot call failed — do NOT claim producerAlive=false (that
+                # misdirects the responder); surface the error and degrade.
                 logger.warning("Health check: feed_health failed: %s", e)
                 checks["feed"] = {
                     "silentSymbols": [],
                     "dropCounts": {},
                     "pollFallback": False,
-                    "producerAlive": False,
+                    "pollFallbackAgeSec": None,
+                    "producerAlive": None,
+                    "error": str(e),
                 }
                 feed_degraded = True
 
@@ -178,7 +192,7 @@ async def health_check(
         if (
             isinstance(coord_check, dict)
             and (coord_check.get("crashedEngines") or coord_check.get("staleEngines"))
-        ) or feed_degraded:
+        ) or feed_degraded or integrity_flags:
             overall = "degraded"
         else:
             overall = "ok"

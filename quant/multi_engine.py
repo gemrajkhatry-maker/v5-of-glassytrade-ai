@@ -1174,6 +1174,34 @@ class QuantCoordinator:
         """
         return self._feed.health_snapshot()
 
+    def integrity_flags(self) -> list[str]:
+        """Runtime integrity flags for /health (B-4/B-5 surface).
+
+        Aggregates per-engine ``AMTEngine.status_flags`` (e.g. ``AMT_FAILING``
+        while the last analyze failure is <60s old) and the process-wide
+        ``PersistenceHealth.bridge_write_degraded`` latch. Day-1 paging must
+        not depend on log-grep alone.
+        """
+        flags: set[str] = set()
+        with self._lock:
+            engines = list(self._engines.values())
+        for eng in engines:
+            amt = getattr(eng, "_amt_engine", None)
+            if amt is None:
+                continue
+            try:
+                flags.update(amt.status_flags)
+            except Exception:
+                logger.exception("integrity_flags: status_flags failed for %s", eng.symbol)
+        try:
+            from quant.persistence_boundary import PersistenceHealth
+
+            if PersistenceHealth.bridge_write_degraded:
+                flags.add("BRIDGE_WRITE_DEGRADED")
+        except Exception:
+            logger.exception("integrity_flags: PersistenceHealth read failed")
+        return sorted(flags)
+
     def emergency_halt(self, reason: str = "emergency halt", *, force_close: bool = False) -> int:
         """Externally halt every engine's SessionRisk (SIGTERM flatten path).
 

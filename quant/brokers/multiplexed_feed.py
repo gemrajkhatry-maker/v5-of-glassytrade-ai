@@ -112,6 +112,10 @@ class MultiplexedMarketFeed:
         # with no packets for a long stretch is broker/exchange silence —
         # distinct from convert/no_queue drops (those leave a _drop_counts key).
         self._last_route_mono: dict[str, float] = {}
+        # Subscribe time per symbol (monotonic) — never-routed symbols only
+        # count as silent after threshold from SUBSCRIBE, not immediately
+        # (avoids a brief /health degraded flap at open before first packet).
+        self._subscribe_mono: dict[str, float] = {}
         self._silent_log_ts: dict[str, float] = {}
 
     # ------------------------------------------------------------------
@@ -194,17 +198,23 @@ class MultiplexedMarketFeed:
 
         Resyncs only when the set actually changed (idempotent re-registration
         does not restart the live stream)."""
+        now = time.monotonic()
         with self._lock:
             before = set(self._queues.keys())
             for sym in symbols:
-                self._queues.setdefault(sym, queue.Queue(maxsize=_QUEUE_MAXSIZE))
+                if sym not in self._queues:
+                    self._queues[sym] = queue.Queue(maxsize=_QUEUE_MAXSIZE)
+                    self._subscribe_mono[sym] = now
             changed = set(symbols) != before
         self._kick(changed=changed)
 
     def subscribe(self, symbol: str) -> None:
         """Register one symbol (idempotent). Resyncs only if it is new."""
+        now = time.monotonic()
         with self._lock:
             fresh = symbol not in self._queues
+            if fresh:
+                self._subscribe_mono[symbol] = now
             self._queues.setdefault(symbol, queue.Queue(maxsize=_QUEUE_MAXSIZE))
         self._kick(changed=fresh)
 
@@ -216,6 +226,8 @@ class MultiplexedMarketFeed:
             self._prev_price.pop(symbol, None)
             self._prev_ts.pop(symbol, None)
             self._depth_cache.pop(symbol, None)
+            self._subscribe_mono.pop(symbol, None)
+            self._last_route_mono.pop(symbol, None)
         if q is not None:
             q.put(None)
         self._resync.set()
@@ -266,6 +278,7 @@ class MultiplexedMarketFeed:
             self._drop_log_ts.clear()
             self._drop_counts.clear()
             self._last_route_mono.clear()
+            self._subscribe_mono.clear()
             self._silent_log_ts.clear()
             queues = tuple(self._queues.values())
             readers = tuple(
@@ -512,15 +525,26 @@ class MultiplexedMarketFeed:
         Complements ``_drop_counts``: drops mean packets arrived and failed
         conversion/routing; silence means the broker/exchange never delivered
         a packet for that sid (the FINNIFTY SEP FUT failure mode).
+
+        Never-routed symbols only count as silent after ``threshold_sec``
+        from their SUBSCRIBE time — a brand-new subscription before the first
+        packet must not flap /health to degraded at open.
         """
         now = time.monotonic()
         silent: list[str] = []
         with self._lock:
             symbols = list(self._queues.keys())
-        for sym in symbols:
-            last = self._last_route_mono.get(sym)
-            if last is None or (now - last) > threshold_sec:
-                silent.append(sym)
+            for sym in symbols:
+                last = self._last_route_mono.get(sym)
+                if last is not None:
+                    if (now - last) > threshold_sec:
+                        silent.append(sym)
+                    continue
+                # Never routed: grace from subscribe time (or from now if
+                # subscribe time unknown — treat as just-subscribed).
+                sub = self._subscribe_mono.get(sym, now)
+                if (now - sub) > threshold_sec:
+                    silent.append(sym)
         return sorted(silent)
 
     def health_snapshot(self) -> dict:
@@ -538,33 +562,43 @@ class MultiplexedMarketFeed:
         if not isinstance(poll_since, (int, float)):
             poll_since = None
         poll_age = (time.monotonic() - float(poll_since)) if poll_since is not None else None
+        # Copy drop counts under the feed lock — the producer thread mutates
+        # the dict concurrently and an unlocked copy can raise (spurious
+        # transient degraded via the health exception path).
+        with self._lock:
+            drops = dict(self._drop_counts)
         return {
             "silentSymbols": self.silent_symbols(),
-            "dropCounts": dict(self._drop_counts),
+            "dropCounts": drops,
             "pollFallback": poll_since is not None,
             "pollFallbackAgeSec": poll_age,
             "producerAlive": producer_alive,
         }
 
     def _check_silent(self) -> None:
-        """Rate-lwarn (≥30s/symbol) when a subscribed queue is getting no packets."""
+        """Rate-limit (≥30s/symbol) when a subscribed queue is getting no packets."""
         now = time.monotonic()
         with self._lock:
             symbols = list(self._queues.keys())
-        for sym in symbols:
-            last = self._last_route_mono.get(sym)
-            if last is None or (now - last) <= 60.0:
-                continue
-            last_log = self._silent_log_ts.get(sym, 0.0)
-            if now - last_log < 30.0:
-                continue
-            self._silent_log_ts[sym] = now
-            age = 0.0 if last is None else now - last
-            logger.warning(
-                "MultiplexedMarketFeed silent symbol=%s no_packet_for=%.0fs "
-                "(subscribed, zero routes — broker/exchange not delivering)",
-                sym, age,
-            )
+            for sym in symbols:
+                last = self._last_route_mono.get(sym)
+                if last is not None and (now - last) <= 60.0:
+                    continue
+                if last is None:
+                    # Never routed: same subscribe grace as silent_symbols().
+                    sub = self._subscribe_mono.get(sym, now)
+                    if (now - sub) <= 60.0:
+                        continue
+                last_log = self._silent_log_ts.get(sym, 0.0)
+                if now - last_log < 30.0:
+                    continue
+                self._silent_log_ts[sym] = now
+                age = 0.0 if last is None else now - last
+                logger.warning(
+                    "MultiplexedMarketFeed silent symbol=%s no_packet_for=%.0fs "
+                    "(subscribed, zero routes — broker/exchange not delivering)",
+                    sym, age,
+                )
 
     def _normalize_dhan_packet(self, pkt: dict, symbol: str) -> dict:
         """Translate Dhan-specific WebSocket packet fields to canonical names.

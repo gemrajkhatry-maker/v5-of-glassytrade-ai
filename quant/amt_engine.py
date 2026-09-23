@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 # tests and for any future composition-time reader; maps to the plan's
 # ``amt_failures_total``.
 AMT_FAILURES_TOTAL = 0
+# Increment lock: per-symbol engine threads race the bare += on the module
+# global (observability-only, but a lost increment under-counts day-1 paging).
+_AMT_FAIL_LOCK = threading.Lock()
 
 # AMT_FAILING snapshot flag: set while the last analyze failure is younger
 # than this (plan: snapshot field AMT_FAILING when last failure <60s).
@@ -630,12 +633,14 @@ class AMTEngine:
             )
         except Exception:
             global AMT_FAILURES_TOTAL
-            AMT_FAILURES_TOTAL += 1
+            with _AMT_FAIL_LOCK:
+                AMT_FAILURES_TOTAL += 1
+                _total = AMT_FAILURES_TOTAL
             self._amt_last_failure_at = time.monotonic()
             logger.error(
                 "AMT analyze failed for %s — keeping last good DTO "
                 "(amt_failures_total=%d)",
-                self.symbol, AMT_FAILURES_TOTAL, exc_info=True,
+                self.symbol, _total, exc_info=True,
             )
             return self._last_amt_dto or {}
         snap = analysis_snapshot_from_result(result, asof_time=iso_now)

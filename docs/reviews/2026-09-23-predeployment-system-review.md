@@ -255,17 +255,17 @@ Host clock vs IST · Dhan cadence vs 60/300s thresholds · 429 backoff · queue 
 
 ### Blockers to clear for GO
 
-| ID | Blocker | Gate |
-|----|---------|------|
-| B-1 | `tests/system` 6 failures (money-path E2E) | must green |
-| B-2 | ledger truthfulness 2 failures (live UNKNOWN contract) | must green |
-| B-3 | feed health not wired to /health (silent_symbols, drops, poll mode) | wire + test |
-| B-4 | AMT once-then-silent + zero-log decision deferral | fix (events/counters) |
-| B-5 | persistence overstated (empty EventStore fold, unread journal replay, unflagged bridge) | fix or honest docs + bridge latch |
-| B-6 | observability largely fiction (dead counters, unwired provider, stale ADR-0003) | fix or remove series |
-| B-7 | 12+ known red tests untriaged | fix or signed risk acceptance |
-| B-8 | live-only: frontend JWT, pyramid asymmetry, Dhan CB export | fix before live |
-| B-9 | dirty tree (uncommitted Fixes A/B/C) | commit + re-run gates |
+| ID | Blocker | Gate | Status (2026-09-23 remediation) |
+|----|---------|------|----------------------------------|
+| B-1 | `tests/system` 6 failures (money-path E2E) | must green | **CLOSED** — 17 green (`7bcba9ef` band-floor + lagging-CVD initiative + Trail fill-at-level) |
+| B-2 | ledger truthfulness 2 failures (live UNKNOWN contract) | must green | **CLOSED** — honest UNKNOWN/FILLED row + always-raise exposure latch (`904dc110`, C-1 fix `0152018b`) |
+| B-3 | feed health not wired to /health (silent_symbols, drops, poll mode) | wire + test | **CLOSED** — `f88a1ea2` checks.feed + queue_full; integrity flags + subscribe grace later |
+| B-4 | AMT once-then-silent + zero-log decision deferral | fix (events/counters) | **CLOSED** — `4cb1ef06` every-failure ERROR+counter; `3163473d` DecisionDeferred; `454a920f` GATE_ERROR; AMT_FAILING on `/health` |
+| B-5 | persistence overstated (empty EventStore fold, unread journal replay, unflagged bridge) | fix or honest docs + bridge latch | **CLOSED** — `a10e816c` StopMoved append-first + honest SQLite rebuild docs; `fc0cc22e` bridge latch (now on `/health` integrityFlags) |
+| B-6 | observability largely fiction (dead counters, unwired provider, stale ADR-0003) | fix or remove series | **CLOSED** — `e3c1ca86` real increments + canary; ADR-0003 amended (`0152018b`) |
+| B-7 | 12+ known red tests untriaged | fix or signed risk acceptance | **CLOSED** for money-path: drive/setup_lvn/VA/fabio/golden cleared or intentional; residual opposing 2 + positive_approval 1 signed as pre-existing |
+| B-8 | live-only: frontend JWT, pyramid asymmetry, Dhan CB export | fix before live | **OPEN — live remains hard NO-GO** |
+| B-9 | dirty tree (uncommitted Fixes A/B/C) | commit + re-run gates | **CLOSED** — baseline `e3c7fd76` + 25 commits, gates re-run |
 
 ### What is solid (credit)
 

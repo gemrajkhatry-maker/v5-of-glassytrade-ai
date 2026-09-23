@@ -128,3 +128,38 @@ async def test_health_without_coordinator_has_no_feed_block(monkeypatch):
         _request(None), broker=object(), storage=_storage(), config=object()
     )
     assert "feed" not in payload["checks"]
+
+
+@pytest.mark.asyncio
+async def test_health_exposes_integrity_flags_and_degrades(monkeypatch):
+    """AMT_FAILING / BRIDGE_WRITE_DEGRADED surface on coordinator and degrade."""
+    monkeypatch.setattr(health_mod, "is_market_open", lambda *a, **k: False)
+
+    class _Flagged(_FeedCoordinator):
+        def integrity_flags(self) -> list[str]:
+            return ["AMT_FAILING", "BRIDGE_WRITE_DEGRADED"]
+
+    payload = await _call_health(_Flagged(), monkeypatch)
+    flags = payload["checks"]["coordinator"]["integrityFlags"]
+    assert flags == ["AMT_FAILING", "BRIDGE_WRITE_DEGRADED"]
+    assert payload["status"] == "degraded"
+
+
+@pytest.mark.asyncio
+async def test_health_feed_exception_does_not_claim_producer_dead(monkeypatch):
+    """feed_health raise must not hardcode producerAlive=false."""
+    monkeypatch.setenv("GLASSYTRADE_ENV", "paper")
+    monkeypatch.delenv("TRADING_MODE", raising=False)
+    monkeypatch.setattr(health_mod, "is_market_open", lambda *a, **k: False)
+
+    class _Boom(_FeedCoordinator):
+        def feed_health(self) -> dict:
+            raise RuntimeError("snapshot race")
+
+    payload = await health_mod.health_check(
+        _request(_Boom()), broker=object(), storage=_storage(), config=object()
+    )
+    feed = payload["checks"]["feed"]
+    assert feed["producerAlive"] is None, "must not claim producer dead on snapshot error"
+    assert "snapshot race" in feed["error"]
+    assert payload["status"] == "degraded"

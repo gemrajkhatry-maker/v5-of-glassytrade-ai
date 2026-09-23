@@ -641,13 +641,15 @@ def test_arrival_source_skips_guard_even_when_older_than_prev_exchange():
 
 def test_silent_symbols_reports_subscribed_queue_with_no_packets():
     """A subscribed symbol that never routes must appear in silent_symbols()."""
+    import time as _t
     md = _FakeMarketData({"A": [_pkt("A", 1, 100.0)], "SILENT": []})
     feed = _make_feed(md)
     feed.set_symbols(["A", "SILENT"])
     try:
         _wait_until(lambda: feed._queues["A"].qsize() >= 1)
-        # SILENT has a queue but no packets were ever routed to it (last is None).
-        # A routed just now — not silent under a normal threshold.
+        # Never-routed symbols only count after subscribe grace (60s) —
+        # push the subscribe stamp past the threshold to simulate a stuck sid.
+        feed._subscribe_mono["SILENT"] = _t.monotonic() - 120.0
         silent = feed.silent_symbols(threshold_sec=60.0)
         assert "SILENT" in silent
         assert "A" not in silent  # A routed at least once
@@ -755,13 +757,16 @@ def test_health_snapshot_reports_silence_drops_and_producer():
     assert snap["pollFallback"] is False
     assert snap["producerAlive"] is False  # not started yet
 
-    # Seed a drop and a subscribed-but-silent queue.
+    # Seed a drop and a subscribed-but-silent queue (past subscribe grace).
     feed._note_drop("late_tick", "X", "ts=1")
     feed.subscribe("SILENT")
+    import time as _t
+    feed._subscribe_mono["SILENT"] = _t.monotonic() - 120.0
     snap = feed.health_snapshot()
     assert snap["dropCounts"].get("late_tick:X") == 1
     assert "SILENT" in snap["silentSymbols"]
     assert snap["pollFallback"] is False
+    assert snap["pollFallbackAgeSec"] is None
 
     # Producer thread reports alive once kicked.
     feed.set_symbols(["SILENT"])
@@ -842,3 +847,28 @@ def test_stale_freshness_uses_arrival_not_old_ltt():
         "freshness must prefer arrived_at over an illiquid exchange LTT"
     )
     assert eng._last_tick_wall > now - 60.0
+
+
+def test_never_routed_not_silent_within_subscribe_grace():
+    """Brand-new subscription before first packet must not flap /health."""
+    feed = MultiplexedMarketFeed(_FakeMarketData({"FRESH FUT": []}))
+    feed.set_symbols(["FRESH FUT"])
+    assert feed.silent_symbols(threshold_sec=60.0) == [], (
+        "never-routed within subscribe grace must not be silent"
+    )
+    # Force past grace: fake subscribe time far in the past.
+    import time as _t
+    feed._subscribe_mono["FRESH FUT"] = _t.monotonic() - 120.0
+    assert "FRESH FUT" in feed.silent_symbols(threshold_sec=60.0)
+
+
+def test_health_snapshot_copies_drop_counts():
+    """dropCounts must be a snapshot copy, not a live reference."""
+    feed = MultiplexedMarketFeed(_FakeMarketData({}))
+    feed.set_symbols(["A"])
+    feed._note_drop("convert_none", "A")
+    snap = feed.health_snapshot()
+    assert snap["dropCounts"].get("convert_none:A", 0) >= 1
+    # Mutating the copy must not touch the feed's dict.
+    snap["dropCounts"]["convert_none:A"] = 999
+    assert feed._drop_counts["convert_none:A"] != 999
