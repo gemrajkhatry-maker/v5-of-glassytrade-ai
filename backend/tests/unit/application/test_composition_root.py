@@ -82,3 +82,45 @@ def test_coordinator_gets_the_host_telemetry_adapter():
     src = inspect.getsource(composition_root._create_quant_coordinator)
     assert "telemetry=PrometheusTelemetry()," in src
     assert "from app.infrastructure.telemetry import PrometheusTelemetry" in src
+
+
+def test_market_data_adapter_gets_symbol_list_not_config(monkeypatch):
+    """DhanMarketDataAdapter(symbols=...) must receive a list of symbol names.
+
+    The composition root used to call DhanMarketDataAdapter(config) so the
+    SystemConfig landed in the symbols slot; scan_candidates then did
+    self._symbols[:limit] and raised 'SystemConfig' object is not
+    subscriptable (GET /api/market/scan → 500).
+    """
+    from app.application.di import composition_root
+    from app.config_models import ExchangeConfig, SymbolConfig, SystemConfig
+
+    captured: dict = {}
+
+    class _FakeAdapter:
+        def __init__(self, symbols=None, exchange=None, client_id=None, access_token=None):
+            captured["symbols"] = symbols
+            captured["exchange"] = exchange
+            captured["client_id"] = client_id
+            captured["access_token"] = access_token
+
+    import app.infrastructure.adapters.dhan_adapter as dhan_mod
+
+    monkeypatch.setattr(dhan_mod, "DhanMarketDataAdapter", _FakeAdapter)
+
+    config = SystemConfig(
+        exchanges={
+            "NSE": ExchangeConfig(
+                name="NSE",
+                enabled=True,
+                symbols={"NIFTY": SymbolConfig(name="NIFTY", enabled=True)},
+            )
+        }
+    )
+
+    adapter = composition_root._create_market_data_adapter(None, config)
+    assert isinstance(adapter, _FakeAdapter)
+    assert captured["symbols"] == ["NIFTY"]
+    assert not isinstance(captured["symbols"], SystemConfig)
+    assert isinstance(captured["symbols"], list)
+    assert captured["exchange"]

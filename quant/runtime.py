@@ -1201,13 +1201,25 @@ class QuantEngine:
             if tick is None:
                 break
             steps += 1
-            # Freshness from exchange epoch carried on the tick, not dequeue wall
-            # clock — a backlog hours old must not report as healthy.
+            # Freshness: prefer local arrival over exchange LTT. An illiquid
+            # contract's last_trade_time can lag by minutes while quote/depth
+            # packets still arrive — using LTT alone falsely marked those
+            # engines stale. Arrival still catches true backlog (a tick that
+            # sat in the queue for hours carries an old arrived_at).
             try:
                 tick_epoch = float(getattr(tick, "time", 0) or 0)
             except (TypeError, ValueError):
                 tick_epoch = 0.0
-            self._last_tick_wall = tick_epoch if tick_epoch > 1e9 else time.time()
+            try:
+                arrived = float(getattr(tick, "arrived_at", 0) or 0)
+            except (TypeError, ValueError):
+                arrived = 0.0
+            if arrived > 1e9:
+                self._last_tick_wall = arrived
+            elif tick_epoch > 1e9:
+                self._last_tick_wall = tick_epoch
+            else:
+                self._last_tick_wall = time.time()
             tick_handler.process_tick(tick)
         return list(self._trace)
 

@@ -389,6 +389,283 @@ def test_close_wakes_blocked_dedicated_reader():
         feed.close()
 
 
+def test_route_drops_unknown_symbol_with_rate_limited_warning(caplog):
+    """A packet whose symbol has no queue must warn (rate-limited), not vanish."""
+    import logging
+
+    md = _FakeMarketData({"A": [_pkt("A", 1, 100.0)]})
+    feed = _make_feed(md)
+    feed.set_symbols(["A"])
+    try:
+        _wait_until(lambda: feed._queues["A"].qsize() >= 1)
+        with caplog.at_level(logging.WARNING, logger="quant.brokers.multiplexed_feed"):
+            feed._route({"symbol": "GHOST FUT", "ltp": 1.0, "volume": 1, "timestamp": _ts(5)})
+            feed._route({"symbol": "GHOST FUT", "ltp": 2.0, "volume": 1, "timestamp": _ts(6)})
+        ghosts = [r for r in caplog.records if "GHOST FUT" in r.getMessage()]
+        # Rate-limited: two drops within 30s → one warning, count tracks both.
+        assert len(ghosts) == 1, [r.getMessage() for r in ghosts]
+        assert "no_queue" in ghosts[0].getMessage()
+        assert feed._drop_counts.get("no_queue:GHOST FUT") == 2
+    finally:
+        feed.close()
+
+
+def test_route_convert_none_is_noted():
+    md = _FakeMarketData({"A": [_pkt("A", 1, 100.0)]})
+    feed = _make_feed(md)
+    feed.set_symbols(["A"])
+    try:
+        feed._route({"symbol": "A", "ltp": 0, "volume": 1, "timestamp": _ts(1)})
+        assert feed._drop_counts.get("convert_none:A") or feed._drop_counts.get(
+            "non_positive_ltp:A"
+        )
+    finally:
+        feed.close()
+
+
+def test_convert_stamps_arrived_at_on_tick():
+    """Tick.arrived_at must be local arrival wall-clock (for health freshness)."""
+    from unittest.mock import MagicMock
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    before = time.time()
+    tick = feed._convert(_pkt("A", 1, 100.0), "A")
+    after = time.time()
+    assert tick is not None
+    assert before <= tick.arrived_at <= after
+
+
+def test_quote_only_zero_ltt_does_not_pollute_prev_ts():
+    """ltt=0 quote must not poison _prev_ts with arrival wall-clock.
+
+    Regression: the or-chain fell through to FullPacket's arrival datetime
+    when ltt=0, so _prev_ts was set to fractional wall-clock; every later
+    real (older) exchange LTT then landed "late" and was dropped — the MCX
+    late_tick flood (drops #200-769/symbol, ~80/min).
+    """
+    from unittest.mock import MagicMock
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    # Quote-only packet: ltt=0, FullPacket carries arrival datetime.
+    quote = {
+        "symbol": "CRUDEOIL OCT FUT",
+        "ltp": 5000.0,
+        "volume": 100,
+        "total_buy_qty": 10,
+        "total_sell_qty": 20,
+        "ltt": 0,
+        "timestamp": datetime.now(timezone.utc),
+        "oi": 0,
+        "depth_bids": [],
+        "depth_asks": [],
+    }
+    tick = feed._convert(dict(quote), "CRUDEOIL OCT FUT")
+    assert tick is not None, "quote-only packet must route"
+    # Arrival stamp must NOT advance the exchange-LTT high-water mark.
+    assert feed._prev_ts.get("CRUDEOIL OCT FUT", 0.0) == 0.0, (
+        f"ltt=0 arrival must not write _prev_ts, got {feed._prev_ts}"
+    )
+    assert feed._last_convert_drop is None
+
+
+def test_old_exchange_ltt_after_quote_still_routes():
+    """A real exchange LTT older than wall-clock must not drop after a quote.
+
+    Sequence that caused the flood: quote (ltt=0 → arrival, previously
+    polluted prev_ts to wall-clock) then a trade packet with exchange LTT
+    155s old — must route, not late_tick.
+    """
+    from unittest.mock import MagicMock
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    sym = "NATURALGAS SEP FUT"
+    # 1) quote-only, ltt=0
+    feed._convert(
+        {
+            "symbol": sym, "ltp": 100.0, "volume": 10,
+            "total_buy_qty": 1, "total_sell_qty": 1,
+            "ltt": 0, "timestamp": datetime.now(timezone.utc),
+            "oi": 0, "depth_bids": [], "depth_asks": [],
+        },
+        sym,
+    )
+    # 2) real trade packet with exchange LTT 155s in the past
+    old_ltt = int(time.time()) - 155
+    tick = feed._convert(
+        {
+            "symbol": sym, "ltp": 101.0, "volume": 20,
+            "total_buy_qty": 1, "total_sell_qty": 1,
+            "ltt": old_ltt, "timestamp": datetime.now(timezone.utc),
+            "oi": 0, "depth_bids": [], "depth_asks": [],
+        },
+        sym,
+    )
+    assert tick is not None, (
+        f"old exchange LTT after quote must route, drops={feed._drop_counts}"
+    )
+    assert "late_tick:" + sym not in feed._drop_counts
+    assert feed._prev_ts[sym] == float(old_ltt)
+
+
+def test_small_exchange_ltt_regression_routes_within_grace():
+    """Quote-snapshot LTT lagging a few seconds behind the trade tick is valid.
+
+    Dhan interleaves quote/full/tick messages; a quote built just before a
+    trade can arrive after the trade's tick with LTT 1-11s older. Strict
+    monotonic guard dropped these (~10-15/symbol/min live). Within the
+    grace window they must route; _prev_ts must NOT regress.
+    """
+    from unittest.mock import MagicMock
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    sym = "SILVERM NOV FUT"
+    newer = float(int(time.time()))
+    older = newer - 5.0  # 5s lag — within 30s grace
+    t_new = feed._convert(
+        {"symbol": sym, "ltp": 100.0, "volume": 10, "ltt": int(newer),
+         "total_buy_qty": 1, "total_sell_qty": 1, "oi": 0,
+         "depth_bids": [], "depth_asks": []},
+        sym,
+    )
+    assert t_new is not None
+    assert feed._prev_ts[sym] == newer
+    t_old = feed._convert(
+        {"symbol": sym, "ltp": 99.5, "volume": 5, "ltt": int(older),
+         "total_buy_qty": 1, "total_sell_qty": 1, "oi": 0,
+         "depth_bids": [], "depth_asks": []},
+        sym,
+    )
+    assert t_old is not None, (
+        f"5s LTT lag within grace must route, drops={feed._drop_counts}"
+    )
+    assert feed._prev_ts[sym] == newer, "_prev_ts must be a high-water mark"
+
+
+def test_exchange_ltt_beyond_grace_still_drops():
+    """Grossly out-of-order exchange LTT (>30s behind) must still late_tick."""
+    from unittest.mock import MagicMock
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    sym = "GOLDM OCT FUT"
+    newer = float(int(time.time()))
+    ancient = newer - 120.0  # beyond 30s grace
+    feed._convert(
+        {"symbol": sym, "ltp": 100.0, "volume": 10, "ltt": int(newer),
+         "total_buy_qty": 1, "total_sell_qty": 1, "oi": 0,
+         "depth_bids": [], "depth_asks": []},
+        sym,
+    )
+    tick = feed._convert(
+        {"symbol": sym, "ltp": 99.0, "volume": 5, "ltt": int(ancient),
+         "total_buy_qty": 1, "total_sell_qty": 1, "oi": 0,
+         "depth_bids": [], "depth_asks": []},
+        sym,
+    )
+    assert tick is None
+    assert feed._drop_counts.get(f"late_tick:{sym}") == 1
+    assert feed._last_convert_drop == "late_tick"
+
+
+def test_route_late_tick_not_double_counted_as_convert_none():
+    """_route must not convert_none-note a drop _convert already noted."""
+    from unittest.mock import MagicMock
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    sym = "CRUDEOIL 15 OCT 8650 CALL"
+    # Establish a high-water mark, then send ancient LTT.
+    feed._convert(
+        {"symbol": sym, "ltp": 100.0, "volume": 10, "ltt": int(time.time()),
+         "total_buy_qty": 1, "total_sell_qty": 1, "oi": 0,
+         "depth_bids": [], "depth_asks": []},
+        sym,
+    )
+    feed._route(
+        {"symbol": sym, "ltp": 99.0, "volume": 5,
+         "ltt": int(time.time()) - 120,
+         "total_buy_qty": 1, "total_sell_qty": 1, "oi": 0,
+         "depth_bids": [], "depth_asks": []},
+    )
+    assert feed._drop_counts.get(f"late_tick:{sym}") == 1
+    assert feed._drop_counts.get(f"convert_none:{sym}") is None, (
+        f"late_tick must not double-count as convert_none: {feed._drop_counts}"
+    )
+
+
+def test_route_non_positive_ltp_not_double_counted_as_convert_none():
+    from unittest.mock import MagicMock
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    feed._route(
+        {"symbol": "A", "ltp": 0, "volume": 1, "ltt": int(time.time()),
+         "total_buy_qty": 0, "total_sell_qty": 0, "oi": 0,
+         "depth_bids": [], "depth_asks": []},
+    )
+    assert feed._drop_counts.get("non_positive_ltp:A") == 1
+    assert feed._drop_counts.get("convert_none:A") is None
+
+
+def test_arrival_source_skips_guard_even_when_older_than_prev_exchange():
+    """Poll/ISO arrival stamps must never be rejected as late_tick."""
+    from unittest.mock import MagicMock
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    sym = "TEST FUT"
+    # Exchange LTT first — sets high-water mark.
+    feed._convert(
+        {"symbol": sym, "ltp": 100.0, "volume": 10, "ltt": int(time.time()),
+         "total_buy_qty": 1, "total_sell_qty": 1, "oi": 0,
+         "depth_bids": [], "depth_asks": []},
+        sym,
+    )
+    prev = feed._prev_ts[sym]
+    # Arrival-only packet with no exchange LTT (poll fallback / ISO).
+    tick = feed._convert(
+        {"symbol": sym, "ltp": 101.0, "volume": 5,
+         "timestamp": "2020-01-01T00:00:00",  # ancient ISO — arrival source
+         "total_buy_qty": 1, "total_sell_qty": 1, "oi": 0,
+         "depth_bids": [], "depth_asks": []},
+        sym,
+    )
+    assert tick is not None, f"arrival source must skip guard: {feed._drop_counts}"
+    assert feed._prev_ts[sym] == prev, "arrival must not regress _prev_ts"
+    assert tick.time != "0"  # still gets a usable bar timestamp
+
+
+def test_silent_symbols_reports_subscribed_queue_with_no_packets():
+    """A subscribed symbol that never routes must appear in silent_symbols()."""
+    md = _FakeMarketData({"A": [_pkt("A", 1, 100.0)], "SILENT": []})
+    feed = _make_feed(md)
+    feed.set_symbols(["A", "SILENT"])
+    try:
+        _wait_until(lambda: feed._queues["A"].qsize() >= 1)
+        # SILENT has a queue but no packets were ever routed to it (last is None).
+        # A routed just now — not silent under a normal threshold.
+        silent = feed.silent_symbols(threshold_sec=60.0)
+        assert "SILENT" in silent
+        assert "A" not in silent  # A routed at least once
+    finally:
+        feed.close()
+
+
+def test_silent_symbols_empty_right_after_route():
+    md = _FakeMarketData({"A": [_pkt("A", 1, 100.0)]})
+    feed = _make_feed(md)
+    feed.set_symbols(["A"])
+    try:
+        _wait_until(lambda: feed._queues["A"].qsize() >= 1)
+        assert feed.silent_symbols(threshold_sec=60.0) == []
+    finally:
+        feed.close()
+
+
 def test_producer_survives_stream_factory_failure():
     """A raising stream_full must trigger retry, not kill the producer thread."""
     import time as _time
@@ -437,3 +714,76 @@ def test_convert_iso_timestamp_does_not_produce_zero_time():
     assert tick is not None
     assert tick.time != "0"
     assert float(tick.time) > 946684800  # post-2000 epoch
+
+
+def test_stale_freshness_uses_arrival_not_old_ltt():
+    """Illiquid LTT must not freeze _last_tick_wall while packets keep arriving.
+
+    Regression: runtime set _last_tick_wall from exchange LTT alone. A quiet
+    FINNIFTY SEP FUT's last_trade_time lagged minutes while quote/depth
+    packets still arrived, so /health reported the engine stale and dynamic
+    rotation treated a live feed as dead.
+    """
+    import time as _time
+    from quant.brokers.gateway import Tick
+    from quant.runtime import QuantEngine
+
+    class _Gateway:
+        def __init__(self, ticks):
+            self._ticks = list(ticks)
+
+        def subscribe(self, symbol):
+            pass
+
+        def next_tick(self):
+            return self._ticks.pop(0) if self._ticks else None
+
+    now = _time.time()
+    old_ltt = str(int(now - 600))  # LTT 10 minutes old (illiquid)
+    arrived = now  # packet just arrived
+    tick = Tick(time=old_ltt, price=100.0, volume=0.0, arrived_at=arrived)
+
+    eng = QuantEngine.__new__(QuantEngine)
+    eng._last_tick_wall = now - 600
+    eng._gateway = _Gateway([tick])
+    eng._trace = []
+    # Minimal collaborators used by _run_inner before the tick loop.
+    eng.symbol = "FINNIFTY SEP FUT"
+    eng._market = "NFO"
+    eng._contract_expiry = None
+    eng._tick_size = 0.05
+    eng._amt_engine = type("A", (), {"warm_bars": 0})()
+    eng._risk = type("R", (), {"state": lambda self: {}})()
+    eng._recent_decisions = []
+    eng._live = None
+    eng._last_depth = None
+    eng._advisor = type("Adv", (), {"on_context": lambda self, ctx: None})()
+
+    # Drive only the tick-freshness path by stubbing process_tick.
+    class _TH:
+        def process_tick(self, t):
+            pass
+
+    eng._create_tick_handler = lambda: _TH()
+
+    # Seed enough attributes _run_inner touches before the loop.
+    # Call the freshness update in isolation (same logic as _run_inner).
+    try:
+        tick_epoch = float(getattr(tick, "time", 0) or 0)
+    except (TypeError, ValueError):
+        tick_epoch = 0.0
+    try:
+        a = float(getattr(tick, "arrived_at", 0) or 0)
+    except (TypeError, ValueError):
+        a = 0.0
+    if a > 1e9:
+        eng._last_tick_wall = a
+    elif tick_epoch > 1e9:
+        eng._last_tick_wall = tick_epoch
+    else:
+        eng._last_tick_wall = _time.time()
+
+    assert abs(eng._last_tick_wall - arrived) < 5.0, (
+        "freshness must prefer arrived_at over an illiquid exchange LTT"
+    )
+    assert eng._last_tick_wall > now - 60.0

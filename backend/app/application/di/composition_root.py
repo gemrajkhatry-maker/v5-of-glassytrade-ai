@@ -95,7 +95,31 @@ def _quant_coordinator():
 
 def _create_market_data_adapter(container: DIContainer, config: "Configuration"):
     from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter
-    return DhanMarketDataAdapter(config)
+
+    # DhanMarketDataAdapter(symbols=..., exchange=..., client_id=..., access_token=...).
+    # Passing SystemConfig positionally made `symbols` a config object, so
+    # scan_candidates did `self._symbols[:limit]` and raised
+    # `'SystemConfig' object is not subscriptable` → GET /api/market/scan 500.
+    symbols = list(getattr(config, "active_symbols", lambda: [])() or [])
+    if not symbols:
+        symbols = list(_settings.SCANNER_UNDERLYINGS or [])
+    exchange = _settings.DEFAULT_EXCHANGE or "NSE"
+    client_id = (
+        getattr(config, "dhan_client_id", None)
+        or getattr(_settings, "DHAN_CLIENT_ID", None)
+        or os.getenv("DHAN_CLIENT_ID", "")
+    )
+    access_token = (
+        getattr(config, "dhan_access_token", None)
+        or getattr(_settings, "DHAN_ACCESS_TOKEN", None)
+        or os.getenv("DHAN_ACCESS_TOKEN", "")
+    )
+    return DhanMarketDataAdapter(
+        symbols=symbols,
+        exchange=exchange,
+        client_id=str(client_id).strip() or None,
+        access_token=str(access_token).strip() or None,
+    )
 
 
 def _create_broker_adapter(container: DIContainer, config: "Configuration"):

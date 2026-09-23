@@ -54,6 +54,11 @@ _IST_OFFSET_SECONDS = float(_IST.utcoffset(None).total_seconds())
 _QUEUE_MAXSIZE = 4096
 # Depth cache older than this is treated as dead; fall back to in-line book.
 _DEPTH_CACHE_TTL_SEC = 2.0
+# Exchange LTT may legitimately regress by a few seconds when a quote/full
+# snapshot (built just before a trade) arrives after the trade's tick.
+# Drop only packets THIS far behind the high-water mark — smaller lag is
+# still valid market data (LTP/volume/depth) and must route.
+_LATE_TICK_GRACE_SEC = 30.0
 
 
 class MultiplexedMarketFeed:
@@ -92,8 +97,22 @@ class MultiplexedMarketFeed:
         # "fix" one side to take the lock without taking it on the other.
         self._prev_cum: dict[str, tuple[float, float, float]] = {}
         self._prev_price: dict[str, float] = {}
+        # High-water mark of exchange LTT (never regress below grace).
+        # Arrival-clock packets must NOT write here — see _convert.
         self._prev_ts: dict[str, float] = {}
         self._depth_cache: dict[str, dict] = {}
+        # Rate-limited drop diagnostics: a silent no-queue / convert miss is
+        # how a starved engine hides behind a "degraded" health check.
+        self._drop_log_ts: dict[str, float] = {}
+        self._drop_counts: dict[str, int] = {}
+        # Set by _convert when it already noted a specific drop reason so
+        # _route does not double-count it as convert_none.
+        self._last_convert_drop: str | None = None
+        # Last successful route per symbol (monotonic). A subscribed queue
+        # with no packets for a long stretch is broker/exchange silence —
+        # distinct from convert/no_queue drops (those leave a _drop_counts key).
+        self._last_route_mono: dict[str, float] = {}
+        self._silent_log_ts: dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # Cumulative -> per-tick delta conversion (legacy candle-builder logic)
@@ -244,6 +263,10 @@ class MultiplexedMarketFeed:
         with self._lock:
             self._prev_cum.clear()
             self._prev_price.clear()
+            self._drop_log_ts.clear()
+            self._drop_counts.clear()
+            self._last_route_mono.clear()
+            self._silent_log_ts.clear()
             queues = tuple(self._queues.values())
             readers = tuple(
                 reader
@@ -352,6 +375,7 @@ class MultiplexedMarketFeed:
                             pkt = anext_full.result()
                             anext_full = None
                             self._route(pkt)
+                            self._check_silent()
                             consecutive_errors = 0
                         except StopAsyncIteration:
                             break
@@ -435,18 +459,81 @@ class MultiplexedMarketFeed:
             except queue.Full:  # silent-except - still full after drop; drop this tick
                 pass
 
+    def _note_drop(self, reason: str, symbol: str, detail: str = "") -> None:
+        """Rate-limited (≥30s per key) warning for a packet that never reached
+        an engine queue — the only observable when routing silently fails."""
+        key = f"{reason}:{symbol}"
+        now = time.monotonic()
+        self._drop_counts[key] = self._drop_counts.get(key, 0) + 1
+        last = self._drop_log_ts.get(key, 0.0)
+        if now - last >= 30.0:
+            self._drop_log_ts[key] = now
+            count = self._drop_counts[key]
+            logger.warning(
+                "MultiplexedMarketFeed drop #%d reason=%s symbol=%s%s",
+                count, reason, symbol,
+                f" detail={detail}" if detail else "",
+            )
+
     def _route(self, pkt: dict) -> None:
         symbol = pkt.get("symbol") or pkt.get("_symbol")
         if not symbol:
+            self._note_drop("missing_symbol", "<none>")
             return
         tick = self._convert(pkt, symbol)
         if tick is None:
+            # _convert already noted late_tick/non_positive_ltp — do not
+            # double-count those as convert_none.
+            if self._last_convert_drop is None:
+                self._note_drop("convert_none", symbol)
             return
         q = self._queues.get(symbol)
-        if q is not None:
-            self._put_tick(q, tick)
+        if q is None:
+            self._note_drop(
+                "no_queue", symbol, f"known={sorted(self._queues)}"
+            )
+            return
+        self._put_tick(q, tick)
         for reader in tuple(self._readers.get(symbol, ())):
             self._put_tick(reader, tick)
+        self._last_route_mono[symbol] = time.monotonic()
+
+    def silent_symbols(self, threshold_sec: float = 60.0) -> list[str]:
+        """Subscribed symbols with no successfully routed packet for ``threshold_sec``.
+
+        Complements ``_drop_counts``: drops mean packets arrived and failed
+        conversion/routing; silence means the broker/exchange never delivered
+        a packet for that sid (the FINNIFTY SEP FUT failure mode).
+        """
+        now = time.monotonic()
+        silent: list[str] = []
+        with self._lock:
+            symbols = list(self._queues.keys())
+        for sym in symbols:
+            last = self._last_route_mono.get(sym)
+            if last is None or (now - last) > threshold_sec:
+                silent.append(sym)
+        return sorted(silent)
+
+    def _check_silent(self) -> None:
+        """Rate-lwarn (≥30s/symbol) when a subscribed queue is getting no packets."""
+        now = time.monotonic()
+        with self._lock:
+            symbols = list(self._queues.keys())
+        for sym in symbols:
+            last = self._last_route_mono.get(sym)
+            if last is None or (now - last) <= 60.0:
+                continue
+            last_log = self._silent_log_ts.get(sym, 0.0)
+            if now - last_log < 30.0:
+                continue
+            self._silent_log_ts[sym] = now
+            age = 0.0 if last is None else now - last
+            logger.warning(
+                "MultiplexedMarketFeed silent symbol=%s no_packet_for=%.0fs "
+                "(subscribed, zero routes — broker/exchange not delivering)",
+                sym, age,
+            )
 
     def _normalize_dhan_packet(self, pkt: dict, symbol: str) -> dict:
         """Translate Dhan-specific WebSocket packet fields to canonical names.
@@ -464,6 +551,22 @@ class MultiplexedMarketFeed:
         baseline, (delta_vol, delta_buy, delta_sell) = self._cum_to_delta(
             self._prev_cum.get(symbol), raw_vol, raw_buy, raw_sell
         )
+        # Resolve the event-time source ONCE here so _convert can apply the
+        # monotonic guard only to exchange LTT. The or-chain must not fall
+        # through to FullPacket's arrival datetime when ltt=0 (quote-only) —
+        # that poisons _prev_ts with wall-clock and every later real LTT
+        # lands "late" (the MCX late_tick flood).
+        exchange_ltt = (
+            pkt.get("last_trade_time")
+            or pkt.get("ltt")
+            or pkt.get("LTP_time")
+        )
+        if exchange_ltt:
+            resolved_ts = exchange_ltt
+            ts_source = "exchange"
+        else:
+            resolved_ts = pkt.get("timestamp") or 0
+            ts_source = "arrival"
         return {
             "ltp": float(pkt.get("last_trade_price") or pkt.get("ltp") or pkt.get("LTP") or 0),
             "ltq": float(pkt.get("last_trade_quantity") or pkt.get("LTQ") or 0),
@@ -471,45 +574,29 @@ class MultiplexedMarketFeed:
             "bid_qty": delta_buy,
             "ask_qty": delta_sell,
             "_pending_baseline": baseline,
-            "timestamp": (
-                # Audit D-TIME-06: exchange event time (LTT epoch) is the truth
-                # for bar windows. WSMessage.timestamp is datetime.now() on the
-                # deployment machine — naive LOCAL wall clock — and preferring
-                # it made bars follow the box's timezone and let the monotonic
-                # guard discard ticks after NTP corrections. The real packet
-                # shape carries this under "last_trade_time" (raw WS dict,
-                # websocket_client.py) OR "ltt" (FullPacket field name after
-                # streaming_service.py's rename / dhan_adapter's asdict()) —
-                # both must be checked, or this silently degrades back to
-                # wall-clock on every real production packet (re-audit finding:
-                # the original fix only checked "last_trade_time", which never
-                # survives the FullPacket rename). Fall back to the arrival
-                # stamp only when the exchange sent neither.
-                pkt.get("last_trade_time")
-                or pkt.get("ltt")
-                or pkt.get("LTP_time")
-                or pkt.get("timestamp")
-                or 0
-            ),
+            "timestamp": resolved_ts,
+            "_ts_source": ts_source,
             "oi": float(pkt.get("oi") or 0),
             "depth_bids": pkt.get("depth_bids") or [],
             "depth_asks": pkt.get("depth_asks") or [],
-            "_raw_timestamp": (
-                pkt.get("last_trade_time") or pkt.get("ltt") or pkt.get("timestamp")
-            ),
+            "_raw_timestamp": resolved_ts,
         }
 
     def _convert(self, pkt: dict, symbol: str) -> Tick | None:
         """``symbol`` is resolved once by ``_route`` so the baseline key always
         matches the routing queue key."""
+        self._last_convert_drop = None
         try:
             norm_pkt = self._normalize_dhan_packet(pkt, symbol)
             
             ltp = norm_pkt["ltp"]
             if ltp <= 0:
+                self._note_drop("non_positive_ltp", symbol, f"ltp={ltp}")
+                self._last_convert_drop = "non_positive_ltp"
                 return None
             
             raw_ts = norm_pkt["_raw_timestamp"] or norm_pkt["timestamp"]
+            ts_source = norm_pkt.get("_ts_source", "arrival")
             if hasattr(raw_ts, "timestamp"):
                 ts = float(raw_ts.timestamp())
             else:
@@ -518,32 +605,41 @@ class MultiplexedMarketFeed:
                 except (ValueError, TypeError):
                     ts = 0.0
 
-            used_arrival_clock = False
             if ts <= 0:
                 # ponytail: poll-fallback packets carry ISO strings float()
                 # rejects; ts=0 freezes bar windows so no bar closes and open
                 # positions lose exit management. Arrival time keeps bars moving.
                 ts = time.time()
-                used_arrival_clock = True
-            elif ts > time.time() + 10000:
+                ts_source = "arrival"
+            elif ts_source == "exchange" and ts > time.time() + 10000:
                 # Dhan binary protocol sends LTT pre-shifted by +IST (IST epoch).
                 # Subtract one IST offset so ts is standard UTC epoch.
                 ts -= _IST_OFFSET_SECONDS
 
-            # Monotonic timestamp guard — discard out-of-order/late ticks silently.
-            # Skip when using arrival clock so poll-fallback packets after a
-            # real LTT packet are not all rejected as "late".
-            prev_ts = self._prev_ts.get(symbol, 0.0)
-            if not used_arrival_clock and ts > 0 and ts < prev_ts:
-                logger.debug('Late tick discarded symbol=%s ts=%.3f prev=%.3f', symbol, ts, prev_ts)
-                return None
+            # Monotonic timestamp guard — discard grossly out-of-order/late
+            # ticks. ONLY exchange LTT participates: arrival stamps (quote-only
+            # ltt=0, poll fallback, ISO strings) must neither reject nor advance
+            # _prev_ts, or wall-clock pollutes the baseline and every later real
+            # LTT lands "late". Small exchange regressions (quote snapshot built
+            # just before a trade arriving after the trade's tick) are valid
+            # market data — allow a grace window before dropping.
+            if ts_source == "exchange" and ts > 0:
+                prev_ts = self._prev_ts.get(symbol, 0.0)
+                if prev_ts > 0 and ts < prev_ts - _LATE_TICK_GRACE_SEC:
+                    self._note_drop(
+                        "late_tick", symbol, f"ts={ts:.3f} prev={prev_ts:.3f}"
+                    )
+                    self._last_convert_drop = "late_tick"
+                    return None
 
             # Commit baselines only for packets that survive validation.
             pending = norm_pkt.get("_pending_baseline")
             if pending is not None:
                 self._prev_cum[symbol] = pending
-            if not used_arrival_clock and ts > 0:
-                self._prev_ts[symbol] = ts
+            if ts_source == "exchange" and ts > 0:
+                # High-water mark: never regress _prev_ts below a newer LTT.
+                if ts > self._prev_ts.get(symbol, 0.0):
+                    self._prev_ts[symbol] = ts
 
             dvol = norm_pkt["delta_volume"]
             
@@ -588,6 +684,7 @@ class MultiplexedMarketFeed:
                 sell_volume=dsell,
                 oi=norm_pkt["oi"],
                 depth=depth,
+                arrived_at=time.time(),
             )
         except Exception:
             logger.exception("MultiplexedMarketFeed dropped packet: %r", pkt)

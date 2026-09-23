@@ -15,6 +15,11 @@ class Tick:
     sell_volume: float = 0.0
     oi: float = 0.0
     depth: dict | None = None
+    # Local arrival epoch (seconds) when the packet was converted/enqueued.
+    # Health freshness must prefer this over exchange LTT: an illiquid
+    # contract's last_trade_time can be minutes old while quote/depth
+    # packets still arrive, which falsely reported the engine as stale.
+    arrived_at: float = 0.0
 
 
 class BrokerGateway(Protocol):
