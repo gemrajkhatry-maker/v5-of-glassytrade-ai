@@ -73,11 +73,11 @@ def h_range_from_ohlcs(ohlcs: Iterable, tick_size: float) -> float:
 compute_h_range = h_range_from_ohlcs
 
 
-def _path_points(o: float, h: float, l: float, c: float) -> list[float]:
+def _path_points(o: float, h: float, lo: float, c: float) -> list[float]:
     """Deterministic OHLC walk: green opens toward high first, red toward low."""
     if c >= o:
-        return [o, h, l, c]
-    return [o, l, h, c]
+        return [o, h, lo, c]
+    return [o, lo, h, c]
 
 
 def synth_range_bars(ohlcs: Iterable, h_range: float) -> list[Bar]:

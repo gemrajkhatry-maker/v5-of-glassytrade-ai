@@ -11,7 +11,6 @@ from quant.amt.range_seed import (
     synth_range_bars,
 )
 from quant.amt_engine import AMTEngine
-from quant.bars import Bar
 from quant.contracts.value_objects import FloatOHLC
 from quant.session_levels import SessionLevelStore
 
