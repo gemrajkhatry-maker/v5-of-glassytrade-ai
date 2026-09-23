@@ -34,12 +34,6 @@ def compose_container(config: "Configuration") -> DIContainer:
     """
     container = DIContainer()
 
-    # --- Configuration ---
-    container.register_singleton(
-        Configuration,
-        lambda c: config,
-    )
-
     # --- Infrastructure Adapters ---
     container.register_singleton(
         _market_data_port(),

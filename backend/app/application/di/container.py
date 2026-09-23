@@ -7,7 +7,7 @@ hardcoded type checks.
 Usage:
     container = DIContainer()
     container.register_singleton(IBroker, lambda c: DhanBrokerAdapter(c.resolve(Config)))
-    container.register(ITradeRepository, lambda c: SQLiteStorageAdapter())
+    container.register_singleton(ITradeRepository, lambda c: SQLiteStorageAdapter())
 
     broker = container.resolve(IBroker)  # Lazy, singleton
 
@@ -40,7 +40,7 @@ class DIContainer:
     Features:
         - OCP-compliant: no if/elif chains, just factory registration
         - Lazy resolution: instances created on first resolve()
-        - Singleton by default: instance cached after first creation
+        - Singleton: instance cached after first creation
         - Circular dependency detection: raises at resolution time
         - Thread-safe: uses RLock for concurrent resolution
 
@@ -56,13 +56,6 @@ class DIContainer:
         self._building: set[type] = set()
         self._lock = threading.RLock()
 
-    def register(self, interface: type[T], factory: Factory[T]) -> None:
-        """Register a factory. Each resolve() creates a new instance."""
-        with self._lock:
-            self._factories[interface] = factory
-            # Remove any cached singleton for this interface
-            self._singletons.pop(interface, None)
-
     def register_singleton(self, interface: type[T], factory: Factory[T]) -> None:
         """Register a singleton factory. Instance created once and cached."""
         with self._lock:
@@ -71,8 +64,7 @@ class DIContainer:
     def resolve(self, interface: type[T]) -> T:
         """Resolve a dependency.
 
-        For singletons: returns cached instance or creates and caches.
-        For non-singletons: creates a new instance each time.
+        Returns the cached instance or creates and caches it.
 
         Raises:
             CircularDependencyError: If a cycle is detected.

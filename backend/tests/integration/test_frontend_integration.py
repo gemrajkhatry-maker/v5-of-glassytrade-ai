@@ -23,7 +23,6 @@ def app():
     mock.probability_engine.is_ready.return_value = True
     mock.active_symbols = ["NIFTY 24 FEB 25750 CALL"]
     mock.market_data = MagicMock()
-    fastapi_app.state.service_graph = mock
 
     yield fastapi_app, mock
 

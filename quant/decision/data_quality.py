@@ -18,28 +18,11 @@ class DataQuality(str, Enum):
     UNAVAILABLE = "UNAVAILABLE"
 
 
-# High-conviction order-flow entries require exact evidence.
-# (The old {TICK_EXACT, CANDLE_DISTRIBUTED} allowance fed the removed
-# DecisionService provenance pre-gate; the single DecisionLoop gate is
-# TICK_EXACT-strict for live capability and marks paper runs PROXY_MODE.)
-
-
 def normalize_data_quality(value) -> DataQuality:
     try:
         return value if isinstance(value, DataQuality) else DataQuality(str(value).upper())
     except (TypeError, ValueError):
         return DataQuality.UNAVAILABLE
-
-
-_ALLOWED_CONVICTION = frozenset({DataQuality.TICK_EXACT})
-
-
-def conviction_allowed(value) -> bool:
-    """Deprecated shim: kept only until N6 folds this module's readers.
-    The entry path must not call this — DecisionLoop compares against
-    DataQuality.TICK_EXACT directly (capability-aware).
-    """
-    return normalize_data_quality(value) in _ALLOWED_CONVICTION
 
 
 def normalize_evidence_provenance(value) -> dict[str, DataQuality]:

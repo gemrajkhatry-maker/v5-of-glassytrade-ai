@@ -98,9 +98,8 @@ def get_coordinator():
 # Annotated types for FastAPI
 BrokerDep = Annotated["IBroker", Depends(get_broker)]
 StorageDep = Annotated["IStorage", Depends(get_storage)]
-MarketDataDep = Annotated["IMarketData", Depends(get_market_data)]
 ConfigDep = Annotated["Configuration", Depends(get_configuration)]
-ActiveSymbolsDep = Annotated[list, Depends(get_active_symbols)]
+
 
 def get_trade_journal():
     """Dependency: Trade journal service."""

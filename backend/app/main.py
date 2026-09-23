@@ -408,8 +408,6 @@ def create_application() -> FastAPI:
         # Store in app state for backward compatibility
         app.state.runtime_mode = runtime_mode
         app.state.container = container
-        app.state.graph = container  # Alias for backward compatibility
-        app.state.service_graph = container
         app.state.market_data = market_data
         app.state.broker = broker
         app.state.storage = storage
