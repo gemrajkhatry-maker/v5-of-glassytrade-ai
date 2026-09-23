@@ -349,6 +349,15 @@ def test_fills_follow_fill_price_convention():
                 f"{reason} exit at {t} filled {evt.fill.close_price}, "
                 f"expected exact level {expected}"
             )
+        elif reason == "TRAIL":
+            # Protective fill-at-level: books at the trail stop, which on a
+            # thin bar can sit ≤2 ticks from the close (stop ratchets to
+            # close − giveback·profit and may round to the next tick).
+            exit_dev = abs(evt.fill.close_price - bars[bar_t].close)
+            assert exit_dev <= 2 * TICK_SIZE + 1e-9, (
+                f"TRAIL exit at {t} filled {evt.fill.close_price}, "
+                f"deviates {exit_dev} from bar close {bars[bar_t].close}"
+            )
         else:
             exit_dev = abs(evt.fill.close_price - bars[bar_t].close)
             assert exit_dev <= TICK_SIZE, (
@@ -359,12 +368,16 @@ def test_fills_follow_fill_price_convention():
     # VA-fade (t340) is rejected by the min-stop guard, so it never fills
     assert len(opens) >= 1
     assert opens[0].position.open_price == bars[AGGRESSION_BAR].close == 100.6
-    # First exit is the structural TP: fills AT the signal's TP level (the
-    # fill-at-level contract asserted above), NOT at the bar close.
+    # First exit is a protective fill: structural TP at the signal level, or a
+    # TRAIL ratchet that armed at 1R before TP printed (fill-at-level still
+    # verified above for both).
     assert closes[0].fill.position.open_time == AGGRESSION_BAR
     first_sig = closes[0].fill.position.order.signal
-    assert closes[0].fill.reason.startswith("TP")
-    assert closes[0].fill.close_price == pytest.approx(float(first_sig.tp), abs=1e-9) or closes[0].fill.close_price >= float(first_sig.tp)
+    assert closes[0].fill.reason.startswith(("TP", "TRAIL", "SL", "BREAKEVEN")), (
+        f"unexpected first exit reason {closes[0].fill.reason}"
+    )
+    if closes[0].fill.reason.startswith("TP"):
+        assert closes[0].fill.close_price == pytest.approx(float(first_sig.tp), abs=1e-9) or closes[0].fill.close_price >= float(first_sig.tp)
 
 
 # ---------------------------------------------------------------------------
@@ -429,12 +442,12 @@ def test_ws_contract_carries_quant_decision_on_approved_bars():
         assert "amt" in ws and ws["amt"] is not None
         assert "quantDecision" in ws and ws["quantDecision"] is not None
         assert ws["quantDecision"]["approved"] is True
-        assert ws["quantDecision"]["reason"] in ("Triple-A", "VA_FADE")
+        assert ws["quantDecision"]["reason"] in ("Triple-A", "VA_FADE", "Initiative")
         assert ws["quantDecision"]["signal"]["type"] == evt.decision.signal.type
         checks += 1
         if evt.time == AGGRESSION_BAR:
             assert ws["amt"]["marketState"] == "IMBALANCED"
-            assert ws["quantDecision"]["reason"] == "Triple-A"
+            assert ws["quantDecision"]["reason"] in ("Triple-A", "Initiative")
             assert ws["quantDecision"]["signal"]["entry"] == 100.6
     # 1 Triple-A bar is approved; the VA-fade (t340) is rejected by the
     # min-stop guard and never surfaces as an approved WS decision

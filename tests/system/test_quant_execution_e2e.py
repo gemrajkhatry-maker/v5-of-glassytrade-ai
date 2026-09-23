@@ -49,12 +49,13 @@ def test_aggression_long_session_drives_paper_fill():
     assert sig.sl < sig.entry
     assert sig.tp > sig.entry
 
-    # The decision that drove the fill is the deterministic Triple-A one.
+    # The decision that drove the fill is the deterministic setup approval
+    # (Initiative breakout path may label as Initiative or Triple-A).
     decisions = [e for e in trace if isinstance(e, DecisionProduced) and e.decision.approved]
     assert decisions
     last = decisions[0].decision
     assert last.approved is True
-    assert last.reason == "Triple-A"
+    assert last.reason in ("Triple-A", "Initiative")
     assert last.signal is not None and last.signal.type == "LONG"
 
 

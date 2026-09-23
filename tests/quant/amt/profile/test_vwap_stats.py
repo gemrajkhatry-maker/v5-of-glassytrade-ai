@@ -37,3 +37,30 @@ def test_recent_stats_does_not_cap_wide_std():
     # Two equal-weight points at 100 and 200 → std = 50; old cap was 3%×vwap≈4.5
     assert std == pytest.approx(50.0, rel=1e-3)
     assert std > vwap * 0.03
+
+
+def test_decision_bands_floor_width_for_anti_climax():
+    """Bands (used by Anti-Climax) must floor at 1.0 so quiet auctions do not
+    veto every displacement; recent_stats keeps raw σ (audit §1.7)."""
+    from quant.amt.profile.vwap import SessionVWAP
+    data = [
+        FloatOHLC(
+            time=str(i), open=100.0, high=100.05, low=99.95, close=100.0,
+            volume=100.0, vwap=100.0, taker_buy_volume=50.0, delta=0.0,
+        )
+        for i in range(40)
+    ]
+    _v, raw = SessionVWAP.recent_stats(data)
+    assert raw < 1.0  # raw stays tiny
+    sw = SessionVWAP()
+    current = FloatOHLC(
+        time="40", open=100.0, high=100.6, low=99.9, close=100.6,
+        volume=100.0, vwap=100.0, taker_buy_volume=90.0, delta=80.0,
+    )
+    u1, _l1, u2, _l2, std_out, _dev = sw.bands(100.0, current, recent_data=data)
+    # Decision bands use floored σ (≥1.0) so first displacement is inside ±2σ
+    assert u2 >= 100.0 + 2.0 - 1e-9, f"upper_2={u2} not floored"
+    # Reported σ remains raw
+    assert std_out == pytest.approx(raw, rel=1e-6)
+    # 100.6 must not be above a floored +2σ band
+    assert 100.6 <= u2 + 1e-9

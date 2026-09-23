@@ -187,10 +187,12 @@ def check_trailing_stop(
         if (long and low <= be_floor) or (not long and high >= be_floor):
             return ExitDecision(True, "BREAKEVEN", close), be_floor, trail_stop
 
-    # Trail stop hit
+    # Trail stop hit — fill AT the trail level (protective fill-at-level, same
+    # contract as SL/TP; bar-close market fill could book a price the stop
+    # never printed).
     if trail_stop is not None:
         if (long and low <= trail_stop) or (not long and high >= trail_stop):
-            return ExitDecision(True, "TRAIL", close, trail_stop=trail_stop), be_floor, trail_stop
+            return ExitDecision(True, "TRAIL", float(trail_stop), trail_stop=trail_stop), be_floor, trail_stop
 
     return None, be_floor, trail_stop
 

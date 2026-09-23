@@ -184,18 +184,28 @@ class SessionVWAP:
         Otherwise the whole-session accumulators are used.
         """
         if recent_data:
-            session_vwap, vwap_std = SessionVWAP.recent_stats(recent_data)
+            session_vwap, raw_std = SessionVWAP.recent_stats(recent_data)
         else:
-            vwap_std = self.std
+            raw_std = self.std
 
-        vwap_upper_1 = session_vwap + vwap_std
-        vwap_lower_1 = session_vwap - vwap_std
-        vwap_upper_2 = session_vwap + 2 * vwap_std
-        vwap_lower_2 = session_vwap - 2 * vwap_std
+        # Decision bands (Anti-Climax veto) floor at max(1.0, 0.1%×vwap) so a
+        # quiet auction's tiny raw σ cannot mark every displacement as a
+        # climax (3339da33 removed the floor and broke first-breakout entries).
+        # recent_stats / reported vwap_std stay RAW for journals (audit §1.7).
+        band_std = raw_std
+        min_band = max(1.0, session_vwap * 0.001) if session_vwap > 0 else 1.0
+        if band_std < min_band:
+            band_std = min_band
+
+        vwap_upper_1 = session_vwap + band_std
+        vwap_lower_1 = session_vwap - band_std
+        vwap_upper_2 = session_vwap + 2 * band_std
+        vwap_lower_2 = session_vwap - 2 * band_std
 
         live_price = float(current.close)
+        # Deviation σ-multiples use RAW std so journals stay honest.
         vwap_deviation_sigmas: float | None = (
-            (live_price - session_vwap) / vwap_std if vwap_std > 0 else None
+            (live_price - session_vwap) / raw_std if raw_std > 0 else None
         )
 
         # Sanity: clamp extreme deviations
@@ -208,5 +218,5 @@ class SessionVWAP:
         return (
             vwap_upper_1, vwap_lower_1,
             vwap_upper_2, vwap_lower_2,
-            vwap_std, vwap_deviation_sigmas,
+            raw_std, vwap_deviation_sigmas,
         )

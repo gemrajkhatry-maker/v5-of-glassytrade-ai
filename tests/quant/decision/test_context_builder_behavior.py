@@ -345,3 +345,51 @@ def test_dead_market_state_is_enum_not_string():
     # MarketState is a str-Enum so == also matches the raw "DEAD" string;
     # identity pins the type contract (DecisionContext.market_state: MarketState).
     assert ctx.market_state is MarketState.DEAD
+
+
+def test_initiative_up_with_lagging_negative_cvd_stays_long():
+    """INITIATIVE UP + lagging persisted negative CVD must not trap to SHORT
+    when the breakout bar's own delta is buying (post-absorption lag)."""
+    builder = DecisionContextBuilder()
+    dto = {
+        "marketState": "IMBALANCED",
+        "breakType": "INITIATIVE",
+        "breakDirection": "UP",
+        "cvdSlope": -6.72,  # persisted slope stuck negative through absorption
+        "normDelta": 0.9,   # this bar is aggressive buying
+        "valueAreaHigh": 102.0,
+        "valueAreaLow": 98.0,
+        "sessionVwap": 100.0,
+        "vwapUpper1": 101.0,
+        "vwapLower1": 99.0,
+    }
+    direction = builder._resolve_direction(
+        dto, close_px=100.6, vah=102.0, val=98.0,
+        obi=0.0, ofi=0.0, vwap_upper_1=101.0, vwap_lower_1=99.0,
+        market="NSE",
+    )
+    assert direction == "LONG", (
+        "INITIATIVE UP with buying delta must resolve LONG, got "
+        f"{direction!r} (lagging CVD must not force SHORT)"
+    )
+
+
+def test_initiative_up_with_fresh_sell_delta_traps_to_short():
+    """True exhaustion trap: INITIATIVE UP, CVD opposing, and this bar sells."""
+    builder = DecisionContextBuilder()
+    dto = {
+        "marketState": "IMBALANCED",
+        "breakType": "INITIATIVE",
+        "breakDirection": "UP",
+        "cvdSlope": -6.72,
+        "normDelta": -0.8,  # breakout bar itself is selling
+        "valueAreaHigh": 102.0,
+        "valueAreaLow": 98.0,
+        "sessionVwap": 100.0,
+    }
+    direction = builder._resolve_direction(
+        dto, close_px=100.2, vah=102.0, val=98.0,
+        obi=0.0, ofi=0.0, vwap_upper_1=101.0, vwap_lower_1=99.0,
+        market="NSE",
+    )
+    assert direction == "SHORT"

@@ -233,10 +233,14 @@ class DecisionContextBuilder:
 
         cvd_threshold = FABIO_CVD_THRESHOLD_MCX if str(market).upper() == "MCX" else FABIO_CVD_THRESHOLD_NSE
         if break_type == "INITIATIVE" and break_dir in ("UP", "DOWN"):
-            # ponytail: CVD strongly opposing the break indicates absorption/exhaustion trap (Fabio Gap #2/#7)
-            if break_dir == "DOWN" and cvd_val > cvd_threshold:
+            # Exhaustion trap (Fabio Gap #2/#7): CVD opposing the break AND this
+            # bar's fresh delta not confirming it. Persisted CVD slope lags
+            # through absorption→breakout and must not alone flip INITIATIVE UP
+            # to SHORT on the first displacement bar (broke paper-protocol E2E).
+            fresh_delta = self._df(amt_dto, "normDelta")
+            if break_dir == "DOWN" and cvd_val > cvd_threshold and fresh_delta >= 0:
                 return "LONG"
-            if break_dir == "UP" and cvd_val < -cvd_threshold:
+            if break_dir == "UP" and cvd_val < -cvd_threshold and fresh_delta <= 0:
                 return "SHORT"
             return "LONG" if break_dir == "UP" else "SHORT"
         if triple_a_sig in ("LONG", "SHORT"):

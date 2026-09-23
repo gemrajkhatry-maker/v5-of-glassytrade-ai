@@ -192,9 +192,20 @@ def _check_guards(ctx: DecisionContext) -> GateResult | None:
     # Doc: NSE tighter (−0.3), MCX looser (−0.5) — was inverted.
     cvd_block_neg = -0.5 if str(market).upper() == "MCX" else -0.3
     cvd_block_pos = 0.5 if str(market).upper() == "MCX" else 0.3
-    if ctx.agent_direction == "LONG" and cvd_slope < cvd_block_neg:
+    # Lagging persisted CVD must not alone veto when this bar's fresh delta
+    # agrees with the trade direction (absorption→breakout sign-freeze).
+    fresh_delta = float(getattr(ctx, "norm_delta", 0.0) or 0.0)
+    if (
+        ctx.agent_direction == "LONG"
+        and cvd_slope < cvd_block_neg
+        and fresh_delta <= 0
+    ):
         return GateResult(3, False, f"CVD slope aggressively negative ({cvd_slope:.2f}) conflicts with LONG")
-    if ctx.agent_direction == "SHORT" and cvd_slope > cvd_block_pos:
+    if (
+        ctx.agent_direction == "SHORT"
+        and cvd_slope > cvd_block_pos
+        and fresh_delta >= 0
+    ):
         return GateResult(3, False, f"CVD slope aggressively positive ({cvd_slope:.2f}) conflicts with SHORT")
 
     # CVD divergence direction alignment — divergence must confirm the trade direction
@@ -306,13 +317,18 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         vwap = getattr(ctx, "session_vwap", 0.0) or (float(ctx.bar.vwap) if ctx.bar and getattr(ctx.bar, "vwap", 0.0) else 0.0)
         price = float(ctx.bar.close) if ctx.bar else 0.0
         tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
-        if break_dir == "UP" and ctx.agent_direction == "LONG" and cvd_slope > -0.2:
+        fresh_delta = float(getattr(ctx, "norm_delta", 0.0) or 0.0)
+        # CVD slope may lag through absorption→breakout; fresh bar delta can
+        # confirm the initiative when persisted slope has not yet flipped.
+        cvd_ok_long = cvd_slope > -0.2 or fresh_delta > 0.5
+        cvd_ok_short = cvd_slope < 0.2 or fresh_delta < -0.5
+        if break_dir == "UP" and ctx.agent_direction == "LONG" and cvd_ok_long:
             if not getattr(ctx, "allow_trend", True):
                 return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
             if vwap > 0 and price < vwap - 1.0 * tick:
                 return GateResult(3, False, f"Initiative upside breakout below session VWAP ({price:.2f} < {vwap:.2f})")
             return _pass("Initiative upside breakout confirmed", "INITIATIVE")
-        if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
+        if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_ok_short:
             if not getattr(ctx, "allow_trend", True):
                 return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
             if vwap > 0 and price > vwap + 1.0 * tick:

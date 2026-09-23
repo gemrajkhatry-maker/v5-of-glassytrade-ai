@@ -31,9 +31,9 @@ ENGINE_ADDED_KEYS = {"tick", "ltp", "oi", "depth"}
 def _run_ws():
     from quant.execution.risk import SessionRisk
     SessionRisk(storage=None, symbol="SYM").reset_session()
-    # 172 ticks closes the approved t168 bar (t166's breakout was dropped as a
-    # thin stop, so the approval slipped one displacement bar forward).
-    eng = QuantEngine(SyntheticGateway(_session_ticks()[:172]), "SYM",
+    # 170 ticks closes the approved t166 bar but NOT t168 (whose NO_EDGE
+    # decision would overwrite latest_quant_decision). Approval is Initiative.
+    eng = QuantEngine(SyntheticGateway(_session_ticks()[:170]), "SYM",
                       interval_seconds=2)
     eng.run()
     from quant.state import project_state
