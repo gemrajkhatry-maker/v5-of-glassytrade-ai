@@ -69,11 +69,16 @@ class MultiplexedMarketFeed:
         self._queues: dict[str, queue.Queue] = {}
         self._readers: dict[str, set[queue.Queue]] = {}
         self._lock = threading.Lock()
+        self._close_lock = threading.Lock()
         self._stop = threading.Event()
         self._resync = threading.Event()
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._resync_async: asyncio.Event | None = None
+        self._stop_async: asyncio.Event | None = None
+        self._resync_task: asyncio.Task | None = None
+        self._anext_full: asyncio.Task | None = None
+        self._anext_depth: asyncio.Task | None = None
         # Per-symbol cumulative-volume baselines. Dhan WS packets carry
         # CUMULATIVE vol / total_buy_qty / total_sell_qty since session open;
         # the legacy candle builder converted them to per-tick deltas with a
@@ -200,6 +205,8 @@ class MultiplexedMarketFeed:
         does not restart the live stream)."""
         now = time.monotonic()
         with self._lock:
+            if self._stop.is_set():
+                return
             before = set(self._queues.keys())
             for sym in symbols:
                 if sym not in self._queues:
@@ -212,6 +219,8 @@ class MultiplexedMarketFeed:
         """Register one symbol (idempotent). Resyncs only if it is new."""
         now = time.monotonic()
         with self._lock:
+            if self._stop.is_set():
+                return
             fresh = symbol not in self._queues
             if fresh:
                 self._subscribe_mono[symbol] = now
@@ -229,12 +238,14 @@ class MultiplexedMarketFeed:
             self._subscribe_mono.pop(symbol, None)
             self._last_route_mono.pop(symbol, None)
         if q is not None:
-            q.put(None)
+            self._put_sentinel(q)
         self._resync.set()
         self._wake_loop()
 
     def next_tick(self, symbol: str) -> Tick | None:
         """Blocking read for one symbol (None when unsubscribed/closed)."""
+        if self._stop.is_set():
+            return None
         q = self._queues.get(symbol)
         if q is None:
             return None
@@ -242,6 +253,8 @@ class MultiplexedMarketFeed:
 
     def try_next_tick(self, symbol: str) -> Tick | None:
         """Non-blocking read for one symbol (None when queue is empty)."""
+        if self._stop.is_set():
+            return None
         q = self._queues.get(symbol)
         if q is None:
             return None
@@ -254,7 +267,10 @@ class MultiplexedMarketFeed:
         """Return a non-consuming copy stream for a second engine."""
         reader = queue.Queue(maxsize=_QUEUE_MAXSIZE)
         with self._lock:
-            self._readers.setdefault(symbol, set()).add(reader)
+            if self._stop.is_set():
+                self._put_sentinel(reader)
+            else:
+                self._readers.setdefault(symbol, set()).add(reader)
         return reader
 
     def remove_reader(self, symbol: str, reader: queue.Queue) -> None:
@@ -264,33 +280,77 @@ class MultiplexedMarketFeed:
                 readers.discard(reader)
                 if not readers:
                     self._readers.pop(symbol, None)
-        reader.put(None)
+        self._put_sentinel(reader)
+
+    @staticmethod
+    def _put_sentinel(q: queue.Queue, discard: bool = False) -> None:
+        if not discard:
+            try:
+                q.put_nowait(None)
+                return
+            except queue.Full:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    pass
+            try:
+                q.put_nowait(None)
+            except queue.Full:
+                pass
+            return
+        while True:
+            while True:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+            try:
+                q.put_nowait(None)
+                return
+            except queue.Full:
+                continue
 
     def close(self) -> None:
         """Stop the producer thread and unblock every reader."""
-        self._stop.set()
-        self._wake_loop()
-        if self._thread is not None:
-            self._thread.join(timeout=5.0)
-        with self._lock:
-            self._prev_cum.clear()
-            self._prev_price.clear()
-            self._drop_log_ts.clear()
-            self._drop_counts.clear()
-            self._last_route_mono.clear()
-            self._subscribe_mono.clear()
-            self._silent_log_ts.clear()
-            queues = tuple(self._queues.values())
-            readers = tuple(
-                reader
-                for symbol_readers in self._readers.values()
-                for reader in symbol_readers
-            )
-            self._readers.clear()
-        for q in queues:
-            q.put(None)
-        for reader in readers:
-            reader.put(None)
+        with self._close_lock:
+            with self._lock:
+                if self._stop.is_set() and self._thread is None:
+                    return
+                self._stop.set()
+                self._resync.clear()
+                thread = self._thread
+                queues = tuple(self._queues.values())
+                readers = tuple(
+                    reader
+                    for symbol_readers in self._readers.values()
+                    for reader in symbol_readers
+                )
+                self._readers.clear()
+
+            self._wake_stop()
+            self._wake_loop()
+            with self._lock:
+                for q in queues:
+                    self._put_sentinel(q, discard=True)
+                for reader in readers:
+                    self._put_sentinel(reader, discard=True)
+
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=5.0)
+
+            with self._lock:
+                if self._thread is thread and (thread is None or not thread.is_alive()):
+                    self._thread = None
+                self._prev_cum.clear()
+                self._prev_price.clear()
+                self._prev_ts.clear()
+                self._depth_cache.clear()
+                self._drop_log_ts.clear()
+                self._drop_counts.clear()
+                self._last_convert_drop = None
+                self._last_route_mono.clear()
+                self._subscribe_mono.clear()
+                self._silent_log_ts.clear()
 
     # ------------------------------------------------------------------
     # Producer
@@ -300,22 +360,44 @@ class MultiplexedMarketFeed:
         """Start the producer if not running, else signal a resync when the
         symbol set changed (a fresh symbol needs subscribing on the wire)."""
         with self._lock:
+            if self._stop.is_set():
+                return
             running = self._thread is not None and self._thread.is_alive()
-        if running:
-            if changed:
-                self._resync.set()
-                self._wake_loop()
-        else:
-            self._thread = threading.Thread(
-                target=self._producer, daemon=True, name="quant-mux-feed"
-            )
-            self._thread.start()
+            if not running:
+                self._thread = threading.Thread(
+                    target=self._producer, daemon=True, name="quant-mux-feed"
+                )
+                self._thread.start()
+        if running and changed:
+            self._resync.set()
+            self._wake_loop()
 
     def _wake_loop(self) -> None:
         """Wake the producer's event loop from another thread."""
         loop = self._loop
         if loop is not None and loop.is_running():
-            loop.call_soon_threadsafe(self._set_async_resync)
+            try:
+                loop.call_soon_threadsafe(self._set_async_resync)
+            except RuntimeError:
+                pass
+
+    def _wake_stop(self) -> None:
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            try:
+                loop.call_soon_threadsafe(self._stop_producer)
+            except RuntimeError:
+                pass
+
+    def _stop_producer(self) -> None:
+        if self._stop_async is not None:
+            self._stop_async.set()
+        self._cancel_stream_tasks()
+
+    def _cancel_stream_tasks(self) -> None:
+        for task in (self._anext_full, self._anext_depth, self._resync_task):
+            if task is not None and not task.done():
+                task.cancel()
 
     def _set_async_resync(self) -> None:
         if self._resync_async is not None:
@@ -330,105 +412,164 @@ class MultiplexedMarketFeed:
         self._loop = loop
         try:
             loop.run_until_complete(self._consume_loop())
+        except asyncio.CancelledError:
+            pass
         except Exception:
             logger.exception("MultiplexedMarketFeed producer crashed")
         finally:
-            self._loop = None
+            with self._lock:
+                self._loop = None
             loop.close()
 
     async def _consume_loop(self) -> None:
         consecutive_errors = 0
-        while not self._stop.is_set():
-            symbols = self._snapshot_symbols()
-            if not symbols:
-                await asyncio.sleep(0.5)
-                continue
-            
-            pending = self._resync.is_set()
-            self._resync_async = asyncio.Event()
-            if pending:
-                self._resync_async.set()
-            self._resync.clear()
-            
-            stream_full = None
-            stream_depth = None
-            try:
-                stream_full = self._md.stream_full(symbols)
-                if hasattr(self._md, "stream_depth_20"):
-                    stream_depth = self._md.stream_depth_20(symbols)
+        self._stop_async = asyncio.Event()
+        if self._stop.is_set():
+            self._stop_async.set()
+        try:
+            while not self._stop.is_set():
+                symbols = self._snapshot_symbols()
+                if not symbols:
+                    await self._sleep_with_stop(0.5)
+                    continue
+
+                pending = self._resync.is_set()
+                self._resync_async = asyncio.Event()
+                if pending:
+                    self._resync_async.set()
+                self._resync.clear()
+
+                stream_full = None
+                stream_depth = None
+                resync_task = None
                 anext_full = None
                 anext_depth = None
-                while True:
-                    if self._stop.is_set() or self._resync.is_set():
+                try:
+                    if self._stop.is_set():
                         break
-                        
-                    tasks = set()
-                    resync_task = asyncio.ensure_future(self._resync_async.wait())
-                    tasks.add(resync_task)
-                    
-                    if anext_full is None:
-                        anext_full = asyncio.ensure_future(stream_full.__anext__())
-                    tasks.add(anext_full)
-                    
-                    if stream_depth and anext_depth is None:
-                        anext_depth = asyncio.ensure_future(stream_depth.__anext__())
-                    if stream_depth:
-                        tasks.add(anext_depth)
-                        
-                    done, _ = await asyncio.wait(
-                        tasks,
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    
-                    if resync_task in done:
+                    stream_full = self._md.stream_full(symbols)
+                    if self._stop.is_set():
                         break
-                        
-                    if anext_full in done:
-                        try:
-                            pkt = anext_full.result()
-                            anext_full = None
-                            self._route(pkt)
-                            self._check_silent()
-                            consecutive_errors = 0
-                        except StopAsyncIteration:
+                    if hasattr(self._md, "stream_depth_20"):
+                        stream_depth = self._md.stream_depth_20(symbols)
+                    while True:
+                        if self._stop.is_set() or self._resync.is_set():
                             break
-                            
-                    if stream_depth and anext_depth in done:
-                        try:
-                            depth_obj = anext_depth.result()
-                            anext_depth = None
-                            self._route_depth(depth_obj)
-                            consecutive_errors = 0
-                        except (StopAsyncIteration, Exception) as depth_err:
-                            if not isinstance(depth_err, StopAsyncIteration):
-                                logger.debug("stream_depth ended (using stream_full 5-depth): %s", depth_err)
-                            # Depth stream dead — drop cached 20-level books so
-                            # ticks fall back to in-line 5-level depth.
-                            self._depth_cache.clear()
-                            stream_depth = None
-                            anext_depth = None
-                            
-            except Exception as exc:
-                if not self._stop.is_set():
+
+                        tasks = set()
+                        if resync_task is None:
+                            resync_task = asyncio.ensure_future(self._resync_async.wait())
+                            self._resync_task = resync_task
+                        tasks.add(resync_task)
+
+                        if anext_full is None:
+                            anext_full = asyncio.ensure_future(stream_full.__anext__())
+                            self._anext_full = anext_full
+                        tasks.add(anext_full)
+
+                        if stream_depth is not None and anext_depth is None:
+                            anext_depth = asyncio.ensure_future(stream_depth.__anext__())
+                            self._anext_depth = anext_depth
+                        if stream_depth is not None:
+                            tasks.add(anext_depth)
+
+                        done, _ = await asyncio.wait(
+                            tasks,
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+
+                        if self._stop.is_set():
+                            break
+                        if resync_task in done:
+                            break
+
+                        if anext_full in done:
+                            try:
+                                pkt = anext_full.result()
+                            except StopAsyncIteration:
+                                break
+                            except asyncio.CancelledError:
+                                if self._stop.is_set():
+                                    break
+                                raise
+                            else:
+                                anext_full = None
+                                self._anext_full = None
+                                self._route(pkt)
+                                self._check_silent()
+                                consecutive_errors = 0
+
+                        if stream_depth is not None and anext_depth in done:
+                            try:
+                                depth_obj = anext_depth.result()
+                            except (StopAsyncIteration, Exception) as depth_err:
+                                if not isinstance(depth_err, StopAsyncIteration):
+                                    logger.debug(
+                                        "stream_depth ended (using stream_full 5-depth): %s",
+                                        depth_err,
+                                    )
+                                self._depth_cache.clear()
+                                stream_depth = None
+                                anext_depth = None
+                                self._anext_depth = None
+                            else:
+                                anext_depth = None
+                                self._anext_depth = None
+                                self._route_depth(depth_obj)
+                                consecutive_errors = 0
+                except Exception as exc:
+                    if self._stop.is_set():
+                        break
                     consecutive_errors += 1
                     backoff = min(10.0, 1.0 * (1.5 ** min(consecutive_errors, 6)))
                     logger.warning(
                         "MultiplexedMarketFeed stream ended (%s): %s (retry in %.1fs)",
                         ",".join(symbols), exc, backoff,
                     )
-                    await asyncio.sleep(backoff)
-            finally:
-                self._resync_async = None
-                if stream_full is not None:
-                    await self._aclose_quietly(stream_full)
-                if stream_depth:
-                    await self._aclose_quietly(stream_depth)
+                    if not await self._sleep_with_stop(backoff):
+                        break
+                finally:
+                    tasks = {
+                        task
+                        for task in (resync_task, anext_full, anext_depth)
+                        if task is not None
+                    }
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    if tasks:
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                    self._resync_task = None
+                    self._anext_full = None
+                    self._anext_depth = None
+                    self._resync_async = None
+                    if stream_full is not None:
+                        await self._aclose_quietly(stream_full)
+                    if stream_depth is not None:
+                        await self._aclose_quietly(stream_depth)
+        finally:
+            self._stop_async = None
+
+    async def _sleep_with_stop(self, delay: float) -> bool:
+        if self._stop.is_set():
+            return False
+        stop_event = self._stop_async
+        if stop_event is None:
+            await asyncio.sleep(delay)
+            return not self._stop.is_set()
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            return not self._stop.is_set()
+        return False
 
     @staticmethod
     async def _aclose_quietly(stream) -> None:
         try:
             await stream.aclose()
-        except Exception:  # silent-except - best-effort stream close in shutdown
+        except asyncio.CancelledError:
+            pass
+        except Exception:
             pass
 
     # ------------------------------------------------------------------
@@ -497,6 +638,8 @@ class MultiplexedMarketFeed:
             )
 
     def _route(self, pkt: dict) -> None:
+        if self._stop.is_set():
+            return
         symbol = pkt.get("symbol") or pkt.get("_symbol")
         if not symbol:
             self._note_drop("missing_symbol", "<none>")
@@ -508,16 +651,19 @@ class MultiplexedMarketFeed:
             if self._last_convert_drop is None:
                 self._note_drop("convert_none", symbol)
             return
-        q = self._queues.get(symbol)
-        if q is None:
-            self._note_drop(
-                "no_queue", symbol, f"known={sorted(self._queues)}"
-            )
-            return
-        self._put_tick(q, tick, symbol)
-        for reader in tuple(self._readers.get(symbol, ())):
-            self._put_tick(reader, tick, symbol)
-        self._last_route_mono[symbol] = time.monotonic()
+        with self._lock:
+            if self._stop.is_set():
+                return
+            q = self._queues.get(symbol)
+            if q is None:
+                self._note_drop(
+                    "no_queue", symbol, f"known={sorted(self._queues)}"
+                )
+                return
+            self._put_tick(q, tick, symbol)
+            for reader in tuple(self._readers.get(symbol, ())):
+                self._put_tick(reader, tick, symbol)
+            self._last_route_mono[symbol] = time.monotonic()
 
     def silent_symbols(self, threshold_sec: float = 60.0) -> list[str]:
         """Subscribed symbols with no successfully routed packet for ``threshold_sec``.

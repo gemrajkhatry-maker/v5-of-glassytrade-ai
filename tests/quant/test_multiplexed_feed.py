@@ -14,6 +14,8 @@ import threading
 import time
 from datetime import datetime, timezone
 
+import pytest
+
 from quant.brokers.gateway import Tick
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 
@@ -67,6 +69,42 @@ def _wait_until(fn, timeout: float = 5.0) -> None:
     while not fn():
         assert time.monotonic() < deadline, "condition not met in time"
         time.sleep(0.01)
+
+
+class _FailingMarketData:
+    def __init__(self):
+        self.calls = 0
+        self.full_started = threading.Event()
+        self.depth_started = threading.Event()
+        self.full_closed = threading.Event()
+        self.depth_closed = threading.Event()
+
+    def _stream(self, started, closed):
+        async def _generator():
+            started.set()
+            try:
+                await asyncio.sleep(60)
+            finally:
+                closed.set()
+            yield {}
+
+        return _generator()
+
+    def stream_full(self, symbols):
+        self.calls += 1
+        return self._stream(self.full_started, self.full_closed)
+
+    def stream_depth_20(self, symbols):
+        return self._stream(self.depth_started, self.depth_closed)
+
+
+@pytest.fixture
+def managed_feed():
+    feed = _make_feed(_FailingMarketData())
+    try:
+        yield feed
+    finally:
+        feed.close()
 
 
 def test_set_symbols_issues_single_stream_full_call():
@@ -668,6 +706,63 @@ def test_silent_symbols_empty_right_after_route():
         feed.close()
 
 
+def test_close_cancels_failing_streams_and_is_idempotent(managed_feed):
+    feed = managed_feed
+    md = feed._md
+    reader = feed.add_reader("NIFTY")
+    for _ in range(4096):
+        reader.put(object())
+    feed.subscribe("NIFTY")
+
+    assert md.full_started.wait(timeout=2.0)
+    assert md.depth_started.wait(timeout=2.0)
+
+    feed.close()
+    feed.close()
+
+    assert feed._thread is None
+    assert md.full_closed.wait(timeout=1.0)
+    assert md.depth_closed.wait(timeout=1.0)
+    assert reader.get(timeout=1.0) is None
+    assert md.calls == 1
+
+    feed.subscribe("NIFTY")
+    assert feed._thread is None
+    assert md.calls == 1
+
+
+def test_close_interrupts_retry_backoff():
+    class _RetryFailingMarketData:
+        def __init__(self):
+            self.calls = 0
+            self.failed = threading.Event()
+
+        def stream_full(self, symbols):
+            self.calls += 1
+            if self.calls == 1:
+                self.failed.set()
+                raise RuntimeError("broker down")
+
+            async def _generator():
+                await asyncio.sleep(60)
+                yield {}
+
+            return _generator()
+
+    md = _RetryFailingMarketData()
+    feed = MultiplexedMarketFeed(md)
+    try:
+        feed.set_symbols(["NIFTY"])
+        assert md.failed.wait(timeout=2.0)
+        started = time.monotonic()
+        feed.close()
+        assert time.monotonic() - started < 0.5
+    finally:
+        feed.close()
+    assert feed._thread is None
+    assert md.calls == 1
+
+
 def test_producer_survives_stream_factory_failure():
     """A raising stream_full must trigger retry, not kill the producer thread."""
     import time as _time
@@ -690,15 +785,17 @@ def test_producer_survives_stream_factory_failure():
 
     md = _FlakyMD()
     feed = MultiplexedMarketFeed(md)
-    feed.set_symbols(["TEST FUT"])
-    tick = None
-    deadline = _time.time() + 15
-    while _time.time() < deadline:
-        tick = feed.try_next_tick("TEST FUT")
-        if tick is not None:
-            break
-        _time.sleep(0.05)
-    feed.close()
+    try:
+        feed.set_symbols(["TEST FUT"])
+        tick = None
+        deadline = _time.time() + 15
+        while _time.time() < deadline:
+            tick = feed.try_next_tick("TEST FUT")
+            if tick is not None:
+                break
+            _time.sleep(0.05)
+    finally:
+        feed.close()
     assert md.calls >= 2, "producer died instead of retrying"
     assert tick is not None and tick.price == 100.0
 
@@ -751,26 +848,26 @@ def test_health_snapshot_reports_silence_drops_and_producer():
     from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 
     feed = MultiplexedMarketFeed(MagicMock())
-    snap = feed.health_snapshot()
-    assert snap["silentSymbols"] == []
-    assert snap["dropCounts"] == {}
-    assert snap["pollFallback"] is False
-    assert snap["producerAlive"] is False  # not started yet
-
-    # Seed a drop and a subscribed-but-silent queue (past subscribe grace).
-    feed._note_drop("late_tick", "X", "ts=1")
-    feed.subscribe("SILENT")
-    import time as _t
-    feed._subscribe_mono["SILENT"] = _t.monotonic() - 120.0
-    snap = feed.health_snapshot()
-    assert snap["dropCounts"].get("late_tick:X") == 1
-    assert "SILENT" in snap["silentSymbols"]
-    assert snap["pollFallback"] is False
-    assert snap["pollFallbackAgeSec"] is None
-
-    # Producer thread reports alive once kicked.
-    feed.set_symbols(["SILENT"])
     try:
+        snap = feed.health_snapshot()
+        assert snap["silentSymbols"] == []
+        assert snap["dropCounts"] == {}
+        assert snap["pollFallback"] is False
+        assert snap["producerAlive"] is False  # not started yet
+
+        # Seed a drop and a subscribed-but-silent queue (past subscribe grace).
+        feed._note_drop("late_tick", "X", "ts=1")
+        feed.subscribe("SILENT")
+        import time as _t
+        feed._subscribe_mono["SILENT"] = _t.monotonic() - 120.0
+        snap = feed.health_snapshot()
+        assert snap["dropCounts"].get("late_tick:X") == 1
+        assert "SILENT" in snap["silentSymbols"]
+        assert snap["pollFallback"] is False
+        assert snap["pollFallbackAgeSec"] is None
+
+        # Producer thread reports alive once kicked.
+        feed.set_symbols(["SILENT"])
         _wait_until(lambda: feed.health_snapshot()["producerAlive"])
     finally:
         feed.close()
@@ -852,23 +949,29 @@ def test_stale_freshness_uses_arrival_not_old_ltt():
 def test_never_routed_not_silent_within_subscribe_grace():
     """Brand-new subscription before first packet must not flap /health."""
     feed = MultiplexedMarketFeed(_FakeMarketData({"FRESH FUT": []}))
-    feed.set_symbols(["FRESH FUT"])
-    assert feed.silent_symbols(threshold_sec=60.0) == [], (
-        "never-routed within subscribe grace must not be silent"
-    )
-    # Force past grace: fake subscribe time far in the past.
-    import time as _t
-    feed._subscribe_mono["FRESH FUT"] = _t.monotonic() - 120.0
-    assert "FRESH FUT" in feed.silent_symbols(threshold_sec=60.0)
+    try:
+        feed.set_symbols(["FRESH FUT"])
+        assert feed.silent_symbols(threshold_sec=60.0) == [], (
+            "never-routed within subscribe grace must not be silent"
+        )
+        # Force past grace: fake subscribe time far in the past.
+        import time as _t
+        feed._subscribe_mono["FRESH FUT"] = _t.monotonic() - 120.0
+        assert "FRESH FUT" in feed.silent_symbols(threshold_sec=60.0)
+    finally:
+        feed.close()
 
 
 def test_health_snapshot_copies_drop_counts():
     """dropCounts must be a snapshot copy, not a live reference."""
     feed = MultiplexedMarketFeed(_FakeMarketData({}))
-    feed.set_symbols(["A"])
-    feed._note_drop("convert_none", "A")
-    snap = feed.health_snapshot()
-    assert snap["dropCounts"].get("convert_none:A", 0) >= 1
-    # Mutating the copy must not touch the feed's dict.
-    snap["dropCounts"]["convert_none:A"] = 999
-    assert feed._drop_counts["convert_none:A"] != 999
+    try:
+        feed.set_symbols(["A"])
+        feed._note_drop("convert_none", "A")
+        snap = feed.health_snapshot()
+        assert snap["dropCounts"].get("convert_none:A", 0) >= 1
+        # Mutating the copy must not touch the feed's dict.
+        snap["dropCounts"]["convert_none:A"] = 999
+        assert feed._drop_counts["convert_none:A"] != 999
+    finally:
+        feed.close()

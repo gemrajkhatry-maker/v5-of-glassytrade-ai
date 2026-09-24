@@ -1,4 +1,8 @@
+import asyncio
+import threading
+
 from quant.bars import Bar
+from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 from quant.decision.decision_service import QuantDecision
 from quant.decision.signal_builder import Signal
 from quant.event_store import EventStore
@@ -52,6 +56,33 @@ def _view_state_with_everything():
             qd = _decision_to_view(e.decision)
     from dataclasses import replace
     return replace(vs, amt=amt, quant_decision=qd)
+
+
+def test_feed_close_cancels_pending_stream():
+    started = threading.Event()
+    closed = threading.Event()
+
+    class _FailingStream:
+        def stream_full(self, symbols):
+            async def _generator():
+                started.set()
+                try:
+                    await asyncio.sleep(60)
+                finally:
+                    closed.set()
+                yield {}
+
+            return _generator()
+
+    feed = MultiplexedMarketFeed(_FailingStream())
+    try:
+        feed.set_symbols(["NIFTY"])
+        assert started.wait(timeout=2.0)
+        feed.close()
+        assert feed._thread is None
+        assert closed.is_set()
+    finally:
+        feed.close()
 
 
 def test_ws_snapshot_has_all_frontend_keys():
