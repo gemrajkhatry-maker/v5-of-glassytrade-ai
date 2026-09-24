@@ -111,6 +111,10 @@ class _RecordingPaperOMS(PaperOMS):
         return None
 
 
+def _exact_provenance() -> dict[str, DataQuality]:
+    return {family: DataQuality.TICK_EXACT for family in REQUIRED_EVIDENCE_FAMILIES}
+
+
 def _bar():
     return Bar(time="2026-01-15T10:00:00+05:30", open=100, high=105, low=95, close=102, volume=1000)
 
@@ -133,13 +137,15 @@ def _loop(oms, quality, *, underlying_gateway=None, live_mode=None, records=None
     prov = provenance if provenance is not None else quality
     if isinstance(prov, DataQuality):
         prov = {family: prov for family in REQUIRED_EVIDENCE_FAMILIES}
+    elif not isinstance(prov, dict):
+        prov = {}
     amt.last_amt_dto = {
         "dataQuality": quality.value,
         "evidenceProvenance": {
             family: (
                 prov[family].value
-                if isinstance(prov[family], DataQuality)
-                else str(prov[family])
+                if family in prov and isinstance(prov[family], DataQuality)
+                else str(prov.get(family, "UNAVAILABLE"))
             )
             for family in REQUIRED_EVIDENCE_FAMILIES
         },
@@ -287,6 +293,60 @@ def test_live_uses_family_provenance_instead_of_aggregate_quality():
     ).evaluate({}, _bar())
 
     assert decision.reason == "PROXY_FLOW_BLOCKED"
+
+
+def test_live_uses_exact_families_when_aggregate_quality_is_proxy():
+    broker = _Broker()
+    oms = LiveOMS(broker=broker, portfolio=object())
+
+    decision = _loop(
+        oms,
+        DataQuality.PRICE_DIRECTION_PROXY,
+        provenance=_exact_provenance(),
+    ).evaluate({}, _bar())
+
+    assert decision.approved is True
+    assert decision.reason != "PROXY_FLOW_BLOCKED"
+    assert broker.submissions
+
+
+@pytest.mark.parametrize("family", REQUIRED_EVIDENCE_FAMILIES)
+def test_live_blocks_each_required_family_when_not_exact(family):
+    provenance = _exact_provenance()
+    provenance[family] = DataQuality.PRICE_DIRECTION_PROXY
+    broker = _Broker()
+    oms = LiveOMS(broker=broker, portfolio=object())
+
+    decision = _loop(
+        oms, DataQuality.TICK_EXACT, provenance=provenance,
+    ).evaluate({}, _bar())
+
+    assert decision.approved is False
+    assert decision.reason == "PROXY_FLOW_BLOCKED"
+    assert decision.metadata["failed_evidence_families"] == [family]
+    assert any(family in reason for reason in decision.block_reasons)
+    assert broker.submissions == []
+
+
+@pytest.mark.parametrize("family", REQUIRED_EVIDENCE_FAMILIES)
+@pytest.mark.parametrize("bad_kind", ["missing", "invalid"])
+def test_live_fails_closed_for_missing_or_invalid_family(family, bad_kind):
+    provenance = _exact_provenance()
+    if bad_kind == "missing":
+        del provenance[family]
+    else:
+        provenance[family] = "NOT_A_PROVENANCE"
+    broker = _Broker()
+    oms = LiveOMS(broker=broker, portfolio=object())
+
+    decision = _loop(
+        oms, DataQuality.TICK_EXACT, provenance=provenance,
+    ).evaluate({}, _bar())
+
+    assert decision.approved is False
+    assert decision.reason == "PROXY_FLOW_BLOCKED"
+    assert decision.metadata["failed_evidence_families"] == [family]
+    assert broker.submissions == []
 
 
 def test_live_capability_cannot_be_downgraded_by_false_config_override():

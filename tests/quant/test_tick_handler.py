@@ -4,8 +4,11 @@ import logging
 from unittest.mock import MagicMock, Mock
 
 from quant.brokers.gateway import Tick
+from quant.contracts.value_objects import OrderBook, OrderBookLevel
 from quant.engine.tick_handler import TickHandler
+from quant.runtime import QuantEngine
 from quant.state import LiveQuoteCache
+from tests.helpers.synthetic import SyntheticGateway
 
 
 class TestTickHandlerExists:
@@ -402,10 +405,9 @@ class TestTickHandlerLiveQuote:
         # Verify depth callback was called
         depth_callback.assert_called_once_with(tick.depth)
     
-    def test_depth_callback_skipped_when_no_depth(self):
-        """Ensure depth callback is NOT invoked when tick has no depth."""
+    def test_depth_callback_clears_when_no_depth(self):
         depth_callback = MagicMock()
-        
+
         handler = TickHandler(
             symbol="NIFTY24SEPFUT",
             macro_aggregator=MagicMock(),
@@ -418,19 +420,64 @@ class TestTickHandlerLiveQuote:
             manage_exit_callback=MagicMock(),
             depth_callback=depth_callback,
         )
-        
+
         tick = Mock()
         tick.price = 20000.0
         tick.time = "2026-09-16T10:00:00"
         tick.depth = None
-        
+
         handler.process_tick(tick)
-        
-        # Depth-less tape receives synthetic 1-tick book around LTP for Gate 1
-        depth_callback.assert_called_once_with({
-            "bids": [{"price": 19999.95, "quantity": 1.0}],
-            "asks": [{"price": 20000.05, "quantity": 1.0}],
-        })
+
+        depth_callback.assert_called_once_with(None)
+
+    def test_depth_callback_clears_before_amt_work(self):
+        events = []
+        macro_aggregator = MagicMock()
+        macro_aggregator.current_bar = MagicMock()
+        amt_engine = MagicMock()
+        amt_engine.on_tick.side_effect = lambda *_: events.append("amt")
+        depth_callback = MagicMock(
+            side_effect=lambda depth: events.append("depth"),
+        )
+        handler = TickHandler(
+            symbol="NIFTY24SEPFUT",
+            macro_aggregator=macro_aggregator,
+            micro_aggregator=None,
+            amt_engine=amt_engine,
+            state_getter=lambda: MagicMock(position=None),
+            manage_tick_exit_callback=MagicMock(),
+            decide_callback=MagicMock(),
+            on_bar_closed_callback=MagicMock(),
+            manage_exit_callback=MagicMock(),
+            depth_callback=depth_callback,
+        )
+
+        handler.process_tick(
+            Tick(time="2026-09-16T10:00:00", price=20000.0, volume=1.0)
+        )
+
+        assert events == ["depth", "amt"]
+        depth_callback.assert_called_once_with(None)
+
+    def test_depthless_tick_clears_engine_depth_before_amt_analysis(self):
+        engine = QuantEngine(SyntheticGateway([]), "NIFTY", interval_seconds=1)
+        engine._last_depth = OrderBook(
+            bids=(OrderBookLevel(19999.95, 100),),
+            asks=(OrderBookLevel(20000.05, 100),),
+        )
+        observed = []
+        engine._amt_engine.on_tick = MagicMock(
+            side_effect=lambda *_: observed.append(engine._last_depth),
+        )
+        handler = engine._create_tick_handler()
+
+        handler.process_tick(
+            Tick(time="2026-09-16T10:00:00", price=20000.0, volume=1.0)
+        )
+
+        assert observed == [None]
+        assert engine._last_depth is None
+        assert engine._decision_loop._get_last_depth() is None
 
     def test_depthless_tick_clears_cached_depth(self):
         cache = LiveQuoteCache()

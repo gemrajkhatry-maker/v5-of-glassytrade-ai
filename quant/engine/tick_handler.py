@@ -189,7 +189,10 @@ class TickHandler:
                 self.symbol, "tick",
                 str(tick.time), float(tick.price), "option",
             )
-        
+
+        if self._depth_callback is not None:
+            self._depth_callback(getattr(tick, "depth", None))
+
         # Route to option or futures path
         if self._underlying_gateway is not None:
             self._process_option_tick(tick, state)
@@ -202,8 +205,6 @@ class TickHandler:
                 self.symbol, tick, self._macro_aggregator.current_bar
             )
         
-        if self._depth_callback is not None and tick.depth is not None:
-            self._depth_callback(tick.depth)
     
     def _process_option_tick(self, tick: Any, state: Any) -> None:
         """Process tick for option contracts with underlying feed.

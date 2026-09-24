@@ -28,6 +28,7 @@ from quant.decision.pipeline import GatePipeline
 from quant.events import DecisionProduced, PositionClosed
 from quant.decision.signal_builder import Signal
 from quant.runtime import QuantEngine
+from tests.quant.runtime.test_positive_approval import _depth_for
 
 
 def _signal(side="LONG", entry=100.0, sl=90.0, tp=120.0):
@@ -83,17 +84,26 @@ def _short_approval_ticks():
     — the spike's own bucket smoothed into a local minimum — which spec
     §5.1 rule 4's absolute floor V(p) < 0.35 x V_bar_profile correctly rejects.
     """
-    out = [Tick(f"t{i}", 100.05 if i % 2 == 0 else 99.75, 10, 1, 9)
-           for i in range(300)]
+    out = [
+        Tick(
+            f"t{i}",
+            100.05 if i % 2 == 0 else 99.75,
+            10,
+            1,
+            9,
+            depth=_depth_for(100.05 if i % 2 == 0 else 99.75),
+        )
+        for i in range(300)
+    ]
     # Down leg first, with a genuine interior void at 99.90.
-    out.append(Tick("t300", 99.95, 40, 5, 35))    # down 1
-    out.append(Tick("t301", 99.90, 2, 1, 1))      # interior void (leg LVN)
-    out.append(Tick("t302", 99.85, 40, 5, 35))    # down 2
+    out.append(Tick("t300", 99.95, 40, 5, 35, depth=_depth_for(99.95)))    # down 1
+    out.append(Tick("t301", 99.90, 2, 1, 1, depth=_depth_for(99.90)))      # interior void (leg LVN)
+    out.append(Tick("t302", 99.85, 40, 5, 35, depth=_depth_for(99.85)))    # down 2
     # Absorption spike: 50x volume, buy-dominant (64% buyers), zero-range,
     # at a price the leg never trades so the void is not contaminated.
-    out.append(Tick("t303", 99.85, 500, 320, 180))  # BUY_ABSORBED pending
-    out.append(Tick("t304", 99.80, 40, 5, 35))    # displacement down -> AGGRESSION
-    out.append(Tick("t305", 99.80, 10, 4, 6))      # bar after AGGRESSION
+    out.append(Tick("t303", 99.85, 500, 320, 180, depth=_depth_for(99.85)))  # BUY_ABSORBED pending
+    out.append(Tick("t304", 99.80, 100, 10, 90, depth=_depth_for(99.80)))    # displacement down -> AGGRESSION
+    out.append(Tick("t305", 99.80, 100, 10, 90, depth=_depth_for(99.80)))      # bar after AGGRESSION
     return out
 
 
@@ -118,7 +128,10 @@ def test_contrary_approval_flattens_position():
     # flat-path cooldown guard fires deterministically (reason COOLDOWN).
     eng = _positioned_engine(
         _short_approval_ticks()
-        + [Tick("t400", 99.55, 10, 1, 9), Tick("t401", 99.50, 10, 1, 9)],
+        + [
+            Tick("t400", 99.55, 10, 1, 9, depth=_depth_for(99.55)),
+            Tick("t401", 99.50, 10, 1, 9, depth=_depth_for(99.50)),
+        ],
         "FLIP", side="LONG", entry=98.5,
     )
     trades_before = eng._risk.state().trades_today

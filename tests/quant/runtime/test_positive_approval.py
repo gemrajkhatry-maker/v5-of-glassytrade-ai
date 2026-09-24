@@ -7,11 +7,9 @@ Triple-A → gate approval. Two properties are pinned here:
   * the organic-tick pipeline is deterministic — two runs emit byte-identical
     event traces;
   * the data-quality safety gate is load-bearing. The fixture runs under a
-    real instrument symbol (``NIFTY``) so the engine classifies its CVD source
-    as ``underlying`` and, once the footprint accumulator has published, the
-    DTO reports ``TICK_EXACT`` and conviction is allowed through. The bars
-    before the first completed footprint still report ``CANDLE_GAUSSIAN`` and
-    the gate must block them.
+    real instrument symbol (``NIFTY``) and supplies an explicit L2 book on
+    every tick. The paper path keeps the CVD price-direction proxy visible in
+    ``PROXY_MODE`` metadata while the organic Triple-A path still approves.
 """
 
 from quant.brokers.gateway import Tick
@@ -26,6 +24,20 @@ from quant.runtime import QuantEngine
 # data-quality gate blocks every decision, so an unrecognizable placeholder
 # would silently exercise nothing. NIFTY resolves as a tradable underlying.
 _SYMBOL = "NIFTY"
+
+
+def _depth_for(price: float) -> dict:
+    price = round(float(price), 4)
+    return {
+        "bids": [
+            {"price": round(price - 0.05, 4), "quantity": 100},
+            {"price": round(price - 0.10, 4), "quantity": 250},
+        ],
+        "asks": [
+            {"price": round(price + 0.05, 4), "quantity": 100},
+            {"price": round(price + 0.10, 4), "quantity": 250},
+        ],
+    }
 
 
 def _organic_approval_ticks():
@@ -60,20 +72,29 @@ def _organic_approval_ticks():
     fixture was reworked to contain a REAL interior void (the t301 bucket at
     2 lots, an order of magnitude below its 40-lot neighbours).
     """
-    out = [Tick(f"t{i}", 99.95 if i % 2 == 0 else 100.25, 10, 9, 1)
-           for i in range(300)]
+    out = [
+        Tick(
+            f"t{i}",
+            99.95 if i % 2 == 0 else 100.25,
+            10,
+            9,
+            1,
+            depth=_depth_for(99.95 if i % 2 == 0 else 100.25),
+        )
+        for i in range(300)
+    ]
     # Leg first: an up-run with a genuine interior low-volume void at 100.10.
     # The void's bucket volume (2) is ~5% of its 40-lot neighbours, so it
     # clears the 0.35 x mean floor AND the percentile gate AND is strictly
     # interior — gate 3's LVN proximity window then catches 100.05/100.10.
-    out.append(Tick("t300", 100.05, 40, 35, 5))    # up 1
-    out.append(Tick("t301", 100.10, 2, 1, 1))      # interior void (leg LVN)
-    out.append(Tick("t302", 100.15, 40, 35, 5))    # up 2
+    out.append(Tick("t300", 100.05, 40, 35, 5, depth=_depth_for(100.05)))    # up 1
+    out.append(Tick("t301", 100.10, 2, 1, 1, depth=_depth_for(100.10)))      # interior void (leg LVN)
+    out.append(Tick("t302", 100.15, 40, 35, 5, depth=_depth_for(100.15)))    # up 2
     # Absorption spike: 50x volume, sell-dominant (64% sellers), zero-range,
     # at a price the leg never trades so the void is not contaminated.
-    out.append(Tick("t303", 100.15, 500, 180, 320))  # SELL_ABSORBED pending
-    out.append(Tick("t304", 100.20, 40, 35, 5))    # displacement up -> AGGRESSION
-    out.append(Tick("t305", 100.20, 10, 6, 4))      # bar after AGGRESSION
+    out.append(Tick("t303", 100.15, 500, 180, 320, depth=_depth_for(100.15)))  # SELL_ABSORBED pending
+    out.append(Tick("t304", 100.20, 100, 90, 10, depth=_depth_for(100.20)))    # displacement up -> AGGRESSION
+    out.append(Tick("t305", 100.20, 100, 90, 10, depth=_depth_for(100.20)))      # bar after AGGRESSION
     return out
 
 

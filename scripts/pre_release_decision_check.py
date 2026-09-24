@@ -201,17 +201,14 @@ def check_dead_market_enum():
 
 
 def check_data_quality_gate_reachable():
-    """DecisionLoop is the sole data-quality authority (v7 prune N3).
-
-    DecisionService intentionally no longer pre-gates quality (gates 1-4 are
-    quality-agnostic). Live OMS requires TICK_EXACT or PRICE_DIRECTION_PROXY;
-    other grades are blocked with PROXY_FLOW_BLOCKED before OMS submission.
-    """
-    import dataclasses  # noqa: F401
-
+    """DecisionLoop is the sole per-family live evidence authority."""
     from quant.bars import Bar
     from quant.decision.context import DecisionContext
-    from quant.decision.data_quality import DataQuality
+    from quant.decision.data_quality import (
+        DataQuality,
+        REQUIRED_EVIDENCE_FAMILIES,
+        failed_evidence_families,
+    )
     from quant.decision.decision_service import QuantDecision
     from quant.engine.decision_loop import DecisionLoop
 
@@ -220,7 +217,7 @@ def check_data_quality_gate_reachable():
         lot_size = 1
 
         def submit(self, signal, quantity):
-            raise AssertionError("must not submit when quality blocked")
+            raise AssertionError("must not submit while probing the evidence gate")
 
     class _Risk:
         class _State:
@@ -240,49 +237,108 @@ def check_data_quality_gate_reachable():
         def position_size(self, *a, **k):
             return 1
 
-    bar = Bar(time="2026-01-15T10:00:00+05:30", open=100, high=105, low=95, close=102, volume=1000)
+    bar = Bar(
+        time="2026-01-15T10:00:00+05:30",
+        open=100,
+        high=105,
+        low=95,
+        close=102,
+        volume=1000,
+    )
 
-    def _ctx(quality):
+    def _ctx(quality, provenance):
         return DecisionContext(
-            bar=bar, symbol="SYM", data_quality=quality, agent_probability=0.7,
+            bar=bar,
+            symbol="SYM",
+            data_quality=quality,
+            evidence_provenance=provenance,
+            agent_probability=0.7,
         )
 
     def _loop():
         from quant.decision.signal_builder import Signal
 
         decision = QuantDecision(
-            True, Signal("LONG", "Triple-A", 100, 98, 106, 3, "Triple-A", "SYM", "t"),
-            "Triple-A", "", (), model_label="Triple-A",
+            True,
+            Signal("LONG", "Triple-A", 100, 98, 106, 3, "Triple-A", "SYM", "t"),
+            "Triple-A",
+            "",
+            (),
+            model_label="Triple-A",
         )
         strategy = type("S", (), {"should_enter": lambda self, ctx: decision})()
         return DecisionLoop(
             config={"symbol": "SYM", "market": "NSE", "cooldown_bars": 0, "live_mode": True},
-            deps={"risk": _Risk(), "oms": _LiveOMS(), "strategy": strategy,
-                  "amt_engine": type("A", (), {"warm_bars": 20, "interval_seconds": 300, "last_amt_dto": {}})(),
-                  "get_position_manager": lambda: None, "execution_enabled": True},
-            state={"get_bar_index": lambda: 10, "get_entry_bar_index": lambda: 0,
-                   "set_entry_bar_index": lambda v: None, "get_last_close_bar_index": lambda: -1,
-                   "get_latch": lambda: {}, "set_latch": lambda k, v: None,
-                   "clear_latch": lambda: None, "get_cert_records": lambda: [],
-                   "get_last_depth": lambda: None, "get_recent_decisions": lambda: [],
-                   "get_exposure_state": lambda: None},
+            deps={
+                "risk": _Risk(),
+                "oms": _LiveOMS(),
+                "strategy": strategy,
+                "amt_engine": type(
+                    "A",
+                    (),
+                    {"warm_bars": 20, "interval_seconds": 300, "last_amt_dto": {}},
+                )(),
+                "get_position_manager": lambda: None,
+                "execution_enabled": True,
+            },
+            state={
+                "get_bar_index": lambda: 10,
+                "get_entry_bar_index": lambda: 0,
+                "set_entry_bar_index": lambda v: None,
+                "get_last_close_bar_index": lambda: -1,
+                "get_latch": lambda: {},
+                "set_latch": lambda k, v: None,
+                "clear_latch": lambda: None,
+                "get_cert_records": lambda: [],
+                "get_last_depth": lambda: None,
+                "get_recent_decisions": lambda: [],
+                "get_exposure_state": lambda: None,
+            },
             emit=lambda e: None,
         )
 
-    loop = _loop()
-    loop._build_context = lambda bar, amt_dto, cooldown: _ctx(DataQuality.CANDLE_DISTRIBUTED)
-    dec_candle = loop.evaluate({}, bar)
-    loop._build_context = lambda bar, amt_dto, cooldown: _ctx(DataQuality.TICK_EXACT)
-    dec_exact = loop.evaluate({}, bar)
+    def _decide(quality, provenance):
+        loop = _loop()
+        loop._build_context = lambda bar, amt_dto, cooldown: _ctx(quality, provenance)
+        return loop._build_decision({}, bar, None, 0.0)[0]
+
+    exact = {family: DataQuality.TICK_EXACT for family in REQUIRED_EVIDENCE_FAMILIES}
+    proxy = {**exact, "cvd_delta": DataQuality.PRICE_DIRECTION_PROXY}
+    missing = {family: exact[family] for family in REQUIRED_EVIDENCE_FAMILIES if family != "ofi_depth"}
+    invalid = {**exact, "absorption": "NOT_A_PROVENANCE"}
+    candle = {family: DataQuality.CANDLE_DISTRIBUTED for family in REQUIRED_EVIDENCE_FAMILIES}
+
+    inferred = _decide(DataQuality.CANDLE_DISTRIBUTED, candle)
+    family_proxy = _decide(DataQuality.TICK_EXACT, proxy)
+    inverse = _decide(DataQuality.PRICE_DIRECTION_PROXY, exact)
+    missing_decision = _decide(DataQuality.TICK_EXACT, missing)
+    invalid_decision = _decide(DataQuality.TICK_EXACT, invalid)
 
     blocked_ok = (
-        dec_candle.approved is False and dec_candle.reason == "PROXY_FLOW_BLOCKED"
+        inferred.approved is False and inferred.reason == "PROXY_FLOW_BLOCKED"
     )
-    allowed_ok = dec_exact.reason != "PROXY_FLOW_BLOCKED"
+    family_names_ok = (
+        failed_evidence_families(proxy) == ("cvd_delta",)
+        and family_proxy.approved is False
+        and family_proxy.reason == "PROXY_FLOW_BLOCKED"
+        and any("cvd_delta" in reason for reason in family_proxy.block_reasons)
+    )
+    inverse_ok = inverse.approved is True and inverse.reason != "PROXY_FLOW_BLOCKED"
+    missing_ok = (
+        failed_evidence_families(missing) == ("ofi_depth",)
+        and missing_decision.approved is False
+    )
+    invalid_ok = (
+        failed_evidence_families(invalid) == ("absorption",)
+        and invalid_decision.approved is False
+    )
     _add(
-        "C. Decision behaviour", "inferred data quality blocks, exact quality does not",
-        blocked_ok and allowed_ok,
-        f"inferred -> {dec_candle.reason}, exact -> {dec_exact.reason}",
+        "C. Decision behaviour",
+        "per-family live evidence gate fails closed",
+        blocked_ok and family_names_ok and inverse_ok and missing_ok and invalid_ok,
+        f"inferred={inferred.reason}, family={family_proxy.reason}, "
+        f"inverse={inverse.reason}, missing={missing_decision.reason}, "
+        f"invalid={invalid_decision.reason}",
     )
 
 
