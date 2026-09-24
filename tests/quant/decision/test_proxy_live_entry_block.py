@@ -4,7 +4,11 @@ from quant.execution.live_oms import EmergencyFlattenError, LiveOMS
 from quant.execution.oms import PaperOMS
 
 from quant.bars import Bar
-from quant.decision.data_quality import REQUIRED_EVIDENCE_FAMILIES, DataQuality
+from quant.decision.data_quality import (
+    REQUIRED_EVIDENCE_FAMILIES,
+    DataQuality,
+    failed_evidence_families,
+)
 from quant.decision.decision_service import QuantDecision
 from quant.decision.signal_builder import Signal
 from quant.engine.decision_loop import DecisionLoop
@@ -54,9 +58,8 @@ class _AMT:
 class _Broker:
     """Live broker double: records submissions and fills at entry price.
 
-    Blocked-quality tests assert submissions == [] before OMS runs; allowed
-    qualities (TICK_EXACT / PRICE_DIRECTION_PROXY) must reach the broker and
-    fill so DecisionLoop can approve.
+    Blocked-quality tests assert submissions == [] before OMS runs; exact
+    evidence must reach the broker and fill so DecisionLoop can approve.
     """
 
     def __init__(self, fill_price: float = 100.0, fill_qty: float = 1.0):
@@ -127,11 +130,18 @@ def _loop(oms, quality, *, underlying_gateway=None, live_mode=None, records=None
     if live_mode is not None:
         config["live_mode"] = live_mode
     amt = _AMT()
-    prov = provenance or quality
+    prov = provenance if provenance is not None else quality
+    if isinstance(prov, DataQuality):
+        prov = {family: prov for family in REQUIRED_EVIDENCE_FAMILIES}
     amt.last_amt_dto = {
         "dataQuality": quality.value,
         "evidenceProvenance": {
-            family: prov.value for family in REQUIRED_EVIDENCE_FAMILIES
+            family: (
+                prov[family].value
+                if isinstance(prov[family], DataQuality)
+                else str(prov[family])
+            )
+            for family in REQUIRED_EVIDENCE_FAMILIES
         },
     }
     loop = DecisionLoop(
@@ -148,6 +158,57 @@ def _loop(oms, quality, *, underlying_gateway=None, live_mode=None, records=None
          emit=(events.append if events is not None else lambda event: None),
     )
     return loop
+
+
+def test_failed_evidence_families_uses_required_order():
+    provenance = {
+        "footprint_imbalance": DataQuality.TICK_EXACT,
+        "cvd_delta": DataQuality.PRICE_DIRECTION_PROXY,
+        "ofi_depth": DataQuality.UNAVAILABLE,
+        "absorption": DataQuality.TICK_EXACT,
+        "stacked_imbalance": DataQuality.TICK_EXACT,
+    }
+
+    assert failed_evidence_families(provenance) == ("cvd_delta", "ofi_depth")
+
+
+def test_live_block_names_each_non_exact_family_when_aggregate_is_exact():
+    provenance = {
+        "footprint_imbalance": DataQuality.TICK_EXACT,
+        "cvd_delta": DataQuality.PRICE_DIRECTION_PROXY,
+        "ofi_depth": DataQuality.UNAVAILABLE,
+        "absorption": DataQuality.TICK_EXACT,
+        "stacked_imbalance": DataQuality.TICK_EXACT,
+    }
+    oms = LiveOMS(broker=_Broker(), portfolio=object())
+
+    decision = _loop(
+        oms, DataQuality.TICK_EXACT, provenance=provenance,
+    ).evaluate({}, _bar())
+
+    assert decision.approved is False
+    assert decision.reason == "PROXY_FLOW_BLOCKED"
+    assert any("cvd_delta" in reason for reason in decision.block_reasons)
+    assert any("ofi_depth" in reason for reason in decision.block_reasons)
+
+
+def test_paper_replay_keeps_proxy_metadata_for_family_failure():
+    provenance = {
+        "footprint_imbalance": DataQuality.TICK_EXACT,
+        "cvd_delta": DataQuality.PRICE_DIRECTION_PROXY,
+        "ofi_depth": DataQuality.UNAVAILABLE,
+        "absorption": DataQuality.TICK_EXACT,
+        "stacked_imbalance": DataQuality.TICK_EXACT,
+    }
+    oms = _RecordingPaperOMS()
+
+    decision = _loop(
+        oms, DataQuality.TICK_EXACT, provenance=provenance,
+    ).evaluate({}, _bar())
+
+    assert decision.approved is True
+    assert decision.metadata["mode"] == "PROXY_MODE"
+    assert decision.metadata["failed_evidence_families"] == ["cvd_delta", "ofi_depth"]
 
 
 def test_live_proxy_entry_is_blocked_before_oms_submission():
@@ -178,8 +239,7 @@ def test_live_unavailable_entry_is_blocked_before_oms_submission():
     ],
 )
 def test_live_blocks_candle_and_unavailable_quality(quality):
-    """Candle-only / unavailable grades still block live OMS. PROXY is
-    accepted because Dhan has no aggressor flag (honest tape ceiling)."""
+    """Candle-only and unavailable grades block live OMS."""
     oms = LiveOMS(broker=_Broker(), portfolio=object())
     decision = _loop(oms, quality).evaluate({}, _bar())
 
@@ -187,10 +247,14 @@ def test_live_blocks_candle_and_unavailable_quality(quality):
     assert decision.reason == "PROXY_FLOW_BLOCKED"
 
 
-def test_live_accepts_price_direction_proxy():
-    oms = LiveOMS(broker=_Broker(), portfolio=object())
+def test_live_price_direction_proxy_is_blocked():
+    broker = _Broker()
+    oms = LiveOMS(broker=broker, portfolio=object())
     decision = _loop(oms, DataQuality.PRICE_DIRECTION_PROXY).evaluate({}, _bar())
-    assert decision.approved is True
+
+    assert decision.approved is False
+    assert decision.reason == "PROXY_FLOW_BLOCKED"
+    assert broker.submissions == []
 
 
 def test_legacy_broker_without_capability_is_blocked_before_entry():
@@ -210,12 +274,16 @@ def test_live_tick_exact_entry_passes_to_live_oms():
     assert decision.approved is True
 
 
-def test_live_blocks_one_non_exact_evidence_family_even_when_aggregate_is_exact():
+def test_live_uses_family_provenance_instead_of_aggregate_quality():
     oms = LiveOMS(broker=_Broker(), portfolio=object())
-    # Non-exact aggregate quality with exact evidence families still blocks
-    # live entry — the DecisionLoop gate reads ctx.data_quality.
+    provenance = {
+        family: DataQuality.TICK_EXACT
+        for family in REQUIRED_EVIDENCE_FAMILIES
+    }
+    provenance["cvd_delta"] = DataQuality.PRICE_DIRECTION_PROXY
+
     decision = _loop(
-        oms, DataQuality.CANDLE_DISTRIBUTED, provenance=DataQuality.TICK_EXACT,
+        oms, DataQuality.TICK_EXACT, provenance=provenance,
     ).evaluate({}, _bar())
 
     assert decision.reason == "PROXY_FLOW_BLOCKED"

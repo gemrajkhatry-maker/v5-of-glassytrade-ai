@@ -259,8 +259,7 @@ class LiveQuoteCache:
             s = self._symbol_state(symbol)
             s["ltp"] = float(tick.price)
             s["oi"] = float(tick.oi)
-            if tick.depth is not None:
-                s["depth"] = tick.depth
+            s["depth"] = getattr(tick, "depth", None)
             if current_bar is not None:
                 s["tick"] = _bar_to_tick(current_bar, interval_sec=self._interval_sec)
 

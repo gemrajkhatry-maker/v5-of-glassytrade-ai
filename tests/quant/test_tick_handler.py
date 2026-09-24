@@ -3,7 +3,9 @@
 import logging
 from unittest.mock import MagicMock, Mock
 
+from quant.brokers.gateway import Tick
 from quant.engine.tick_handler import TickHandler
+from quant.state import LiveQuoteCache
 
 
 class TestTickHandlerExists:
@@ -429,6 +431,40 @@ class TestTickHandlerLiveQuote:
             "bids": [{"price": 19999.95, "quantity": 1.0}],
             "asks": [{"price": 20000.05, "quantity": 1.0}],
         })
+
+    def test_depthless_tick_clears_cached_depth(self):
+        cache = LiveQuoteCache()
+        cache.on_quote(
+            "NIFTY24SEPFUT",
+            Tick(
+                time="2026-09-16T10:00:00",
+                price=20000.0,
+                volume=1.0,
+                depth={"bids": [], "asks": []},
+            ),
+        )
+        handler = TickHandler(
+            symbol="NIFTY24SEPFUT",
+            macro_aggregator=MagicMock(),
+            micro_aggregator=None,
+            amt_engine=MagicMock(),
+            state_getter=lambda: MagicMock(position=None),
+            manage_tick_exit_callback=MagicMock(),
+            decide_callback=MagicMock(),
+            on_bar_closed_callback=MagicMock(),
+            manage_exit_callback=MagicMock(),
+            live_quote_callback=cache.on_quote,
+        )
+
+        handler.process_tick(
+            Tick(
+                time="2026-09-16T10:00:01",
+                price=20000.0,
+                volume=1.0,
+            )
+        )
+
+        assert cache.snapshot("NIFTY24SEPFUT").depth is None
 
 
 class TestTickHandlerHotpath:

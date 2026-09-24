@@ -150,12 +150,11 @@ def test_quote_updates_ltp_oi_depth_per_tick():
     assert v.oi == 42.0
     assert v.depth == {"bids": [{"price": 104.5, "quantity": 10}],
                        "asks": [{"price": 105.5, "quantity": 8}]}
-    # Depth is sticky across ticks without depth; ltp/oi keep updating.
     cache.on_quote("S", Tick(time="2", price=106.0, volume=0, oi=43.0))
     v2 = cache.snapshot("S")
     assert v2.ltp == 106.0
     assert v2.oi == 43.0
-    assert v2.depth == v.depth
+    assert v2.depth is None
 
 
 def test_portfolio_open_then_close():

@@ -202,20 +202,8 @@ class TickHandler:
                 self.symbol, tick, self._macro_aggregator.current_bar
             )
         
-        # Depth/book update. Depth-less tapes (synthetic/replay) get a 1-tick
-        # book around LTP so Gate1 can still enforce the spread formula; live
-        # MultiplexedFeed overwrites this with the real book on every packet.
-        if self._depth_callback is not None:
-            if tick.depth is not None:
-                self._depth_callback(tick.depth)
-            else:
-                px = float(getattr(tick, "price", 0) or 0)
-                if px > 0:
-                    step = 0.05
-                    self._depth_callback({
-                        "bids": [{"price": px - step, "quantity": 1.0}],
-                        "asks": [{"price": px + step, "quantity": 1.0}],
-                    })
+        if self._depth_callback is not None and tick.depth is not None:
+            self._depth_callback(tick.depth)
     
     def _process_option_tick(self, tick: Any, state: Any) -> None:
         """Process tick for option contracts with underlying feed.

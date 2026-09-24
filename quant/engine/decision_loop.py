@@ -32,7 +32,10 @@ from quant.events import (
     SignalBlocked,
 )
 from quant.execution.execution_model import ExecutionModel
-from quant.decision.data_quality import DataQuality, normalize_data_quality
+from quant.decision.data_quality import (
+    failed_evidence_families,
+    normalize_data_quality,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -447,34 +450,41 @@ class DecisionLoop:
         ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
         decision = self._strategy.should_enter(ctx)
         quality = normalize_data_quality(ctx.data_quality)
+        failed_families = failed_evidence_families(ctx.evidence_provenance)
         capability = getattr(self._oms, "is_live", None)
         configured_live = self._configured_live_mode
         configured_live = configured_live() if callable(configured_live) else configured_live
-        # The OMS capability is authoritative. A missing capability is not
-        # paper mode, and a config override cannot make a live OMS paper.
         safety_live = (
             capability is True
             or capability is None
             or not isinstance(capability, bool)
             or configured_live is True
         )
-        # Live entry requires honest tape. Dhan has no aggressor flag, so the
-        # best available grade is PRICE_DIRECTION_PROXY — accept that for live.
-        # UNAVAILABLE / candle-only grades still block live OMS.
-        _LIVE_OK = frozenset({DataQuality.TICK_EXACT, DataQuality.PRICE_DIRECTION_PROXY})
-        if safety_live and quality not in _LIVE_OK:
+        if failed_families and safety_live and decision.approved:
+            block_reasons = tuple(
+                f"Live AMT entry requires TICK_EXACT evidence: {family}"
+                for family in failed_families
+            )
             decision = _dc_replace(
                 decision,
                 approved=False,
                 signal=None,
                 reason="PROXY_FLOW_BLOCKED",
-                block_reasons=("Live AMT entry requires TICK_EXACT or PRICE_DIRECTION_PROXY evidence",),
-                metadata={"data_quality": quality.value},
+                block_reasons=block_reasons,
+                metadata={
+                    **decision.metadata,
+                    "data_quality": quality.value,
+                    "failed_evidence_families": list(failed_families),
+                },
             )
-        elif quality not in _LIVE_OK:
+        elif failed_families and not safety_live:
             decision = _dc_replace(
                 decision,
-                metadata={**decision.metadata, "mode": "PROXY_MODE"},
+                metadata={
+                    **decision.metadata,
+                    "mode": "PROXY_MODE",
+                    "failed_evidence_families": list(failed_families),
+                },
             )
 
         # If running on an option contract with underlying futures feed,

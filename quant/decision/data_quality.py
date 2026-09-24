@@ -34,8 +34,14 @@ def normalize_evidence_provenance(value) -> dict[str, DataQuality]:
     }
 
 
-def live_evidence_exact(value) -> bool:
-    return all(
-        quality is DataQuality.TICK_EXACT
-        for quality in normalize_evidence_provenance(value).values()
+def failed_evidence_families(value) -> tuple[str, str, str, str, str]:
+    provenance = normalize_evidence_provenance(value)
+    return tuple(
+        family
+        for family in REQUIRED_EVIDENCE_FAMILIES
+        if provenance[family] is not DataQuality.TICK_EXACT
     )
+
+
+def live_evidence_exact(value) -> bool:
+    return not failed_evidence_families(value)
