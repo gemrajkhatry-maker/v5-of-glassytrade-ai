@@ -23,7 +23,7 @@ for pid_file in "$BACKEND_PID_FILE" "$FRONTEND_PID_FILE"; do
 done
 
 if command -v lsof >/dev/null 2>&1; then
-  for port in 8090 5191; do
+  for port in 9090 8090 5190 5191; do
     for pid in $(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true); do
       add_pid "$pid"
     done

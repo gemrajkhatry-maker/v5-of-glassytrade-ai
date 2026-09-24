@@ -175,6 +175,21 @@ def _set_active_symbols(app, symbols) -> tuple:
     return normalized
 
 
+def _assert_runtime_engine_supported(runtime_engine: str) -> None:
+    """Refuse startup when a runtime engine is requested but not wired.
+
+    The target stack (glassytrade.bootstrap/execution/api) has no production
+    composition yet: its routers are never registered and the lifespan always
+    boots the legacy QuantCoordinator. Allowing GLASSYTRADE_RUNTIME_ENGINE=
+    target would advertise target semantics while running legacy execution.
+    """
+    if runtime_engine == "target":
+        raise RuntimeError(
+            "GLASSYTRADE_RUNTIME_ENGINE=target is not wired into the "
+            "application factory yet — the only supported engine is legacy"
+        )
+
+
 def _runtime_config_from_environment(settings, runtime_mode: str) -> RuntimeConfig:
     """Build the immutable target config before any runtime adapter is created."""
 
@@ -454,6 +469,7 @@ def create_application() -> FastAPI:
         logger.info(f"Loaded configuration: {config}")
         runtime_config = _runtime_config_from_environment(_settings, runtime_mode)
         app.state.runtime_config = runtime_config
+        _assert_runtime_engine_supported(runtime_config.runtime_engine)
 
         # Add CORS middleware
         # Origins loaded from the settings adapter (env CORS_ORIGINS)

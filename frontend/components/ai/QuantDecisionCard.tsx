@@ -31,6 +31,40 @@ const formatReason = (reason?: string | null): string => {
 
 /** PRIMARY decision card — renders the quant decision with clean metrics and gate grid. */
 const QuantDecisionCard = React.memo<QuantDecisionCardProps>(({ quantDecision, riskState }) => {
+    const [resetState, setResetState] = React.useState<'idle' | 'pending' | 'done' | 'error'>('idle');
+    const [resetMessage, setResetMessage] = React.useState('');
+
+    const requestRiskReset = React.useCallback(async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (resetState === 'pending') return;
+        if (!window.confirm('Reset daily risk limits and loss streak? This re-enables trading.')) return;
+        setResetState('pending');
+        setResetMessage('');
+        try {
+            const token = typeof localStorage !== 'undefined'
+                ? (localStorage.getItem('glassytrade.operator-token') || '')
+                : '';
+            const res = await fetch('/api/trading/risk/reset', {
+                method: 'POST',
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
+            if (!res.ok) {
+                setResetState('error');
+                setResetMessage(
+                    res.status === 401 || res.status === 403
+                        ? 'Operator authorization required'
+                        : `Reset failed (${res.status})`
+                );
+                return;
+            }
+            setResetState('done');
+            setResetMessage('Risk reset requested');
+        } catch {
+            setResetState('error');
+            setResetMessage('Reset request failed');
+        }
+    }, [resetState]);
+
     if (!quantDecision) return null;
 
     const effectiveDecision = riskState?.halted === false && quantDecision.reason === 'HALTED'
@@ -83,20 +117,28 @@ const QuantDecisionCard = React.memo<QuantDecisionCardProps>(({ quantDecision, r
                     {isHalted && (
                         <button
                             type="button"
-                            onClick={async (e) => {
-                                e.stopPropagation();
-                                try {
-                                    await fetch('/api/trading/risk/reset', { method: 'POST' });
-                                } catch (err) {
-                                    console.error('Failed to reset risk', err);
-                                }
-                            }}
-                            className="px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider rounded bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/40 text-rose-200 transition-colors shrink-0"
+                            onClick={requestRiskReset}
+                            disabled={resetState === 'pending'}
+                            className="px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider rounded bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/40 text-rose-200 transition-colors shrink-0 disabled:opacity-50"
                             title="Reset daily risk limits and loss streak"
                         >
-                            Reset Risk
+                            {resetState === 'pending' ? 'Resetting…' : 'Reset Risk'}
                         </button>
                     )}
+                </div>
+            )}
+            {resetState !== 'idle' && primaryBlocker && (
+                <div
+                    role="status"
+                    className={`mb-2.5 px-2.5 py-1 rounded-lg border text-[9px] font-mono uppercase tracking-wide ${
+                        resetState === 'error'
+                            ? 'border-rose-500/40 bg-rose-900/30 text-rose-300'
+                            : resetState === 'done'
+                            ? 'border-emerald-500/40 bg-emerald-900/30 text-emerald-300'
+                            : 'border-slate-500/40 bg-slate-800/50 text-slate-300'
+                    }`}
+                >
+                    {resetMessage || 'Resetting risk…'}
                 </div>
             )}
             {/* 1. Header Bar */}

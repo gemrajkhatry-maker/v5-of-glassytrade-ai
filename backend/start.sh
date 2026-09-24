@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 # Use python-dotenv to load .env (handles special characters properly)
 # This is safer than bash source for complex .env files
 export KMP_DUPLICATE_LIB_OK=TRUE
-export PYTHONPATH="${PYTHONPATH:-$PWD:$(dirname "$PWD"):$PWD/src"
+export PYTHONPATH="${PYTHONPATH:-$PWD:$(dirname "$PWD"):$PWD/src}"
 export GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}"
 export CLEAR_POSITIONS_ON_RESTART="${CLEAR_POSITIONS_ON_RESTART:-false}"
 export RECONCILE_DELETE_STALE="${RECONCILE_DELETE_STALE:-0}"

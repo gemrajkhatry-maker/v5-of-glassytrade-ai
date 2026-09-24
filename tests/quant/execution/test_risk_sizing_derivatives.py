@@ -1,5 +1,28 @@
 """Derivative sizing must not zero out when stop-loss risk fits budget."""
+import pytest
+
 from quant.execution.risk import SessionRisk
+
+
+@pytest.mark.parametrize("day_of_week", [0, 4])
+def test_monday_friday_halving_preserves_viable_one_lot_without_cap(day_of_week):
+    """Regression: with no deployment cap configured, Mon/Fri defensive
+    halving must not zero a stop-distance-viable 1-lot setup.
+
+    HEAD behavior: the post-halving floor rescue was unconditional. The
+    one_lot_allowed gate must default to that rescue when no capital
+    deployment cap was consulted; it only tightens when a cap branch ran.
+    """
+    risk = SessionRisk(
+        starting_equity=1_000_000,
+        day_of_week=day_of_week,  # Monday/Friday: 0.5x defensive sizing
+    )
+    qty = risk.position_size(
+        entry=56430.0,
+        sl=56350.0,  # 80 points → ₹2400/lot, fits the ₹2500 HMP budget
+        lot_size=30,
+    )
+    assert qty >= 30.0, f"Expected >= 1 lot (30) on weekday {day_of_week}, got {qty}"
 
 
 def test_futures_sizing_does_not_zero_when_risk_fits_budget():
@@ -113,3 +136,24 @@ def test_equity_stocks_unchanged_behavior():
         lot_size=1,
     )
     assert qty > 0
+
+
+@pytest.mark.parametrize("day_of_week", [0, 4])
+def test_cap_set_monday_friday_preserves_viable_one_lot(day_of_week):
+    """A configured deployment cap must floor at 1 lot when stop risk fits.
+
+    Deployment capital may mathematically allow 0 lots after the defensive
+    halving, but the stop-loss risk (₹2400) still fits the budget (₹2500).
+    In that case the 1-lot rescue remains valid even with a cap set.
+    """
+    risk = SessionRisk(
+        starting_equity=1_000_000,
+        capital_deployment_pct=0.10,
+        day_of_week=day_of_week,
+    )
+    qty = risk.position_size(
+        entry=56430.0,
+        sl=56350.0,
+        lot_size=30,
+    )
+    assert qty >= 30.0, f"Expected >= 1 lot (30) on weekday {day_of_week}, got {qty}"

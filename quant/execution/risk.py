@@ -468,7 +468,9 @@ class SessionRisk:
                 return 0.0
 
             raw_qty = risk_amount / loss_per_unit
-            one_lot_allowed = False
+            # Default true: the post-halving 1-lot rescue stays unconditional
+            # unless the deployment-cap branch below computes a real permission.
+            one_lot_allowed = True
             if lot_size and lot_size > 1.0:
                 # Expiry half-size must not round UP past half of the full-day size.
                 qty = (
@@ -499,7 +501,6 @@ class SessionRisk:
                     qty = min(qty, float(max_lots * lot_size))
             else:
                 qty = raw_qty
-                one_lot_allowed = qty >= lot_size if lot_size and lot_size > 1.0 else True
                 if self._capital_deployment_pct is not None and entry > 0:
                     qty = min(qty, (sizing_equity * self._capital_deployment_pct) / entry)
                 if max_lots is not None and max_lots > 0:

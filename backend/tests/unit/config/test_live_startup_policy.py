@@ -89,3 +89,12 @@ def test_application_factory_refuses_live_without_explicit_capabilities(monkeypa
 
     with pytest.raises(StartupError, match="broker_capabilities"):
         _runtime_config_from_environment(object(), "live")
+
+
+def test_startup_refuses_target_engine_until_it_is_wired():
+    from app.main import _assert_runtime_engine_supported
+
+    # legacy remains the only engine the app factory actually composes.
+    _assert_runtime_engine_supported("legacy")
+    with pytest.raises(RuntimeError, match="not wired"):
+        _assert_runtime_engine_supported("target")

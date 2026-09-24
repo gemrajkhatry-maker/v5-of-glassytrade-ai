@@ -1,7 +1,29 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import QuantDecisionCard from '../../../components/ai/QuantDecisionCard';
 import { QuantDecisionAnalysis } from '../../../types';
+
+const haltedRisk = {
+  halted: true,
+  haltReason: 'Daily loss limit reached',
+  consecutiveLosses: 3,
+  dailyPnl: -20000,
+  baseRiskPct: 0.0025,
+  effectiveBaseRiskPct: 0.0025,
+  riskPerTradePct: 0.0025,
+  maxDailyLossPct: 0.02,
+  maxConsecutiveLosses: 3,
+  effectiveHmpTier: 'CONSERVATIVE',
+};
+
+const haltedDecision: QuantDecisionAnalysis = {
+  approved: false,
+  reason: 'HALTED',
+  phase: '',
+  blockReasons: ['Risk: daily loss limit'],
+  signal: null,
+};
 
 const approved: QuantDecisionAnalysis = {
   approved: true,
@@ -95,6 +117,60 @@ describe('QuantDecisionCard', () => {
     expect(screen.getByText('G7_Timing')).toBeInTheDocument();
     const passElements = screen.getAllByText('PASS');
     expect(passElements.length).toBe(7);
+  });
+
+  describe('risk reset control', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('does not call the endpoint when the operator cancels confirmation', async () => {
+      const fetchMock = vi.spyOn(globalThis, 'fetch');
+      vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const user = userEvent.setup();
+      render(<QuantDecisionCard quantDecision={haltedDecision} riskState={haltedRisk} />);
+      await user.click(screen.getByRole('button', { name: /reset risk/i }));
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('shows operator-authorization feedback when the server rejects the reset', async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('forbidden', { status: 403 }),
+      );
+      const user = userEvent.setup();
+      render(<QuantDecisionCard quantDecision={haltedDecision} riskState={haltedRisk} />);
+      await user.click(screen.getByRole('button', { name: /reset risk/i }));
+      await waitFor(() =>
+        expect(screen.getByRole('status')).toHaveTextContent(/operator authorization required/i),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/trading/risk/reset',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    it('sends the bearer token and reports success when the server accepts', async () => {
+      localStorage.setItem('glassytrade.operator-token', 'tok-123');
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ status: 'ok' }), { status: 200 }),
+      );
+      const user = userEvent.setup();
+      render(<QuantDecisionCard quantDecision={haltedDecision} riskState={haltedRisk} />);
+      await user.click(screen.getByRole('button', { name: /reset risk/i }));
+      await waitFor(() =>
+        expect(screen.getByRole('status')).toHaveTextContent(/risk reset requested/i),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/trading/risk/reset',
+        expect.objectContaining({
+          method: 'POST',
+          headers: { Authorization: 'Bearer tok-123' },
+        }),
+      );
+      localStorage.removeItem('glassytrade.operator-token');
+    });
   });
 });
 
