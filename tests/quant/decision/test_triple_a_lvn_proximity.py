@@ -1,4 +1,3 @@
-"""Triple-A AGGRESSION in trend mode requires LVN proximity (Fabio Trend Model)."""
 from quant.decision.gates_edge import gate_triple_a_edge
 from quant.decision.context import DecisionContext
 from quant.bars import Bar
@@ -31,21 +30,20 @@ def _make_ctx(**overrides):
 
 
 def test_triple_a_passes_when_price_at_leg_lvn():
-    """Price within 5 ticks of leg LVN -> Triple-A passes."""
-    ctx = _make_ctx(leg_lvn=100.9)  # within 5*0.05=0.25 of close=101
+    ctx = _make_ctx(leg_lvn=100.9)
     result = gate_triple_a_edge(ctx)
     assert result.passed is True
 
 
-def test_triple_a_blocked_when_price_far_from_lvn():
-    """Price far from any LVN -> Triple-A blocked in trend mode."""
-    ctx = _make_ctx(leg_lvn=95.0)  # 6 points away from close=101
+def test_triple_a_passes_when_price_far_from_lvn():
+    ctx = _make_ctx(leg_lvn=95.0)
     result = gate_triple_a_edge(ctx)
-    assert result.passed is False
+    assert result.passed is True
+    assert result.setup_key == "TRIPLE_A"
 
 
-def test_triple_a_blocked_when_no_lvn():
-    """No leg LVN available -> Triple-A blocked."""
+def test_triple_a_passes_when_no_lvn():
     ctx = _make_ctx(leg_lvn=0.0)
     result = gate_triple_a_edge(ctx)
-    assert result.passed is False
+    assert result.passed is True
+    assert result.setup_key == "TRIPLE_A"

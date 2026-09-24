@@ -232,8 +232,6 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
     """
     price = float(ctx.bar.close) if ctx.bar else 0.0
     tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
-    leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0
-    _LVN_PROXIMITY_TICKS = 5
     vwap = getattr(ctx, "session_vwap", 0.0) or (float(ctx.bar.vwap) if ctx.bar and getattr(ctx.bar, "vwap", 0.0) else 0.0)
 
     if getattr(ctx, "setup_evidence", None) is not None:
@@ -256,14 +254,6 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         if not getattr(ctx, "allow_trend", True):
             # ponytail: gate-1 owns evidence-gated paths; here we catch the evidence-free ones
             return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
-        # ponytail: Fabio Trend Model — pullback to LVN with aggression
-        leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0
-        tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
-        _LVN_PROXIMITY_TICKS = 5
-        price = float(ctx.bar.close) if ctx.bar else 0.0
-        lvn_near = leg_lvn > 0 and abs(price - leg_lvn) <= _LVN_PROXIMITY_TICKS * tick
-        if not lvn_near:
-            return GateResult(3, False, f"Triple-A AGGRESSION without LVN proximity (leg_lvn={leg_lvn:.2f}, price={price:.2f})")
         # Spec §5.2 Layer 2: compression box breakout confirmation. When a
         # micro-balance range has formed (compression box detected), require
         # the breakout close to exceed the micro-VAH (LONG) or micro-VAL
@@ -292,7 +282,7 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
                 return GateResult(3, False, f"Triple-A LONG below session VWAP ({price:.2f} < {vwap:.2f}) violates auction bias")
             if ctx.agent_direction == "SHORT" and price > vwap + 1.0 * tick:
                 return GateResult(3, False, f"Triple-A SHORT above session VWAP ({price:.2f} > {vwap:.2f}) violates auction bias")
-        return _pass(f"Triple-A AGGRESSION {tsignal} @ LVN {leg_lvn:.2f}", "TRIPLE_A")
+        return _pass(f"Triple-A AGGRESSION {tsignal}", "TRIPLE_A")
     if ctx.drive_entry_valid:
         return _pass("Second Drive reclaim confirmed", "SECOND_DRIVE")
     leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0

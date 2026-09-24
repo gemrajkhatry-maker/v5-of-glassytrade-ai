@@ -202,19 +202,22 @@ def test_imbalanced_alone_is_not_an_entry():
     assert d.approved is False or d.reason == "VA_FADE"
 
 
-def test_triple_a_aggression_is_required_for_playbook_a():
+def test_triple_a_playbook_a_does_not_require_leg_lvn_proximity():
     ctx = _ctx(
         agent_direction="LONG",
         market_state=MarketState.BALANCED,
-        close=110.0,
+        close=101.0,
         triple_a_phase=AGGRESSION,
         triple_a_signal="LONG",
         cvd_slope=1.0,
-        leg_lvn=110.0,  # Fabio Trend Model: pullback to the impulse LVN
+        session_vwap=100.0,
+        absorption_cluster_high=100.5,
+        absorption_cluster_low=99.5,
+        leg_lvn=0.0,
     )
     r = gate_triple_a_edge(ctx)
     assert r.passed is True
-    assert "AGGRESSION" in r.reason or "Triple-A" in r.reason
+    assert r.setup_key == "TRIPLE_A"
 
 
 def test_absorption_without_accumulation_is_not_entry():
@@ -267,6 +270,99 @@ def test_triple_a_machine_requires_cluster_close():
     # Next bar is not sticky — resets to WAITING.
     s = m.update(close=100.6, high=100.7, low=100.3, vwap=100.0, cvd_slope=0.4)
     assert s.phase == WAITING
+
+
+def _absorbing_machine() -> TripleAMachine:
+    machine = TripleAMachine()
+    machine.update(
+        close=100.0,
+        high=100.2,
+        low=99.8,
+        vwap=100.0,
+        cvd_slope=0.1,
+        absorption_active=True,
+        absorption_cluster_high=100.5,
+        absorption_cluster_low=99.5,
+        poc=100.0,
+        tick_size=0.05,
+    )
+    return machine
+
+
+@pytest.mark.parametrize(
+    ("absorption_side", "close", "cvd_slope"),
+    [
+        ("SELL_ABSORBED", 101.0, -0.1),
+        ("SELL_ABSORBED", 101.0, 0.0),
+        ("SELL_ABSORBED", 101.0, -2.0),
+        ("BUY_ABSORBED", 99.0, 0.1),
+        ("BUY_ABSORBED", 99.0, 0.0),
+        ("BUY_ABSORBED", 99.0, 2.0),
+    ],
+)
+def test_triple_a_machine_requires_directional_cvd(
+    absorption_side: str,
+    close: float,
+    cvd_slope: float,
+):
+    result = _absorbing_machine().update(
+        close=close,
+        high=close + 0.2,
+        low=close - 0.2,
+        vwap=100.0,
+        cvd_slope=cvd_slope,
+        absorption_side=absorption_side,
+        absorption_active=True,
+        absorption_cluster_high=100.5,
+        absorption_cluster_low=99.5,
+        poc=100.0,
+        tick_size=0.05,
+    )
+    assert result.phase != AGGRESSION
+
+
+def test_triple_a_machine_missing_cvd_does_not_confirm():
+    result = _absorbing_machine().update(
+        close=101.0,
+        high=101.2,
+        low=100.0,
+        vwap=100.0,
+        absorption_side="SELL_ABSORBED",
+        absorption_active=True,
+        absorption_cluster_high=100.5,
+        absorption_cluster_low=99.5,
+        poc=100.0,
+        tick_size=0.05,
+    )
+    assert result.phase != AGGRESSION
+
+
+@pytest.mark.parametrize(
+    ("absorption_side", "close", "cvd_slope"),
+    [
+        ("SELL_ABSORBED", 100.5, 0.5),
+        ("BUY_ABSORBED", 99.5, -0.5),
+    ],
+)
+def test_triple_a_machine_requires_close_outside_absorption_cluster(
+    absorption_side: str,
+    close: float,
+    cvd_slope: float,
+):
+    result = _absorbing_machine().update(
+        close=close,
+        high=close + 0.2,
+        low=close - 0.2,
+        vwap=100.0,
+        cvd_slope=cvd_slope,
+        absorption_side=absorption_side,
+        absorption_active=True,
+        absorption_cluster_high=100.5,
+        absorption_cluster_low=99.5,
+        poc=100.0,
+        tick_size=0.05,
+    )
+    assert result.phase != AGGRESSION
 
 
 def test_float_epoch_normalizes_to_ist_date_not_prefix():

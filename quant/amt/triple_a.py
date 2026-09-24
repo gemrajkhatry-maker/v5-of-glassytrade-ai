@@ -238,13 +238,20 @@ class TripleAMachine:
         self, signal: str, close: float, vwap: float, cvd_slope: float
     ) -> bool:
         """Confirm the breakout bar agrees with VWAP and CVD (spec §8)."""
+        if (
+            vwap is None
+            or vwap <= 0
+            or cvd_slope is None
+            or self._cluster_high <= 0
+            or self._cluster_low <= 0
+            or self._cluster_low > self._cluster_high
+        ):
+            return False
         if signal == "LONG":
-            vwap_ok = vwap > 0 and close > vwap
-            cvd_ok = cvd_slope > -0.3  # not aggressively diverging
-        else:  # SHORT
-            vwap_ok = vwap > 0 and close < vwap
-            cvd_ok = cvd_slope < 0.3
-        return vwap_ok and cvd_ok
+            return close > self._cluster_high and close > vwap and cvd_slope > 0
+        if signal == "SHORT":
+            return close < self._cluster_low and close < vwap and cvd_slope < 0
+        return False
 
     def _is_near_poc(
         self, close: float, poc: float, tick_size: float
