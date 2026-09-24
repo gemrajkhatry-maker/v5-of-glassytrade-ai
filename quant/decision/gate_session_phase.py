@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from quant.amt.session.context import get_session_info
 from quant.contracts.constants import amt_spread_limit
+from quant.contracts.instrument_registry import is_option_contract
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 from quant.session_gates import session_allow_entry

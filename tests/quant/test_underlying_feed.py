@@ -276,7 +276,7 @@ def test_attached_stale_underlying_blocks_before_strategy():
         engine._underlying_amt_dto,
         engine._last_underlying_bar,
         Bar(
-            time="2026-09-24T10:01:00+05:30",
+            time="2026-09-24T10:06:00+05:30",
             open=49.0, high=51.0, low=48.0, close=50.0, volume=1.0,
         ),
     )

@@ -182,8 +182,8 @@ def test_option_spread_policy_matches_amt_and_expiry_tightens_limit():
             symbol="NIFTY 25000 CALL",
             session_open=True,
             warmup_complete=True,
-            bid=49.825,
-            ask=50.175,
+            bid=49.30,
+            ask=50.70,
             tick_size=0.05,
             is_expiry=is_expiry,
         )
