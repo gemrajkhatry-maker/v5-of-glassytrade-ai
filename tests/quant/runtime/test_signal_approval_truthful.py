@@ -38,7 +38,7 @@ def _engine(execution_enabled=True, can_accept=(True, "")):
     pra.register_open.return_value = True
     eng = QuantEngine(
         gateway=MagicMock(),
-        symbol="TRUTH-CALL",
+        symbol="TRUTH",
         portfolio_risk=pra,
         execution_enabled=execution_enabled,
     )

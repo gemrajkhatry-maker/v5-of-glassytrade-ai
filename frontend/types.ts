@@ -128,6 +128,12 @@ export interface RiskState {
   haltReason: string;
   consecutiveLosses: number;
   dailyPnl: number;
+  baseRiskPct: number;
+  effectiveBaseRiskPct: number;
+  riskPerTradePct: number;
+  maxDailyLossPct: number;
+  maxConsecutiveLosses: number;
+  effectiveHmpTier: string;
   driftAlert?: boolean;
   driftMessage?: string;
 }

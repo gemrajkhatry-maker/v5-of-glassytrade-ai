@@ -53,6 +53,12 @@ describe('QuantDecisionCard', () => {
       haltReason: '',
       consecutiveLosses: 0,
       dailyPnl: 0,
+      baseRiskPct: 0.0025,
+      effectiveBaseRiskPct: 0.0025,
+      riskPerTradePct: 0.0025,
+      maxDailyLossPct: 0.02,
+      maxConsecutiveLosses: 3,
+      effectiveHmpTier: 'CONSERVATIVE',
     }} />);
     expect(screen.queryByText(/HALTED:/i)).toBeNull();
     expect(screen.queryByText(/SIGTERM shutdown/i)).toBeNull();

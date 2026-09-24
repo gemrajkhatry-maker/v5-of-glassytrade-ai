@@ -7,6 +7,8 @@ Handles both option contracts (with underlying feed) and direct futures.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from math import isfinite
 from typing import TYPE_CHECKING, Any, Callable
 
 from quant.contracts.ports.telemetry import NULL_TELEMETRY
@@ -18,6 +20,55 @@ if TYPE_CHECKING:
     from quant.state_machine import EngineState
 
 logger = logging.getLogger(__name__)
+
+
+def amt_observation_is_fresh(
+    amt_dto: Mapping[str, Any] | None,
+    decision_bar: Any,
+    interval_seconds: Any,
+    *,
+    snapshot: Any | None = None,
+) -> bool:
+    """Apply the live-feed one-macro-bar freshness contract."""
+    dto_time_value = (
+        amt_dto.get("time")
+        if isinstance(amt_dto, Mapping)
+        else getattr(amt_dto, "time", None)
+    )
+    dto_time = parse_bar_time(
+        dto_time_value or getattr(snapshot, "asof_time", None)
+    )
+    decision_time = parse_bar_time(getattr(decision_bar, "time", None))
+    try:
+        macro_seconds = int(interval_seconds)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if dto_time is None or decision_time is None or macro_seconds <= 0:
+        return False
+    age_seconds = (decision_time - dto_time).total_seconds()
+    return 0.0 <= age_seconds < 2 * macro_seconds
+
+
+def underlying_observation_is_valid(bar: Any, amt_dto: Any) -> bool:
+    """Require a timestamped, positive-price bar and meaningful AMT DTO."""
+    if bar is None or not isinstance(amt_dto, Mapping) or not amt_dto:
+        return False
+    if parse_bar_time(getattr(bar, "time", None)) is None:
+        return False
+    try:
+        close = float(getattr(bar, "close", 0.0) or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not isfinite(close) or close <= 0.0:
+        return False
+    for key in ("poc", "valueAreaHigh", "valueAreaLow"):
+        try:
+            value = float(amt_dto.get(key, 0.0) or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if isfinite(value) and value > 0.0:
+            return True
+    return False
 
 
 class TickHandler:
@@ -112,6 +163,7 @@ class TickHandler:
         self._last_underlying_bar = None
         self._underlying_amt_dto = None
         self._option_amt_dto = None
+        self._underlying_unavailable_reported = False
         # Decision deferral counters (B-4b): reason -> count
         self._deferred_counts: dict[str, int] = {}
 
@@ -140,32 +192,47 @@ class TickHandler:
         decision_bar: Any | None = None,
     ) -> bool:
         """Evaluate only while the AMT snapshot is at most one macro bar old."""
-        dto_time = parse_bar_time(
-            (amt_dto or {}).get("time")
-            or getattr(
-                getattr(self._amt_engine, "last_snapshot", None),
-                "asof_time",
-                None,
-            )
+        fresh = amt_observation_is_fresh(
+            amt_dto,
+            decision_bar or execution_bar or macro_bar,
+            getattr(self._macro_aggregator, "interval_seconds", 0),
+            snapshot=getattr(self._amt_engine, "last_snapshot", None),
         )
-        decision_time = parse_bar_time(
-            getattr(decision_bar or execution_bar or macro_bar, "time", "")
-        )
-        macro_seconds = int(
-            getattr(self._macro_aggregator, "interval_seconds", 0) or 0
-        )
-        if dto_time is None or decision_time is None or macro_seconds <= 0:
-            self._defer_decision("STALE_DTO")
-            return False
-        age_seconds = (decision_time - dto_time).total_seconds()
-        # Macro DTO timestamp marks the start of the completed macro bar.
-        # It remains fresh throughout the subsequent macro cycle (up to 2 * macro_seconds).
-        if age_seconds < 0 or age_seconds >= 2 * macro_seconds:
+        if not fresh:
+
             self._defer_decision("STALE_DTO")
             return False
         self._decide(amt_dto, macro_bar, execution_bar)
         return True
-    
+
+    def _report_underlying_unavailable(self, decision_bar: Any) -> None:
+        if self._underlying_unavailable_reported:
+            return
+        decision = self._decide(
+            self._underlying_amt_dto or {},
+            decision_bar,
+            decision_bar,
+        )
+        if getattr(decision, "reason", None) == "OPTION_UNDERLYING_UNAVAILABLE":
+            self._underlying_unavailable_reported = True
+
+    def _decide_at_option_boundary(self, decision_bar: Any) -> None:
+        amt_dto = self._underlying_amt_dto
+        underlying_bar = self._last_underlying_bar
+        if (
+            amt_dto
+            and underlying_bar
+            and underlying_observation_is_valid(underlying_bar, amt_dto)
+            and self._decide_if_macro_fresh(
+                amt_dto,
+                underlying_bar,
+                decision_bar,
+            )
+        ):
+            self._underlying_unavailable_reported = False
+            return
+        self._report_underlying_unavailable(decision_bar)
+
     def process_tick(self, tick: Any) -> None:
         """Process a single market tick.
         
@@ -216,12 +283,7 @@ class TickHandler:
             micro_bar = self._micro_aggregator.add_tick(tick)
             self._note_range_close(micro_bar)
             if micro_bar is not None and state.position is None:
-                if self._underlying_amt_dto and self._last_underlying_bar is not None:
-                    self._decide_if_macro_fresh(
-                        self._underlying_amt_dto,
-                        self._last_underlying_bar,
-                        micro_bar,
-                    )
+                self._decide_at_option_boundary(micro_bar)
         
         # Option's OWN ticks feed the option's 5m aggregator
         option_bar = self._macro_aggregator.add_tick(tick)
@@ -249,12 +311,7 @@ class TickHandler:
                 if state.position is not None:
                     self._manage_exit(self._option_amt_dto, option_bar)
                 elif self._micro_aggregator is None:
-                    if self._underlying_amt_dto and self._last_underlying_bar is not None:
-                        self._decide_if_macro_fresh(
-                            self._underlying_amt_dto,
-                            self._last_underlying_bar,
-                            option_bar,
-                        )
+                    self._decide_at_option_boundary(option_bar)
         
         # 2. Underlying futures ticks feed the underlying aggregator and AMT engine
         if self._underlying_aggregator is not None:

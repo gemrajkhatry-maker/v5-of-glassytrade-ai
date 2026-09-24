@@ -27,6 +27,10 @@ from quant.decision.context_builder import (
 from quant.decision.decision_service import QuantDecision
 from quant.decision.signal_builder import Signal
 from quant.engine.submission_handler import SubmissionHandler
+from quant.engine.tick_handler import (
+    amt_observation_is_fresh,
+    underlying_observation_is_valid,
+)
 from quant.events import (
     DecisionProduced,
     Event,
@@ -79,7 +83,8 @@ class DecisionLoop:
         set_entry_bar_index, get_last_close_bar_index, get_latch, set_latch,
         clear_latch, get_cert_records, get_last_depth, get_recent_decisions,
         get_open_trade_risk, set_open_trade_risk, get_exposure_state,
-        set_exposure_state.
+        set_exposure_state, get_last_underlying_bar, get_underlying_amt_dto,
+        get_underlying_interval_seconds.
     emit : callable
         Function to emit events (Event -> None).
     forecast_fn : callable, optional
@@ -154,6 +159,12 @@ class DecisionLoop:
         self._get_range_warmup = state.get(
             "get_range_warmup",
             lambda: (False, 0, 0.0),
+        )
+        self._get_last_underlying_bar = state.get("get_last_underlying_bar")
+        self._get_underlying_amt_dto = state.get("get_underlying_amt_dto")
+        self._get_underlying_interval_seconds = state.get(
+            "get_underlying_interval_seconds",
+            lambda: getattr(self._amt_engine, "interval_seconds", DEFAULT_INTERVAL_SEC),
         )
 
         # --- Event emission ---
@@ -406,6 +417,55 @@ class DecisionLoop:
 
         return False, cooldown_remaining_sec
 
+    def _underlying_observation_is_fresh(
+        self,
+        bar: Any,
+        execution_bar: Any | None,
+        amt_dto: Any,
+    ) -> bool:
+        """Fail closed for option entry without a fresh underlying observation."""
+        if not is_option_contract(self._symbol) or self._underlying_gateway is None:
+            return True
+        if (
+            self._get_last_underlying_bar is None
+            or self._get_underlying_amt_dto is None
+        ):
+            return False
+        try:
+            underlying_bar = self._get_last_underlying_bar()
+            underlying_dto = self._get_underlying_amt_dto()
+            interval_seconds = self._get_underlying_interval_seconds()
+            snapshot = getattr(self._amt_engine, "last_snapshot", None)
+        except Exception:
+            return False
+        if not underlying_observation_is_valid(underlying_bar, underlying_dto):
+            return False
+        candidate_dto = amt_dto or underlying_dto
+        if not underlying_observation_is_valid(underlying_bar, candidate_dto):
+            return False
+        decision_bar = execution_bar or bar
+        if not amt_observation_is_fresh(
+            {"time": getattr(underlying_bar, "time", None)},
+            decision_bar,
+            interval_seconds,
+        ):
+            return False
+        if not amt_observation_is_fresh(
+            underlying_dto,
+            decision_bar,
+            interval_seconds,
+            snapshot=snapshot,
+        ):
+            return False
+        if candidate_dto is not underlying_dto and not amt_observation_is_fresh(
+            candidate_dto,
+            decision_bar,
+            interval_seconds,
+            snapshot=snapshot,
+        ):
+            return False
+        return True
+
     # ---------------------------------------------------------------------
     # Decision building
     # ---------------------------------------------------------------------
@@ -422,6 +482,11 @@ class DecisionLoop:
         Returns ``(decision, ctx, amt_dto, risk_st)``.
         """
         amt_dto = amt_dto or self._amt_engine.last_amt_dto or {}
+        if not amt_dto and self._get_underlying_amt_dto is not None:
+            try:
+                amt_dto = self._get_underlying_amt_dto() or amt_dto
+            except Exception:
+                pass
         risk_st = self._risk.state()
 
         # S1 certification trace for context
@@ -448,8 +513,13 @@ class DecisionLoop:
             },
         )
 
+        underlying_fresh = self._underlying_observation_is_fresh(
+            bar, execution_bar, amt_dto,
+        )
         ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
-        if is_option_contract(self._symbol) and self._underlying_gateway is None:
+        if not underlying_fresh or (
+            is_option_contract(self._symbol) and self._underlying_gateway is None
+        ):
             decision = QuantDecision(
                 approved=False,
                 signal=None,
@@ -472,7 +542,12 @@ class DecisionLoop:
             or not isinstance(capability, bool)
             or configured_live is True
         )
-        if failed_families and safety_live and decision.approved:
+        if (
+            decision.reason != "OPTION_UNDERLYING_UNAVAILABLE"
+            and failed_families
+            and safety_live
+            and decision.approved
+        ):
             block_reasons = tuple(
                 f"Live AMT entry requires TICK_EXACT evidence: {family}"
                 for family in failed_families
@@ -489,7 +564,11 @@ class DecisionLoop:
                     "failed_evidence_families": list(failed_families),
                 },
             )
-        elif failed_families and not safety_live:
+        elif (
+            decision.reason != "OPTION_UNDERLYING_UNAVAILABLE"
+            and failed_families
+            and not safety_live
+        ):
             decision = _dc_replace(
                 decision,
                 metadata={

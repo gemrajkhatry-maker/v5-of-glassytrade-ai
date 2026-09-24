@@ -4,6 +4,54 @@ from __future__ import annotations
 from quant.multi_engine import QuantCoordinator
 
 
+def test_coordinator_snapshot_includes_effective_risk_policy():
+    import threading
+
+    from quant.events import RiskUpdated
+    from quant.execution.risk import RiskState
+    from tests.helpers.synthetic import SyntheticGateway
+    from quant.runtime import QuantEngine
+
+    coordinator = object.__new__(QuantCoordinator)
+    coordinator._lock = threading.RLock()
+    engine = QuantEngine(
+        SyntheticGateway([]),
+        "NIFTY",
+        interval_seconds=1,
+        risk_per_trade_pct=0.0037,
+        max_daily_loss_pct=0.013,
+        max_consecutive_losses=7,
+    )
+    engine.event_store.append(
+        RiskUpdated(
+            symbol="NIFTY",
+            time="t1",
+            risk=RiskState(
+                daily_pnl=0.0,
+                consecutive_losses=0,
+                halted=False,
+                halt_reason="",
+                risk_per_trade_pct=0.0025,
+                base_risk_pct=0.0037,
+                effective_base_risk_pct=0.0025,
+                max_daily_loss_pct=0.013,
+                max_consecutive_losses=7,
+                effective_hmp_tier="CONSERVATIVE",
+            ),
+        )
+    )
+    coordinator._engines = {"NIFTY": engine}
+
+    risk = coordinator.snapshot("NIFTY")["riskState"]
+
+    assert risk["baseRiskPct"] == 0.0037
+    assert risk["effectiveBaseRiskPct"] == 0.0025
+    assert risk["riskPerTradePct"] == 0.0025
+    assert risk["maxDailyLossPct"] == 0.013
+    assert risk["maxConsecutiveLosses"] == 7
+    assert risk["effectiveHmpTier"] == "CONSERVATIVE"
+
+
 def test_snapshot_does_not_fallback_to_mutable_engine_state(monkeypatch):
     coordinator = object.__new__(QuantCoordinator)
     coordinator._lock = __import__("threading").RLock()

@@ -116,6 +116,31 @@ def test_va_fade_blocked_in_dead_market():
     assert not d.approved and d.signal is None and d.reason == "NO_EDGE"
 
 
+def test_va_fade_uses_shared_stop_distance_policy(monkeypatch):
+    from quant.contracts import constants as amt_constants
+
+    calls = []
+    original = amt_constants.amt_stop_distance_limit
+
+    def policy(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "quant.decision.decision_service.amt_stop_distance_limit",
+        policy,
+    )
+    ctx = _ctx(
+        agent_direction="LONG", market_state="BALANCED", close=100.4,
+        poc=101.0, val=100.0, tick_size=0.5, cvd_slope=50.0,
+    )
+
+    DecisionService().evaluate(ctx)
+
+    assert calls
+    assert calls[0][1]["is_option"] is False
+
+
 def test_no_edge():
     ctx = _ctx(agent_direction=None, agent_probability=0.0, market_state="BALANCED")
     d = DecisionService().evaluate(ctx)

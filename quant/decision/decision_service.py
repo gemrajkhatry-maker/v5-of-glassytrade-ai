@@ -10,6 +10,7 @@ QuantDecision is consumed by the backend wiring (quant signal → domain Signal
 from __future__ import annotations
 import logging
 
+from quant.contracts.constants import amt_stop_distance_limit
 from quant.contracts.enums import MarketState
 
 from dataclasses import dataclass, field
@@ -158,15 +159,14 @@ class DecisionService:
                 return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
             if fade.sl <= 0:
                 return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
-            # Re-enforce Gate 4 max stop-width on the emitted fade plan.
             tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
             fade_risk = abs(fade.entry - fade.sl)
-            if is_option_contract(ctx.symbol):
-                cap_ticks = max(1.0, (fade.entry * 0.30) / tick)
-            else:
-                from quant.contracts.constants import MAX_STOP_DISTANCE_TICKS
-                cap_ticks = max(MAX_STOP_DISTANCE_TICKS, (fade.entry * 0.0075) / tick)
-            if fade_risk > cap_ticks * tick:
+            stop_limit = amt_stop_distance_limit(
+                fade.entry,
+                tick,
+                is_option=is_option_contract(ctx.symbol),
+            )
+            if fade_risk > stop_limit:
                 return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
             sig = Signal(
                 type=fade.direction, reason="Value-Area fade", entry=fade.entry,

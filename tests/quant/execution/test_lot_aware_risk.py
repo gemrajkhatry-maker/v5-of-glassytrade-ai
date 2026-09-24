@@ -79,6 +79,13 @@ def test_position_size_honors_is_expiry_at_call_site():
         underlying_gateway=SyntheticGateway([]),
     )
     eng._cooldown_bars = 0
+    eng._last_underlying_bar = bar
+    eng._underlying_amt_dto = {
+        "time": bar.time,
+        "poc": bar.close,
+        "valueAreaHigh": bar.high,
+        "valueAreaLow": bar.low,
+    }
     eng.set_option_delta(0.5)
     eng._risk.position_size = lambda *a, **kw: seen.append(kw.get("is_expiry")) or 25.0
     eng._strategy.should_enter = lambda ctx: _approved(_expiry_symbol(today))

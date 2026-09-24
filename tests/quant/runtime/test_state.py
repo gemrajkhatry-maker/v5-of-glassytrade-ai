@@ -69,6 +69,12 @@ def test_snapshot_defaults_empty_state():
         "equity": 1_000_000.0,
         "driftAlert": False,
         "driftMessage": "",
+        "baseRiskPct": 0.0025,
+        "effectiveBaseRiskPct": 0.0025,
+        "riskPerTradePct": 0.0025,
+        "maxDailyLossPct": 0.02,
+        "maxConsecutiveLosses": 3,
+        "effectiveHmpTier": "CONSERVATIVE",
     }
     assert v.depth is None
     # Portfolio is always the full contract shape — the WS layer and React
@@ -134,7 +140,43 @@ def test_risk_fold():
         "equity": 950000.0,
         "driftAlert": False,
         "driftMessage": "",
+        "baseRiskPct": 0.0025,
+        "effectiveBaseRiskPct": 0.0025,
+        "riskPerTradePct": 0.01,
+        "maxDailyLossPct": 0.10,
+        "maxConsecutiveLosses": 3,
+        "effectiveHmpTier": "CONSERVATIVE",
     }
+
+
+def test_risk_projection_reports_configured_effective_policy():
+    store = EventStore()
+    store.append(RiskUpdated(
+        symbol="S",
+        time="t1",
+        risk=RiskState(
+            daily_pnl=10.0,
+            consecutive_losses=1,
+            halted=False,
+            halt_reason="",
+            risk_per_trade_pct=0.0042,
+            trades_today=2,
+            equity=1_010_000.0,
+            base_risk_pct=0.0031,
+            effective_base_risk_pct=0.0025,
+            max_daily_loss_pct=0.017,
+            max_consecutive_losses=4,
+            effective_hmp_tier="MOMENTUM",
+        ),
+    ))
+
+    risk = _fold_view(store).risk_state
+    assert risk["baseRiskPct"] == 0.0031
+    assert risk["effectiveBaseRiskPct"] == 0.0025
+    assert risk["riskPerTradePct"] == 0.0042
+    assert risk["maxDailyLossPct"] == 0.017
+    assert risk["maxConsecutiveLosses"] == 4
+    assert risk["effectiveHmpTier"] == "MOMENTUM"
 
 
 def test_quote_updates_ltp_oi_depth_per_tick():

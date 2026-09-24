@@ -987,6 +987,13 @@ class QuantEngine:
             "set_entry_time_epoch": lambda v: setattr(self, "_entry_time_epoch", v),
             "get_state": lambda: self.state,
             "get_range_warmup": self._get_range_warmup,
+            "get_last_underlying_bar": lambda: self._last_underlying_bar,
+            "get_underlying_amt_dto": lambda: self._underlying_amt_dto,
+            "get_underlying_interval_seconds": lambda: getattr(
+                self._underlying_aggregator,
+                "interval_seconds",
+                getattr(self._amt_engine, "interval_seconds", DEFAULT_INTERVAL_SEC),
+            ),
         }
         return DecisionLoop(
             config=config,
@@ -1620,18 +1627,39 @@ class QuantEngine:
                 f"vs store_halted={canonical.risk.halted}"
             )
             # Emit RiskUpdated so downstream consumers see the correction.
-            # Convert state_machine.RiskState -> execution.risk.RiskState
-            # (the projector expects consecutive_losses/equity/cushion_tier).
             from quant.execution import risk as _risk_mod
+            configured_risk = self._risk.state()
+            canonical_risk = canonical.risk
             exec_risk = _risk_mod.RiskState(
-                daily_pnl=canonical.risk.daily_pnl,
-                trades_today=canonical.risk.trades_today,
-                halted=canonical.risk.halted,
-                halt_reason=canonical.risk.halt_reason,
-                consecutive_losses=0,
-                risk_per_trade_pct=0.005,
-                equity=0.0,
-                cushion_tier="CONSERVATIVE",
+                daily_pnl=float(
+                    getattr(canonical_risk, "daily_pnl", configured_risk.daily_pnl)
+                ),
+                trades_today=int(
+                    getattr(canonical_risk, "trades_today", configured_risk.trades_today)
+                ),
+                halted=bool(getattr(canonical_risk, "halted", configured_risk.halted)),
+                halt_reason=str(
+                    getattr(canonical_risk, "halt_reason", configured_risk.halt_reason)
+                ),
+                consecutive_losses=int(
+                    getattr(
+                        canonical_risk,
+                        "consecutive_losses",
+                        configured_risk.consecutive_losses,
+                    )
+                ),
+                risk_per_trade_pct=float(configured_risk.risk_per_trade_pct),
+                equity=float(configured_risk.equity),
+                cushion_tier=str(configured_risk.cushion_tier),
+                session_r=float(configured_risk.session_r),
+                peak_daily_pnl=float(configured_risk.peak_daily_pnl),
+                base_risk_pct=float(configured_risk.base_risk_pct),
+                effective_base_risk_pct=float(
+                    configured_risk.effective_base_risk_pct
+                ),
+                max_daily_loss_pct=float(configured_risk.max_daily_loss_pct),
+                max_consecutive_losses=int(configured_risk.max_consecutive_losses),
+                effective_hmp_tier=str(configured_risk.effective_hmp_tier),
             )
             # Timestamp the drift-correction event: an empty time would be
             # rejected by the EventStore timestamp validation (audit trail

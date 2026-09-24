@@ -110,3 +110,31 @@ class TestPeriodicReconciliation:
         engine.state = engine.state.with_risk(RiskState(halted=True))
         result = engine.periodic_reconcile()
         assert result.risk_event_emitted is True
+
+
+def test_reconcile_preserves_configured_risk_policy_fields():
+    from quant.events import RiskUpdated
+
+    engine = QuantEngine(
+        SyntheticGateway([]),
+        "NIFTY",
+        interval_seconds=1,
+        risk_per_trade_pct=0.0037,
+        max_daily_loss_pct=0.013,
+        max_consecutive_losses=7,
+    )
+    engine.state = engine.state.with_risk(RiskState(halted=True))
+    events = []
+    engine._bus.subscribe(RiskUpdated, events.append)
+
+    result = engine.periodic_reconcile()
+
+    assert result.risk_event_emitted is True
+    risk_event = events[-1].risk
+    configured = engine._risk.state()
+    assert risk_event.base_risk_pct == configured.base_risk_pct
+    assert risk_event.effective_base_risk_pct == configured.effective_base_risk_pct
+    assert risk_event.risk_per_trade_pct == configured.risk_per_trade_pct
+    assert risk_event.max_daily_loss_pct == configured.max_daily_loss_pct
+    assert risk_event.max_consecutive_losses == configured.max_consecutive_losses
+    assert risk_event.effective_hmp_tier == configured.effective_hmp_tier

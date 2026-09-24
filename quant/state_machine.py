@@ -10,6 +10,12 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from quant.bars import Bar  # canonical single definition (was a local dataclass)
+from quant.contracts.aggregates import INITIAL_CAPITAL
+from quant.contracts.constants import (
+    HMP_BASE_RISK_PCT,
+    MAX_CONSECUTIVE_LOSSES,
+    MAX_DAILY_LOSS_PCT,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -33,11 +39,22 @@ class PositionState:
 @dataclass(frozen=True)
 class RiskState:
     """Immutable risk state."""
+
     daily_pnl: float = 0.0
     trades_today: int = 0
     halted: bool = False
     halt_reason: str = ""
-
+    consecutive_losses: int = 0
+    risk_per_trade_pct: float = HMP_BASE_RISK_PCT
+    equity: float = float(INITIAL_CAPITAL)
+    cushion_tier: str = "CONSERVATIVE"
+    session_r: float = 0.0
+    peak_daily_pnl: float = 0.0
+    base_risk_pct: float = HMP_BASE_RISK_PCT
+    effective_base_risk_pct: float = HMP_BASE_RISK_PCT
+    max_daily_loss_pct: float = MAX_DAILY_LOSS_PCT
+    max_consecutive_losses: int = MAX_CONSECUTIVE_LOSSES
+    effective_hmp_tier: str = "CONSERVATIVE"
 
 # ---------------------------------------------------------------------------
 # EngineState (single source of truth)

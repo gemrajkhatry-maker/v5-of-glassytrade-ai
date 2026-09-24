@@ -203,12 +203,15 @@ def make_decision_loop(
     cooldown_bars: int = 5,
     execution_enabled: bool = True,
     underlying_gateway: Any = None,
+    underlying_bar: Any = None,
+    underlying_amt_dto: Any = None,
+    underlying_interval_seconds: Any = 300,
     advisor: Any = None,
     forecast_fn: Any = None,
     exposure_state: ExposureState | None = None,
     emit: Any = None,
     greeks: Any = None,
-    symbol: str = "NIFTY24JAN100CE",
+    symbol: str = "NIFTYFUT",
     telemetry: Any = None,
     trades_executed: Any = None,
 ) -> DecisionLoop:
@@ -264,6 +267,9 @@ def make_decision_loop(
             "get_open_trade_risk": lambda: _open_trade_risk,
             "set_open_trade_risk": _set_open_trade_risk,
             "get_exposure_state": lambda: _exposure_state,
+            "get_last_underlying_bar": lambda: underlying_bar,
+            "get_underlying_amt_dto": lambda: underlying_amt_dto,
+            "get_underlying_interval_seconds": lambda: underlying_interval_seconds,
             "set_exposure_state": lambda v: None,
             "set_entry_time_epoch": lambda v: None,
             "set_last_rejected_bar_index": lambda: None,
@@ -839,16 +845,23 @@ class TestOptionTranslationSeam:
         strategy = FakeStrategy(decision=make_decision(signal=underlying_signal))
         oms = FakeOMS()
         greeks = DictGreeks({contract: 0.55})
+        und_bar = FakeBar(close=25000.0, open=24990.0, high=25010.0, low=24980.0)
+        opt_bar = FakeBar(close=100.0, open=99.0, high=101.0, low=98.0)
+        underlying_dto = {
+            "time": und_bar.time,
+            "poc": 25000.0,
+            "valueAreaHigh": 25010.0,
+            "valueAreaLow": 24990.0,
+        }
         loop = make_decision_loop(
             strategy=strategy,
             oms=oms,
             underlying_gateway=object(),
+            underlying_bar=und_bar,
+            underlying_amt_dto=underlying_dto,
             greeks=greeks,
             symbol=contract,
         )
-        # Underlying bar for strategy; execution_bar is the option premium tape.
-        und_bar = FakeBar(close=25000.0, open=24990.0, high=25010.0, low=24980.0)
-        opt_bar = FakeBar(close=100.0, open=99.0, high=101.0, low=98.0)
 
         result = loop.evaluate({}, und_bar, execution_bar=opt_bar)
 
@@ -869,15 +882,23 @@ class TestOptionTranslationSeam:
         )
         strategy = FakeStrategy(decision=make_decision(signal=underlying_signal))
         oms = FakeOMS()
+        und_bar = FakeBar(close=25000.0)
+        opt_bar = FakeBar(close=100.0)
+        underlying_dto = {
+            "time": und_bar.time,
+            "poc": 25000.0,
+            "valueAreaHigh": 25010.0,
+            "valueAreaLow": 24990.0,
+        }
         loop = make_decision_loop(
             strategy=strategy,
             oms=oms,
             underlying_gateway=object(),
+            underlying_bar=und_bar,
+            underlying_amt_dto=underlying_dto,
             greeks=None,
             symbol=contract,
         )
-        und_bar = FakeBar(close=25000.0)
-        opt_bar = FakeBar(close=100.0)
 
         result = loop.evaluate({}, und_bar, execution_bar=opt_bar)
 

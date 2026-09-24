@@ -181,3 +181,110 @@ def test_missing_underlying_option_blocks_before_strategy_approval():
     assert any(event.decision.reason == result.reason for event in events)
     assert all(event.decision.reason != "ENTRY_NOT_SUBMITTED" for event in events)
     telemetry.record_decision.assert_called_once_with(approved=False)
+
+
+def _install_approving_option_strategy(engine, signal):
+    from unittest.mock import MagicMock
+
+    from quant.decision.decision_service import QuantDecision
+    from quant.events import DecisionProduced
+
+    engine.set_option_delta(0.55)
+    strategy = MagicMock()
+    strategy.should_enter.return_value = QuantDecision(
+        approved=True,
+        signal=signal,
+        reason="probe",
+        phase="",
+        gate_results=(),
+        block_reasons=(),
+        model_label="probe",
+    )
+    engine._strategy = strategy
+    telemetry = MagicMock()
+    engine.telemetry = telemetry
+    engine._decision_loop.telemetry = telemetry
+    events = []
+    engine._bus.subscribe(DecisionProduced, events.append)
+    engine._bar_index = 10
+    return strategy, telemetry, events
+
+
+def test_attached_empty_underlying_blocks_before_strategy_and_submission():
+    from quant.bars import Bar
+    from quant.decision.signal_builder import Signal
+
+    symbol = _NIFTY_OPTION
+    engine = QuantEngine(
+        SyntheticGateway([]),
+        symbol,
+        interval_seconds=300,
+        market="NSE",
+        underlying_gateway=SyntheticGateway([]),
+    )
+    signal = Signal(
+        type="LONG", reason="probe", entry=25000.0, sl=24980.0, tp=25040.0,
+        rr=2.0, model_label="probe", symbol="NIFTY FUT", timestamp="t0",
+    )
+    strategy, telemetry, events = _install_approving_option_strategy(engine, signal)
+
+    result = engine._decide(
+        {},
+        Bar(
+            time="2026-09-24T10:01:00+05:30",
+            open=100.0, high=101.0, low=99.0, close=100.0, volume=1.0,
+        ),
+    )
+
+    assert result is not None
+    assert result.approved is False
+    assert result.reason == "OPTION_UNDERLYING_UNAVAILABLE"
+    strategy.should_enter.assert_not_called()
+    assert engine.state.position is None
+    assert any(event.decision.reason == result.reason for event in events)
+    telemetry.record_decision.assert_called_once_with(approved=False)
+
+
+def test_attached_stale_underlying_blocks_before_strategy():
+    from quant.bars import Bar
+    from quant.decision.signal_builder import Signal
+
+    engine = QuantEngine(
+        SyntheticGateway([]),
+        _NIFTY_OPTION,
+        interval_seconds=300,
+        market="NSE",
+        underlying_gateway=SyntheticGateway([]),
+    )
+    engine._last_underlying_bar = Bar(
+        time="2026-09-24T09:55:00+05:30",
+        open=99.0, high=101.0, low=98.0, close=100.0, volume=10.0,
+    )
+    engine._underlying_amt_dto = {
+        "time": "2026-09-24T09:55:00+05:30",
+        "poc": 100.0,
+        "valueAreaHigh": 101.0,
+        "valueAreaLow": 99.0,
+    }
+    signal = Signal(
+        type="LONG", reason="probe", entry=25000.0, sl=24980.0, tp=25040.0,
+        rr=2.0, model_label="probe", symbol="NIFTY FUT", timestamp="t0",
+    )
+    strategy, telemetry, events = _install_approving_option_strategy(engine, signal)
+
+    result = engine._decide(
+        engine._underlying_amt_dto,
+        engine._last_underlying_bar,
+        Bar(
+            time="2026-09-24T10:01:00+05:30",
+            open=49.0, high=51.0, low=48.0, close=50.0, volume=1.0,
+        ),
+    )
+
+    assert result is not None
+    assert result.approved is False
+    assert result.reason == "OPTION_UNDERLYING_UNAVAILABLE"
+    strategy.should_enter.assert_not_called()
+    assert engine.state.position is None
+    assert any(event.decision.reason == result.reason for event in events)
+    telemetry.record_decision.assert_called_once_with(approved=False)

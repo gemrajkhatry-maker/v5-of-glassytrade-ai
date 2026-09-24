@@ -34,7 +34,7 @@ def _sig():
 
 def _engine():
     pra = MagicMock()
-    eng = QuantEngine(gateway=MagicMock(), symbol="LATCH-CALL", portfolio_risk=pra)
+    eng = QuantEngine(gateway=MagicMock(), symbol="LATCH", portfolio_risk=pra)
     eng._oms = MagicMock()
     eng._oms.lot_size = 1
     eng._oms.is_live = False

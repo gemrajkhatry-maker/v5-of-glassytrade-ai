@@ -21,6 +21,11 @@ from datetime import datetime
 from typing import Any
 
 from quant.contracts.aggregates import INITIAL_CAPITAL
+from quant.contracts.constants import (
+    HMP_BASE_RISK_PCT,
+    MAX_CONSECUTIVE_LOSSES,
+    MAX_DAILY_LOSS_PCT,
+)
 from quant.contracts.timezones import IST, epoch_to_iso
 from quant.decision.decision_service import QuantDecision
 from quant.execution.risk import RiskState
@@ -192,10 +197,28 @@ def _risk_to_view(risk: RiskState) -> dict:
         "dailyPnl": risk.daily_pnl,
         "tradesToday": getattr(risk, "trades_today", 0),
         "equity": getattr(risk, "equity", float(INITIAL_CAPITAL)),
-        # Contract parity with the legacy risk DTO — SessionRisk does not yet
-        # track drift, so these default off until a drift source exists.
         "driftAlert": False,
         "driftMessage": "",
+        "baseRiskPct": float(getattr(risk, "base_risk_pct", HMP_BASE_RISK_PCT)),
+        "effectiveBaseRiskPct": float(
+            getattr(risk, "effective_base_risk_pct", HMP_BASE_RISK_PCT)
+        ),
+        "riskPerTradePct": float(
+            getattr(risk, "risk_per_trade_pct", HMP_BASE_RISK_PCT)
+        ),
+        "maxDailyLossPct": float(
+            getattr(risk, "max_daily_loss_pct", MAX_DAILY_LOSS_PCT)
+        ),
+        "maxConsecutiveLosses": int(
+            getattr(risk, "max_consecutive_losses", MAX_CONSECUTIVE_LOSSES)
+        ),
+        "effectiveHmpTier": str(
+            getattr(
+                risk,
+                "effective_hmp_tier",
+                getattr(risk, "cushion_tier", "CONSERVATIVE"),
+            )
+        ),
     }
 
 

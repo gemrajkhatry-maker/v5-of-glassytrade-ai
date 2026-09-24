@@ -49,13 +49,19 @@
   }
  },
  "riskState": {
+  "baseRiskPct": 0.0025,
   "consecutiveLosses": 0,
   "dailyPnl": 0.0,
   "driftAlert": false,
   "driftMessage": "",
+  "effectiveBaseRiskPct": 0.0025,
+  "effectiveHmpTier": "CONSERVATIVE",
   "equity": 1000000.0,
   "haltReason": "",
   "halted": false,
+  "maxConsecutiveLosses": 3,
+  "maxDailyLossPct": 0.1,
+  "riskPerTradePct": 0.005,
   "tradesToday": 0
  },
  "tick": {

@@ -43,7 +43,12 @@ def _view_state_with_everything():
                              risk=RiskState(daily_pnl=-50.0,
                                             consecutive_losses=2, halted=True,
                                             halt_reason="daily loss limit reached",
-                                            risk_per_trade_pct=0.01)))
+                                            risk_per_trade_pct=0.01,
+                                            base_risk_pct=0.0031,
+                                            effective_base_risk_pct=0.0025,
+                                            max_daily_loss_pct=0.017,
+                                            max_consecutive_losses=4,
+                                            effective_hmp_tier="MOMENTUM")))
     from quant.state import _decision_to_view
     vs = project_state(store.fold())
     # Extract latest values from the event trace (engine does this inline)
@@ -120,6 +125,11 @@ def test_ws_snapshot_fields():
     assert ws["quantDecision"] is not None and "approved" in ws["quantDecision"]
     assert ws["quantDecision"]["approved"] is True
     assert ws["riskState"] is not None and "halted" in ws["riskState"]
+    assert ws["riskState"]["effectiveBaseRiskPct"] == 0.0025
+    assert ws["riskState"]["riskPerTradePct"] == 0.01
+    assert ws["riskState"]["maxDailyLossPct"] == 0.017
+    assert ws["riskState"]["maxConsecutiveLosses"] == 4
+    assert ws["riskState"]["effectiveHmpTier"] == "MOMENTUM"
 
 
 def test_ws_snapshot_passthrough_values():
@@ -147,6 +157,12 @@ def test_ws_snapshot_empty_state_does_not_crash():
         "equity": 1_000_000.0,
         "driftAlert": False,
         "driftMessage": "",
+        "baseRiskPct": 0.0025,
+        "effectiveBaseRiskPct": 0.0025,
+        "riskPerTradePct": 0.0025,
+        "maxDailyLossPct": 0.02,
+        "maxConsecutiveLosses": 3,
+        "effectiveHmpTier": "CONSERVATIVE",
     }
     # Portfolio is ALWAYS the full frontend contract shape (never `{}`) so
     # the React layer never reduces over undefined positions/closedTrades.
