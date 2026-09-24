@@ -546,3 +546,91 @@ class TestTickHandlerHotpath:
             "NIFTY24SEPFUT", "tick",
             "2026-09-16T10:00:00", 20000.0, "option",
         )
+
+
+class TestTickHandlerOptionUnderlyingUnavailable:
+    def _run_option_ticks(self, underlying_ticks):
+        from datetime import timedelta
+
+        from quant.brokers.gateway import Tick
+        from quant.contracts.timezones import today_ist
+        from quant.events import DecisionProduced, PositionOpened
+        from quant.runtime import QuantEngine
+        from tests.helpers.synthetic import SyntheticGateway
+
+        expiry = today_ist() + timedelta(days=30)
+        symbol = (
+            f"NIFTY {expiry.day} {expiry.strftime('%b').upper()} "
+            f"{expiry.year} 24600 CALL"
+        )
+        option_ticks = [
+            Tick("2026-09-24T10:00:00+05:30", 50.0, 10.0, 6.0, 4.0),
+            Tick("2026-09-24T10:01:00+05:30", 51.0, 10.0, 6.0, 4.0),
+            Tick("2026-09-24T10:02:00+05:30", 52.0, 10.0, 6.0, 4.0),
+        ]
+        telemetry = MagicMock()
+        engine = QuantEngine(
+            SyntheticGateway(option_ticks),
+            symbol,
+            interval_seconds=300,
+            market="NSE",
+            underlying_gateway=SyntheticGateway(underlying_ticks),
+            telemetry=telemetry,
+        )
+        strategy = MagicMock()
+        engine._strategy = strategy
+        decisions = []
+        opened = []
+        engine._bus.subscribe(DecisionProduced, decisions.append)
+        engine._bus.subscribe(PositionOpened, opened.append)
+        handler = engine._create_tick_handler()
+        for tick in option_ticks:
+            handler.process_tick(tick)
+        return engine, handler, strategy, telemetry, decisions, opened
+
+    def test_empty_attached_underlying_emits_one_blocked_decision_at_micro_trigger(self):
+        engine, handler, strategy, telemetry, decisions, opened = (
+            self._run_option_ticks([])
+        )
+
+        assert [event.decision.reason for event in decisions] == [
+            "OPTION_UNDERLYING_UNAVAILABLE"
+        ]
+        telemetry.record_decision.assert_called_once_with(approved=False)
+        assert telemetry.record_tick.call_count == 3
+        strategy.should_enter.assert_not_called()
+        assert opened == []
+        assert engine.state.position is None
+
+    def test_stale_attached_underlying_emits_one_blocked_decision_at_micro_trigger(self):
+        from datetime import datetime, timedelta
+
+        from quant.brokers.gateway import Tick
+
+        start = datetime.fromisoformat("2026-09-24T09:00:00+05:30")
+        underlying_ticks = [
+            Tick(
+                (start + timedelta(seconds=bar * 300 + offset)).isoformat(),
+                24500.0 + bar + offset / 1000.0,
+                100.0,
+                60.0,
+                40.0,
+            )
+            for bar in range(5)
+            for offset in (0, 150)
+        ]
+        underlying_ticks.append(
+            Tick("2026-09-24T09:30:00+05:30", 24505.0, 100.0, 60.0, 40.0)
+        )
+        engine, handler, strategy, telemetry, decisions, opened = (
+            self._run_option_ticks(underlying_ticks)
+        )
+
+        assert handler._deferred_counts.get("STALE_DTO", 0) >= 1
+        assert [event.decision.reason for event in decisions] == [
+            "OPTION_UNDERLYING_UNAVAILABLE"
+        ]
+        telemetry.record_decision.assert_called_once_with(approved=False)
+        strategy.should_enter.assert_not_called()
+        assert opened == []
+        assert engine.state.position is None

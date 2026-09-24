@@ -7,10 +7,8 @@ from quant.multi_engine import QuantCoordinator
 def test_coordinator_snapshot_includes_effective_risk_policy():
     import threading
 
-    from quant.events import RiskUpdated
-    from quant.execution.risk import RiskState
-    from tests.helpers.synthetic import SyntheticGateway
     from quant.runtime import QuantEngine
+    from tests.helpers.synthetic import SyntheticGateway
 
     coordinator = object.__new__(QuantCoordinator)
     coordinator._lock = threading.RLock()
@@ -22,24 +20,7 @@ def test_coordinator_snapshot_includes_effective_risk_policy():
         max_daily_loss_pct=0.013,
         max_consecutive_losses=7,
     )
-    engine.event_store.append(
-        RiskUpdated(
-            symbol="NIFTY",
-            time="t1",
-            risk=RiskState(
-                daily_pnl=0.0,
-                consecutive_losses=0,
-                halted=False,
-                halt_reason="",
-                risk_per_trade_pct=0.0025,
-                base_risk_pct=0.0037,
-                effective_base_risk_pct=0.0025,
-                max_daily_loss_pct=0.013,
-                max_consecutive_losses=7,
-                effective_hmp_tier="CONSERVATIVE",
-            ),
-        )
-    )
+    assert engine.event_store.get_all() == []
     coordinator._engines = {"NIFTY": engine}
 
     risk = coordinator.snapshot("NIFTY")["riskState"]

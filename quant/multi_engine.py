@@ -835,6 +835,28 @@ class QuantCoordinator:
         return open_pnl
 
     @staticmethod
+    def _compose_configured_risk_policy(vs, engine):
+        risk = getattr(engine, "_risk", None)
+        if risk is None:
+            return vs
+        try:
+            state = risk.state()
+            policy = {
+                "baseRiskPct": float(state.base_risk_pct),
+                "effectiveBaseRiskPct": float(state.effective_base_risk_pct),
+                "riskPerTradePct": float(state.risk_per_trade_pct),
+                "maxDailyLossPct": float(state.max_daily_loss_pct),
+                "maxConsecutiveLosses": int(state.max_consecutive_losses),
+                "effectiveHmpTier": str(state.effective_hmp_tier),
+            }
+        except Exception:
+            return vs
+        return replace(
+            vs,
+            risk_state={**(vs.risk_state or {}), **policy},
+        )
+
+    @staticmethod
     def _patch_active_position(agent_dec, curr_px, pnl):
         """Patch live price/PnL into an existing activePosition decision."""
         agent_dec = dict(agent_dec)
@@ -1067,6 +1089,7 @@ class QuantCoordinator:
             return {"_symbol": symbol}
         try:
             vs = project_state(engine.event_store.fold())
+            vs = self._compose_configured_risk_policy(vs, engine)
         except Exception as e:
             logger.warning(
                 "snapshot: EventStore.fold failed for %s (%s) — canonical projection unavailable",
