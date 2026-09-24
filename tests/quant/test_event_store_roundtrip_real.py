@@ -41,7 +41,7 @@ def _signal(side="LONG", entry=100.0, sl=90.0, tp=120.0):
     )
 
 
-def _position(size=4.0, _id="pos-1", is_pyramid=False, pyramid_level=0):
+def _position(size=4.0, _id="pos-1", is_pyramid=False, pyramid_level=0, stop_order_id=""):
     sig = _signal()
     return Position(
         order=Order(signal=sig, quantity=abs(size)),
@@ -51,6 +51,7 @@ def _position(size=4.0, _id="pos-1", is_pyramid=False, pyramid_level=0):
         pyramid_level=pyramid_level,
         is_pyramid=is_pyramid,
         _id=_id,
+        stop_order_id=stop_order_id,
     )
 
 
@@ -67,6 +68,7 @@ def _partial(position, fraction=0.5, price=110.0, time="1700000060"):
             realized_pnl=pnl,
             pyramid_level=position.pyramid_level,
             is_pyramid=position.is_pyramid,
+            stop_order_id=position.stop_order_id,
             _id=position._id,
         ),
         close_price=price,
@@ -81,6 +83,7 @@ def _partial(position, fraction=0.5, price=110.0, time="1700000060"):
         size=remaining_size,
         pyramid_level=position.pyramid_level,
         is_pyramid=position.is_pyramid,
+        stop_order_id=position.stop_order_id,
         _id=position._id,
     )
     return fill, remaining
@@ -150,6 +153,34 @@ class TestRealPayloadRoundTrip:
         assert state2.position.size == pytest.approx(4.0)
         # Same state as the original store's fold.
         assert state2.position == store1.fold().position
+
+    def test_position_opened_preserves_native_stop_id(self):
+        _, store2, exported = self._round_trip([
+            PositionOpened(
+                symbol="NIFTY",
+                time="t0",
+                position=_position(stop_order_id="stop-1"),
+            )
+        ])
+
+        restored = store2.get_all()[0]
+        assert isinstance(restored, PositionOpened)
+        assert exported[0]["payload"]["position"]["stop_order_id"] == "stop-1"
+        assert restored.position.stop_order_id == "stop-1"
+        assert store2.verify_chain() is True
+
+    def test_position_reduced_preserves_native_stop_id(self):
+        pos = _position(size=4.0, stop_order_id="stop-1")
+        fill, remaining = _partial(pos, fraction=0.5)
+        _, store2, _ = self._round_trip([
+            PositionOpened(symbol="NIFTY", time="t0", position=pos),
+            PositionReduced(symbol="NIFTY", time="t2", fill=fill, remaining=remaining),
+        ])
+
+        restored = store2.get_all()[1]
+        assert isinstance(restored, PositionReduced)
+        assert restored.fill.position.stop_order_id == "stop-1"
+        assert restored.remaining.stop_order_id == "stop-1"
 
     def test_position_reduced_round_trips_size(self):
         """The reduced survivor size survives the round-trip."""

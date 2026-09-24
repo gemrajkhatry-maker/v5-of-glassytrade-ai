@@ -22,6 +22,7 @@ class Position:
     is_pyramid: bool = False   # True for add-on positions (P1, P2)
     _id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False, repr=False)
     entry_costs: TradeCosts | None = None  # costs charged by the entry fill
+    stop_order_id: str = ""
 
     @property
     def id(self) -> str:
@@ -85,6 +86,7 @@ def position_to_row(symbol: str, position: Position, *, stop_meta: dict | None =
         "quantity": position.order.quantity,
         "pyramid_level": position.pyramid_level,
         "is_pyramid": position.is_pyramid,
+        "stop_order_id": getattr(position, "stop_order_id", "") or "",
         "entry_costs": _costs_to_dict(position.entry_costs),
         "breakeven": meta.get("breakeven"),
         "trail_stop": meta.get("trail_stop"),
@@ -116,4 +118,5 @@ def row_to_position(row: dict) -> Position:
         is_pyramid=bool(row.get("is_pyramid") or False),
         entry_costs=_costs_from_dict(row.get("entry_costs")),
         _id=str(row.get("id") or ""),
+        stop_order_id=str(row.get("stop_order_id") or ""),
     )

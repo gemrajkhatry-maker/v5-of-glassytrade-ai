@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 from brokers.broker.dhan.domain.order_status import (
@@ -93,6 +94,14 @@ def test_row_roundtrip_base_and_pyramid():
         assert q.order.signal.entry == 100.0 and q.order.quantity == 65.0
         assert q.pyramid_level == p.pyramid_level and q.is_pyramid == p.is_pyramid
         assert row["side"] == "LONG" and row["symbol"] == "NIFTY"
+
+
+def test_stop_order_id_roundtrips_through_persistence_row():
+    p = replace(_eng_position(), stop_order_id="stop-1")
+    row = position_to_row("NIFTY", p)
+    restored = row_to_position(row)
+    assert row["stop_order_id"] == "stop-1"
+    assert restored.stop_order_id == "stop-1"
 
 
 def test_fill_mapping_exact_values():

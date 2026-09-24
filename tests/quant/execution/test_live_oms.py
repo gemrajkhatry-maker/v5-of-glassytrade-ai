@@ -105,6 +105,19 @@ class MockBroker(IBroker):
         return True
 
 
+class FixedStopBroker(MockBroker):
+    def __init__(self, stop_result):
+        super().__init__()
+        self.stop_result = stop_result
+
+    def place_stop_loss(
+        self, symbol, side, quantity, stop_price, contract_ref=None
+    ):
+        self.stop_call_count += 1
+        self.last_stop_order_id = self.stop_result
+        return self.stop_result
+
+
 def _make_signal(entry=100.0, sl=95.0, tp=110.0, symbol="NIFTY 24800 CE"):
     return Signal(
         type="LONG",
@@ -216,13 +229,28 @@ class TestLiveOMSSubmit:
         portfolio = MagicMock(spec=Portfolio)
         oms = LiveOMS(broker=broker, portfolio=portfolio, lot_size=65.0)
 
-        oms.submit(_make_signal(entry=100.0), quantity=130.0)
+        position = oms.submit(_make_signal(entry=100.0), quantity=130.0)
 
+        assert position is not None
         assert broker.native_stop_capability_call_count == 1
         assert broker.stop_call_count == 1
         assert broker.last_stop_order_id
+        assert position.stop_order_id == broker.last_stop_order_id
         assert broker.last_stop["side"] == "SELL"
         assert broker.last_stop["quantity"] == 130
+
+    @pytest.mark.parametrize("stop_id", [None, ""])
+    def test_post_fill_falsey_stop_id_attempts_emergency_flatten(self, stop_id):
+        broker = FixedStopBroker(stop_id)
+        portfolio = MagicMock(spec=Portfolio)
+        oms = LiveOMS(broker=broker, portfolio=portfolio)
+
+        with pytest.raises(EmergencyFlattenError):
+            oms.submit(_make_signal(), quantity=100.0)
+
+        assert broker.native_stop_capability_call_count == 1
+        assert broker.close_call_count == 1
+        assert broker.last_close_side == "SELL"
 
     def test_post_fill_stop_failure_attempts_emergency_flatten(self):
         broker = MockBroker()
@@ -289,6 +317,16 @@ class TestLiveOMSClose:
         with pytest.raises(RuntimeError, match="broker failed to close"):
             oms.close(pos, price=105.0, time="t1", reason="TP")
 
+    def test_close_preserves_stop_id(self):
+        broker = MockBroker(fill_price=105.0, fill_qty=130.0)
+        portfolio = MagicMock(spec=Portfolio)
+        oms = LiveOMS(broker=broker, portfolio=portfolio, lot_size=65.0)
+        pos = oms.submit(_make_signal(), quantity=130.0)
+
+        fill = oms.close(pos, price=105.0, time="t1", reason="TP")
+
+        assert fill.position.stop_order_id == pos.stop_order_id
+
     def test_close_zero_size_returns_zero_pnl(self):
         broker = MockBroker()
         portfolio = MagicMock(spec=Portfolio)
@@ -331,6 +369,19 @@ class TestLiveOMSClosePartial:
         assert remaining._id == pos._id
         assert remaining.pyramid_level == pos.pyramid_level
         assert remaining.is_pyramid == pos.is_pyramid
+
+    def test_close_partial_preserves_stop_id(self):
+        broker = MockBroker(fill_price=105.0, fill_qty=32.0)
+        portfolio = MagicMock(spec=Portfolio)
+        oms = LiveOMS(broker=broker, portfolio=portfolio, lot_size=65.0)
+        pos = oms.submit(_make_signal(), quantity=130.0)
+
+        fill, remaining = oms.close_partial(
+            pos, fraction=0.25, price=105.0, time="t1", reason="TP1"
+        )
+
+        assert fill.position.stop_order_id == pos.stop_order_id
+        assert remaining.stop_order_id == pos.stop_order_id
 
 
 # ---------------------------------------------------------------------------

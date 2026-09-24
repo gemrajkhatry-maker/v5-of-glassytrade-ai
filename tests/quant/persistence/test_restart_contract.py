@@ -143,9 +143,11 @@ def test_restart_restores_position_from_sqlite_row_then_startup_reconcile():
         "breakeven": 100.0,
         "trail_stop": 100.5,
         "tp_tier": 1,
+        "stop_order_id": "stop-row-1",
     }
     position = row_to_position(row)
     assert position._id == "row-1"
+    assert position.stop_order_id == "stop-row-1"
 
     eng = QuantEngine(SyntheticGateway([]), "NIFTY", interval_seconds=60)
     eng.restore_position(position, stop_meta=row)
@@ -154,6 +156,7 @@ def test_restart_restores_position_from_sqlite_row_then_startup_reconcile():
     pm = eng._get_position_manager()
     assert pm.current_position is not None
     assert pm.current_position._id == "row-1"
+    assert pm.current_position.stop_order_id == "stop-row-1"
     assert eng.state.position is not None
     assert eng.state.position.id == "row-1"
     assert abs(float(eng.state.position.size) - 4.0) < 1e-9

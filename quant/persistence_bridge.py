@@ -144,6 +144,7 @@ class PositionStorageBridge:
                 "entry_time_epoch": prior.get("entry_time_epoch"),
                 "stop_loss": prior.get("stop_loss"),
             }),
+            "stop_order_id": getattr(event.remaining, "stop_order_id", "") or prior.get("stop_order_id", ""),
             **self._identity(),
         }
         self._open_rows[event.remaining.id] = row

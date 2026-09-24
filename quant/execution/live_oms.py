@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from quant.contracts.contracts import ContractRef
@@ -113,10 +114,12 @@ class LiveOMS:
             )
         broker_signal = to_broker_signal(signal, size)
         stop_price = float(getattr(signal, "sl", 0.0) or 0.0)
-        if stop_price > 0 and not self._broker.supports_native_stop_loss():
-            raise EmergencyFlattenError(
-                f"LiveOMS cannot submit {signal.symbol}: native stop loss is unavailable"
-            )
+        if stop_price > 0:
+            supports_native_stop = getattr(self._broker, "supports_native_stop_loss", None)
+            if not callable(supports_native_stop) or not supports_native_stop():
+                raise EmergencyFlattenError(
+                    f"LiveOMS cannot submit {signal.symbol}: native stop loss is unavailable"
+                )
         try:
             broker_pos = self._broker.execute_order(
                 broker_signal, self._portfolio, signal.symbol,
@@ -170,10 +173,10 @@ class LiveOMS:
         )
 
         # Phase 2: Broker Contingent Stop-Loss Order Placement (SL-M)
+        stop_order_id = ""
         if stop_price > 0 and filled_qty > 0:
             stop_side = "SELL" if signal.type == "LONG" else "BUY"
             stop_qty = int(abs(filled_qty))
-            stop_order_id = None
             try:
                 stop_order_id = self._broker.place_stop_loss(
                     symbol=signal.symbol,
@@ -224,6 +227,8 @@ class LiveOMS:
                     "— position flattened via Emergency Flatten Guard."
                 )
 
+        if stop_order_id:
+            position = replace(position, stop_order_id=str(stop_order_id))
         return position
 
     def close(
@@ -328,6 +333,7 @@ class LiveOMS:
             realized_pnl=pnl,
             pyramid_level=position.pyramid_level,
             is_pyramid=position.is_pyramid,
+            stop_order_id=getattr(position, "stop_order_id", "") or "",
         )
 
         return Fill(
@@ -375,6 +381,7 @@ class LiveOMS:
                         realized_pnl=0.0,
                         pyramid_level=position.pyramid_level,
                         is_pyramid=position.is_pyramid,
+                        stop_order_id=getattr(position, "stop_order_id", "") or "",
                     ),
                     close_price=price,
                     close_time=time,
@@ -437,6 +444,7 @@ class LiveOMS:
             realized_pnl=partial_pnl,
             pyramid_level=position.pyramid_level,
             is_pyramid=position.is_pyramid,
+            stop_order_id=getattr(position, "stop_order_id", "") or "",
         )
 
         fill = Fill(
@@ -455,6 +463,7 @@ class LiveOMS:
             size=remaining_size,
             pyramid_level=position.pyramid_level,
             is_pyramid=position.is_pyramid,
+            stop_order_id=getattr(position, "stop_order_id", "") or "",
             _id=position._id,
         )
 

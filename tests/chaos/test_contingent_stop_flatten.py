@@ -30,6 +30,9 @@ class FailingStopBroker(IBroker):
         self.last_close_side = None
         self.last_close_qty = None
 
+    def supports_native_stop_loss(self) -> bool:
+        return True
+
     def execute_order(self, signal, portfolio, symbol, contract_ref=None):
         return BrokerPosition(
             symbol=symbol,

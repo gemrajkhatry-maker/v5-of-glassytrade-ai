@@ -1,6 +1,6 @@
 import pytest
 
-from quant.execution.live_oms import LiveOMS
+from quant.execution.live_oms import EmergencyFlattenError, LiveOMS
 from quant.execution.oms import PaperOMS
 
 from quant.bars import Bar
@@ -82,6 +82,20 @@ class _Broker:
             take_profit=self._Decimal("0"),
             entry_time="2026-01-15T10:00:00+05:30",
         )
+
+    def supports_native_stop_loss(self) -> bool:
+        return True
+
+    def place_stop_loss(self, symbol, side, quantity, stop_price, contract_ref=None):
+        return "proxy-stop-1"
+
+
+class _LegacyBroker:
+    def __init__(self):
+        self.submissions = []
+
+    def execute_order(self, signal, portfolio, symbol, contract_ref=None):
+        self.submissions.append((signal, portfolio, symbol))
 
 
 class _RecordingPaperOMS(PaperOMS):
@@ -177,6 +191,16 @@ def test_live_accepts_price_direction_proxy():
     oms = LiveOMS(broker=_Broker(), portfolio=object())
     decision = _loop(oms, DataQuality.PRICE_DIRECTION_PROXY).evaluate({}, _bar())
     assert decision.approved is True
+
+
+def test_legacy_broker_without_capability_is_blocked_before_entry():
+    broker = _LegacyBroker()
+    oms = LiveOMS(broker=broker, portfolio=object())
+
+    with pytest.raises(EmergencyFlattenError, match="native stop"):
+        oms.submit(_decision().signal, quantity=1)
+
+    assert broker.submissions == []
 
 
 def test_live_tick_exact_entry_passes_to_live_oms():

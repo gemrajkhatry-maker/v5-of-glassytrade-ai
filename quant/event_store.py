@@ -756,6 +756,7 @@ class EventStore:
                     is_pyramid=bool(data.get("is_pyramid") or False),
                     _id=str(data.get("_id") or data.get("id") or ""),
                     entry_costs=_decode_costs(data.get("entry_costs")),
+                    stop_order_id=str(data.get("stop_order_id") or ""),
                 )
             return PositionState(
                 id=str(data.get("id") or ""),
