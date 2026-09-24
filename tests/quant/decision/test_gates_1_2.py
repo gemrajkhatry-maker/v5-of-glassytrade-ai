@@ -28,3 +28,31 @@ def test_gate2_fails_when_position_open():
 
 def test_gate2_fails_in_cooldown():
     assert not gate_position_cooldown(_ctx(cooldown_remaining_sec=30)).passed
+
+
+def test_gate1_option_spread_allows_normal_liquidity():
+    """Option with contract_symbol set allows healthy option spread (> 0.50)."""
+    # 0.90 spread on a ~300 premium option (0.30%)
+    ctx = _ctx(
+        symbol="BANKNIFTY SEP FUT",
+        contract_symbol="BANKNIFTY 29 SEP 55700 PUT",
+        bid=299.10,
+        ask=300.00,
+        tick_size=0.05,
+    )
+    r = gate_session_phase(ctx)
+    assert r.passed, f"Option spread should pass but failed with: {r.reason}"
+
+
+def test_gate1_futures_spread_rejects_wide_spread():
+    """Futures contract strictly enforces the tight futures spread limit (0.50)."""
+    ctx = _ctx(
+        symbol="BANKNIFTY SEP FUT",
+        contract_symbol="",
+        bid=55700.00,
+        ask=55770.00,
+        tick_size=0.05,
+    )
+    r = gate_session_phase(ctx)
+    assert not r.passed
+    assert "Wide spread" in r.reason

@@ -424,8 +424,11 @@ class TestTickHandlerLiveQuote:
         
         handler.process_tick(tick)
         
-        # Verify depth callback was NOT called
-        depth_callback.assert_not_called()
+        # Depth-less tape receives synthetic 1-tick book around LTP for Gate 1
+        depth_callback.assert_called_once_with({
+            "bids": [{"price": 19999.95, "quantity": 1.0}],
+            "asks": [{"price": 20000.05, "quantity": 1.0}],
+        })
 
 
 class TestTickHandlerHotpath:

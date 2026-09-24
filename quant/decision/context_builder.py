@@ -762,6 +762,7 @@ class DecisionContextBuilder:
             option_delta=self._option_delta(
                 symbol, contract_symbol=contract_symbol, amt_dto=amt_dto,
             ),
+            contract_symbol=contract_symbol or "",
             contested_bubble_zone=db(amt_dto, "contestedZone"),
             stacked_imbalance_direction=si_dir,
             stacked_imbalance_magnitude=si_mag,

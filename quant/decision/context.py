@@ -14,6 +14,7 @@ class DecisionContext:
     state: Optional[AMTResult] = None
     bar: Optional[Bar] = None             # the bar that closed to produce state
     symbol: str = ""
+    contract_symbol: str = ""
     market: str = "NSE"
     # Index of the bar that produced this context (-1 = unknown; set by
     # DecisionContextBuilder from its bar_index param). Lets downstream

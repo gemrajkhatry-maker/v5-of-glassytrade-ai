@@ -90,7 +90,12 @@ def gate_session_phase(ctx: DecisionContext) -> GateResult:
     mid = (ctx.ask + ctx.bid) / 2.0
     close_px = float(getattr(ctx.bar, "close", 0) or 0) if ctx.bar is not None else 0.0
     px = mid if mid > 0 else close_px
-    if is_option_contract(ctx.symbol):
+    is_option = (
+        is_option_contract(ctx.contract_symbol)
+        if ctx.contract_symbol
+        else (is_option_contract(ctx.symbol) or ctx.option_delta is not None)
+    )
+    if is_option:
         # Options: wider spread allowance for normal market liquidity (up to 1.5% of premium or 10 ticks, min ₹2.00)
         max_spread = max(10.0 * tick, px * 0.015, 2.00)
     else:

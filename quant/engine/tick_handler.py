@@ -158,7 +158,9 @@ class TickHandler:
             self._defer_decision("STALE_DTO")
             return False
         age_seconds = (decision_time - dto_time).total_seconds()
-        if age_seconds < 0 or age_seconds > macro_seconds:
+        # Macro DTO timestamp marks the start of the completed macro bar.
+        # It remains fresh throughout the subsequent macro cycle (up to 2 * macro_seconds).
+        if age_seconds < 0 or age_seconds >= 2 * macro_seconds:
             self._defer_decision("STALE_DTO")
             return False
         self._decide(amt_dto, macro_bar, execution_bar)
