@@ -375,7 +375,21 @@ class OptionSelector:
         if option_ltp <= 0:
             logger.warning("[OPTION TRANSLATE] %s: option LTP <= 0, cannot price option signal", option_symbol)
             return None
-        if delta is None or not math.isfinite(float(delta)) or not 0.0 < abs(float(delta)) <= 1.0:
+        if delta is None or isinstance(delta, bool):
+            logger.warning(
+                "[OPTION TRANSLATE] %s: explicit option Greek delta is required",
+                option_symbol,
+            )
+            return None
+        try:
+            delta_value = abs(float(delta))
+        except (TypeError, ValueError, OverflowError):
+            logger.warning(
+                "[OPTION TRANSLATE] %s: explicit option Greek delta is required",
+                option_symbol,
+            )
+            return None
+        if not math.isfinite(delta_value) or not 0.0 < delta_value <= 1.0:
             logger.warning(
                 "[OPTION TRANSLATE] %s: explicit option Greek delta is required",
                 option_symbol,
@@ -416,7 +430,7 @@ class OptionSelector:
             )
             return None
 
-        eff_delta = max(MIN_EFFECTIVE_DELTA, min(1.0, abs(float(delta))))
+        eff_delta = max(MIN_EFFECTIVE_DELTA, min(1.0, delta_value))
         underlying_risk = abs(signal.entry - signal.sl)
         underlying_reward = abs(signal.tp - signal.entry)
         
@@ -436,8 +450,17 @@ class OptionSelector:
         actual_risk = opt_entry - opt_sl
         if actual_risk <= 0:
             return None
+        from quant.contracts.constants import AMT_OPTION_STOP_FRACTION, MIN_RR_RATIO
+        if actual_risk > opt_entry * AMT_OPTION_STOP_FRACTION:
+            logger.info(
+                "[OPTION TRANSLATE REJECT] %s: stop risk %.2f exceeds %.0f%% of option premium %.2f",
+                option_symbol,
+                actual_risk,
+                AMT_OPTION_STOP_FRACTION * 100.0,
+                opt_entry,
+            )
+            return None
         rr = opt_reward / actual_risk
-        from quant.contracts.constants import MIN_RR_RATIO
         if rr < MIN_RR_RATIO:
             logger.info(
                 "[OPTION TRANSLATE REJECT] %s: RR %.2f < min %.2f after clamp",

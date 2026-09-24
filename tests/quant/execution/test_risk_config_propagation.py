@@ -30,6 +30,21 @@ def test_effective_risk_state_reports_the_floor():
     assert state.cushion_tier == "CONSERVATIVE"
 
 
+def test_risk_state_exposes_configured_limits_and_effective_tier():
+    risk = SessionRisk(
+        starting_equity=1_000_000,
+        base_risk_pct=0.0025,
+        max_daily_loss_pct=0.017,
+        max_consecutive_losses=5,
+        day_of_week=1,
+    )
+    state = risk.state()
+
+    assert state.max_daily_loss_pct == pytest.approx(0.017)
+    assert state.max_consecutive_losses == 5
+    assert state.effective_hmp_tier == "CONSERVATIVE"
+
+
 def test_startup_summary_reports_effective_live_base(monkeypatch, caplog):
     from app.config_models.loader import load_config
 
@@ -40,3 +55,5 @@ def test_startup_summary_reports_effective_live_base(monkeypatch, caplog):
         load_config(strategy="nse_options")
 
     assert "effective_base=0.25%" in caplog.text
+    assert "hmp_tier=CONSERVATIVE" in caplog.text
+    assert "max_consecutive_losses=2" in caplog.text

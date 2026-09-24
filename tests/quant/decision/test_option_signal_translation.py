@@ -38,7 +38,7 @@ def test_translate_translates_underlying_signal_to_option():
                  tp=161338.2, rr=2.0, model_label="Triple-A",
                  symbol="GOLDM SEP FUT", timestamp="t")
     out = OptionSelector().translate_underlying_signal_to_option(
-        signal=sig, option_symbol="GOLDM 28 AUG 159500 CALL",
+        signal=sig, option_symbol="GOLDM CALL",
         option_ltp=2837.0, delta=0.5, tick_size=0.05,
     )
     assert out is not None
@@ -179,7 +179,7 @@ def test_option_spread_policy_matches_amt_and_expiry_tightens_limit():
     def context(is_expiry: bool) -> DecisionContext:
         return DecisionContext(
             bar=Bar(time="t0", open=50.0, high=50.2, low=49.8, close=50.0, volume=1.0),
-            symbol="NIFTY 29 SEP 24600 CALL",
+            symbol="NIFTY 25000 CALL",
             session_open=True,
             warmup_complete=True,
             bid=49.825,
@@ -193,3 +193,84 @@ def test_option_spread_policy_matches_amt_and_expiry_tightens_limit():
 
     assert normal.passed is True
     assert expiry.passed is False
+
+
+def test_translation_rejects_option_stop_wider_than_thirty_percent_of_premium():
+    from quant.amt.session.selector import OptionSelector
+    from quant.decision.signal_builder import Signal
+
+    signal = Signal(
+        type="LONG", reason="Triple-A", entry=100.0, sl=60.0, tp=180.0,
+        rr=2.0, model_label="Triple-A", symbol="NIFTY FUT", timestamp="t0",
+    )
+
+    result = OptionSelector().translate_underlying_signal_to_option(
+        signal=signal,
+        option_symbol="NIFTY 25000 CALL",
+        option_ltp=100.0,
+        delta=1.0,
+        tick_size=0.05,
+    )
+
+    assert result is None
+
+
+def test_translation_uses_option_premium_for_stop_cap():
+    from quant.amt.session.selector import OptionSelector
+    from quant.decision.signal_builder import Signal
+
+    signal = Signal(
+        type="LONG", reason="Triple-A", entry=100.0, sl=0.0, tp=300.0,
+        rr=2.0, model_label="Triple-A", symbol="NIFTY FUT", timestamp="t0",
+    )
+
+    result = OptionSelector().translate_underlying_signal_to_option(
+        signal=signal,
+        option_symbol="NIFTY 25000 CALL",
+        option_ltp=400.0,
+        delta=1.0,
+        tick_size=0.05,
+    )
+
+    assert result is not None
+    assert result.sl == 300.0
+
+
+def test_entry_and_exit_spread_use_the_same_mid_basis():
+    from quant.bars import Bar
+    from quant.decision.context import DecisionContext
+    from quant.decision.gate_session_phase import gate_session_phase
+    from quant.decision.signal_builder import Signal
+    from quant.execution.exits import ExitEngine
+    from quant.execution.order import Order, Position
+
+    bid, ask = 999.75, 1000.25
+    ctx = DecisionContext(
+        bar=Bar(time="t0", open=bid, high=ask, low=bid, close=1.0, volume=1.0),
+        symbol="NIFTY 25000 CALL",
+        session_open=True,
+        warmup_complete=True,
+        bid=bid,
+        ask=ask,
+        tick_size=0.05,
+    )
+    assert gate_session_phase(ctx).passed is True
+
+    signal = Signal(
+        type="LONG", reason="test", entry=1000.0, sl=900.0, tp=1200.0,
+        rr=2.0, model_label="test", symbol="NIFTY 25000 CALL", timestamp="t0",
+    )
+    position = Position(
+        order=Order(signal, 1.0), open_price=1000.0, open_time="t0", size=1.0
+    )
+    decision = ExitEngine().evaluate(
+        position,
+        bar_close=1.0,
+        bar_high=1000.0,
+        bar_low=1000.0,
+        best_bid=bid,
+        best_ask=ask,
+    )
+
+    assert decision.reason != "SPREAD_BLOWOUT"
+    assert decision.should_exit is False

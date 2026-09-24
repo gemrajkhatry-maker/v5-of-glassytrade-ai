@@ -8,9 +8,11 @@ Proves:
 """
 
 import threading
+from datetime import timedelta
 
 
 from quant.brokers.gateway import Tick
+from quant.contracts.timezones import today_ist
 from quant.execution.portfolio_risk import PortfolioRiskAuthority
 from quant.multi_engine import QuantCoordinator
 from quant.runtime import QuantEngine
@@ -52,7 +54,9 @@ def test_stress_12_engines_interleaved_ticks_no_contamination(monkeypatch):
         "SENSEX", "BANKEX", "CRUDEOIL", "CRUDEOILM",
         "NATURALGAS", "GOLD", "SILVER", "COPPER",
     )
-    symbols = [f"{root} 28 AUG 1000{i} CALL" for i, root in enumerate(roots)]
+    expiry = today_ist() + timedelta(days=7)
+    expiry_token = f"{expiry.day} {expiry.strftime('%b').upper()} {expiry.year}"
+    symbols = [f"{root} {expiry_token} 1000{i} CALL" for i, root in enumerate(roots)]
     coord = _make_coordinator(n)
     monkeypatch.setattr(coord, "_scan", lambda force=False: list(symbols), raising=True)
     coord.start()

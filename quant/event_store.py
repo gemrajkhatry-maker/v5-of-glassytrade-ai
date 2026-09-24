@@ -836,6 +836,13 @@ class EventStore:
                 effective_base_risk_pct=float(
                     risk_data.get("effective_base_risk_pct") or HMP_BASE_RISK_PCT
                 ),
+                max_daily_loss_pct=float(risk_data.get("max_daily_loss_pct") or 0.10),
+                max_consecutive_losses=int(risk_data.get("max_consecutive_losses") or 3),
+                effective_hmp_tier=str(
+                    risk_data.get("effective_hmp_tier")
+                    or risk_data.get("cushion_tier")
+                    or "CONSERVATIVE"
+                ),
             )
             return RiskUpdated(symbol=symbol, time=time, risk=risk)
 

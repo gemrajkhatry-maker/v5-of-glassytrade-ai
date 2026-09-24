@@ -66,6 +66,9 @@ class RiskState:
     peak_daily_pnl: float = 0.0
     base_risk_pct: float = HMP_BASE_RISK_PCT
     effective_base_risk_pct: float = HMP_BASE_RISK_PCT
+    max_daily_loss_pct: float = 0.10
+    max_consecutive_losses: int = 3
+    effective_hmp_tier: str = "CONSERVATIVE"
 
 
 class SessionRisk:
@@ -161,6 +164,18 @@ class SessionRisk:
     @property
     def effective_base_risk_pct(self) -> float:
         return HMP_BASE_RISK_PCT
+
+    @property
+    def max_daily_loss_pct(self) -> float:
+        return float(self._max_daily_loss_pct)
+
+    @property
+    def max_consecutive_losses(self) -> int:
+        return int(self._max_consecutive_losses)
+
+    @property
+    def effective_hmp_tier(self) -> str:
+        return self._cushion_tier()
 
     def _load(self) -> None:
         if self._storage is None:
@@ -549,6 +564,7 @@ class SessionRisk:
 
     def state(self) -> RiskState:
         with self._lock:
+            effective_tier = self._cushion_tier()
             return RiskState(
                 daily_pnl=self._daily_pnl,
                 consecutive_losses=self._consecutive_losses,
@@ -557,11 +573,14 @@ class SessionRisk:
                 risk_per_trade_pct=self._risk_per_trade_pct(),
                 trades_today=self._trades_today,
                 equity=self._equity,
-                cushion_tier=self._cushion_tier(),
+                cushion_tier=effective_tier,
                 session_r=self.session_r_multiple(),
                 peak_daily_pnl=self._peak_daily_pnl,
                 base_risk_pct=float(self._base_risk_pct),
                 effective_base_risk_pct=HMP_BASE_RISK_PCT,
+                max_daily_loss_pct=self.max_daily_loss_pct,
+                max_consecutive_losses=self.max_consecutive_losses,
+                effective_hmp_tier=effective_tier,
             )
 
     def _cushion_tier(self) -> str:

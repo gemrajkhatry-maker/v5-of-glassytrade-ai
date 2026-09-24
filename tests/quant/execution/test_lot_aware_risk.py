@@ -51,7 +51,7 @@ def test_expiry_day_uses_reduced_risk():
 
 
 def _approved(symbol="SYM"):
-    sig = Signal(type="LONG", reason="r", entry=100.0, sl=98.0, tp=102.0,
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=98.0, tp=104.0,
                  rr=2.0, model_label="Triple-A", symbol=symbol, timestamp="t0")
     return QuantDecision(approved=True, signal=sig, reason="Triple-A",
                          phase="", gate_results=(), block_reasons=(), model_label="Triple-A")
@@ -72,7 +72,14 @@ def test_position_size_honors_is_expiry_at_call_site():
               open=100.0, high=100.0, low=100.0, close=100.0, volume=10)
 
     seen = []
-    eng = QuantEngine(SyntheticGateway([]), _expiry_symbol(today), interval_seconds=1)
+    eng = QuantEngine(
+        SyntheticGateway([]),
+        _expiry_symbol(today),
+        interval_seconds=1,
+        underlying_gateway=SyntheticGateway([]),
+    )
+    eng._cooldown_bars = 0
+    eng.set_option_delta(0.5)
     eng._risk.position_size = lambda *a, **kw: seen.append(kw.get("is_expiry")) or 25.0
     eng._strategy.should_enter = lambda ctx: _approved(_expiry_symbol(today))
     eng._decide({}, bar)
@@ -80,6 +87,7 @@ def test_position_size_honors_is_expiry_at_call_site():
 
     seen2 = []
     eng2 = QuantEngine(SyntheticGateway([]), "SYM", interval_seconds=1)
+    eng2._cooldown_bars = 0
     eng2._risk.position_size = lambda *a, **kw: seen2.append(kw.get("is_expiry")) or 25.0
     eng2._strategy.should_enter = lambda ctx: _approved("SYM")
     eng2._decide({}, Bar(time=f"{today.isoformat()}T00:30:00+05:30",

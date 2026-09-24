@@ -1,5 +1,7 @@
 """Option translation must use Greek delta, not candle order-flow delta."""
 
+import pytest
+
 from quant.amt.session.selector import OptionSelector
 from quant.decision.signal_builder import Signal
 
@@ -21,7 +23,7 @@ def _signal():
 def test_translation_requires_explicit_greek_delta():
     result = OptionSelector().translate_underlying_signal_to_option(
         signal=_signal(),
-        option_symbol="NIFTY 30 SEP 25000 CE",
+        option_symbol="NIFTY 25000 CE",
         option_ltp=100.0,
         delta=None,
         tick_size=0.05,
@@ -33,7 +35,7 @@ def test_translation_requires_explicit_greek_delta():
 def test_translation_preserves_explicit_greek_delta():
     result = OptionSelector().translate_underlying_signal_to_option(
         signal=_signal(),
-        option_symbol="NIFTY 30 SEP 25000 CE",
+        option_symbol="NIFTY 25000 CE",
         option_ltp=100.0,
         delta=0.65,
         tick_size=0.05,
@@ -41,6 +43,19 @@ def test_translation_preserves_explicit_greek_delta():
 
     assert result is not None
     assert result.sl == 87.0
+
+
+@pytest.mark.parametrize("delta", ["not-a-number", True, 0.0, 1.5, float("nan"), object()])
+def test_translation_rejects_malformed_or_invalid_delta(delta):
+    result = OptionSelector().translate_underlying_signal_to_option(
+        signal=_signal(),
+        option_symbol="NIFTY 25000 CE",
+        option_ltp=100.0,
+        delta=delta,
+        tick_size=0.05,
+    )
+
+    assert result is None
 
 
 def test_option_delta_is_none_without_greeks_port():
@@ -120,7 +135,7 @@ def test_scanner_missing_delta_is_none_and_contract_is_not_scored():
 
     scanner = OptionScannerService(SimpleNamespace())
     option = SimpleNamespace(
-        symbol="NIFTY 29 SEP 24600 CALL",
+        symbol="NIFTY 25000 CALL",
         ltp=50.0,
         oi=10_000,
         volume=1_000,
@@ -145,6 +160,82 @@ def test_scanner_missing_delta_is_none_and_contract_is_not_scored():
 
     assert score[0] == 0.0
     assert score[2] is None
+    assert scanner._process_contract(
+        u="NIFTY",
+        opt_type="CE",
+        strike=100,
+        atm=100,
+        interval=50,
+        option_map={100.0: option},
+        bullish_only=False,
+        bias="BULLISH",
+        bias_reason="test",
+        chain=SimpleNamespace(),
+        is_mcx=False,
+    ) is None
+
+
+def test_scanner_fallback_skips_missing_delta():
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from quant.amt.session.scanner import OptionScannerService
+    from quant.contracts.timezones import today_ist
+
+    option = SimpleNamespace(
+        symbol="NIFTY 25000 CALL",
+        ltp=100.0,
+        oi=10_000,
+        volume=1_000,
+        bid=99.0,
+        ask=101.0,
+        delta=None,
+        iv=15.0,
+    )
+    chain = SimpleNamespace(
+        expiry=today_ist() + timedelta(days=7),
+        atm_strike=100.0,
+        calls={100.0: option},
+        puts={},
+        spot_price=100.0,
+    )
+    scanner = OptionScannerService(SimpleNamespace())
+
+    assert scanner._fallback_atm(["NIFTY"], 0, chains={"NIFTY": chain}) == []
+
+
+@pytest.mark.parametrize("delta", ["not-a-number", True, 0.0, 1.5, float("nan"), object()])
+def test_scanner_rejects_malformed_or_invalid_delta(delta):
+    from types import SimpleNamespace
+
+    from quant.amt.session.scanner import OptionScannerService
+
+    option = SimpleNamespace(
+        symbol="NIFTY 25000 CALL",
+        ltp=100.0,
+        oi=10_000,
+        volume=1_000,
+        bid=99.0,
+        ask=101.0,
+        delta=delta,
+        iv=15.0,
+    )
+    score = OptionScannerService._score_contract(
+        strike=100,
+        atm=100,
+        interval=50,
+        oi=10_000,
+        vol=1_000,
+        opt=option,
+        ltp=100.0,
+        bid=99.0,
+        ask=101.0,
+        underlying_upper="NIFTY",
+    )
+
+    assert score[0] == 0.0
+    assert score[2] is None
+    scanner = OptionScannerService(SimpleNamespace())
     assert scanner._process_contract(
         u="NIFTY",
         opt_type="CE",

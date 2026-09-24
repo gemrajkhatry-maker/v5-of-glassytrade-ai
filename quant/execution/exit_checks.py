@@ -20,17 +20,18 @@ def check_spread_blowout(
     if best_bid is None or best_ask is None or close <= 0:
         return None
     spread = best_ask - best_bid
+    price_basis = (best_bid + best_ask) / 2.0
     if spread_max_pct is None:
-        max_spread = amt_spread_limit(close, tick_size, is_expiry=is_expiry)
+        max_spread = amt_spread_limit(price_basis, tick_size, is_expiry=is_expiry)
     else:
         effective = (
             spread_max_pct * AMT_EXPIRY_SPREAD_MULTIPLIER
             if is_expiry
             else spread_max_pct
         )
-        max_spread = close * effective
-    if spread >= max_spread:
-        return ExitDecision(True, "SPREAD_BLOWOUT", (best_bid + best_ask) / 2)
+        max_spread = price_basis * effective
+    if spread > max_spread:
+        return ExitDecision(True, "SPREAD_BLOWOUT", price_basis)
     return None
 
 

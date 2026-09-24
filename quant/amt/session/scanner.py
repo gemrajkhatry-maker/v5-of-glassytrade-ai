@@ -102,11 +102,11 @@ class OptionScannerService:
     @staticmethod
     def _option_delta(opt) -> float | None:
         raw = getattr(opt, "delta", None)
-        if raw is None:
+        if raw is None or isinstance(raw, bool):
             return None
         try:
             value = abs(float(raw))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return None
         if not math.isfinite(value) or not 0.0 < value <= 1.0:
             return None

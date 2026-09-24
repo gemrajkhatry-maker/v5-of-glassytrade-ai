@@ -18,6 +18,7 @@ from dataclasses import replace as _dc_replace
 from typing import Any, Callable, Optional
 
 from quant.bars import DEFAULT_INTERVAL_SEC
+from quant.contracts.instrument_registry import is_option_contract
 from quant.decision.context import DecisionContext
 from quant.decision.context_builder import (
     DecisionContextBuilder,
@@ -448,7 +449,18 @@ class DecisionLoop:
         )
 
         ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
-        decision = self._strategy.should_enter(ctx)
+        if is_option_contract(self._symbol) and self._underlying_gateway is None:
+            decision = QuantDecision(
+                approved=False,
+                signal=None,
+                reason="OPTION_UNDERLYING_UNAVAILABLE",
+                phase="",
+                gate_results=(),
+                block_reasons=("Option AMT requires a valid underlying observation",),
+                model_label="",
+            )
+        else:
+            decision = self._strategy.should_enter(ctx)
         quality = normalize_data_quality(ctx.data_quality)
         failed_families = failed_evidence_families(ctx.evidence_provenance)
         capability = getattr(self._oms, "is_live", None)

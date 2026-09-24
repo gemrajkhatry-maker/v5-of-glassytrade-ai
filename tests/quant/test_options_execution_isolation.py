@@ -57,13 +57,13 @@ def test_rejected_signal_is_debounced():
 
     eng = QuantEngine(
         gateway=MagicMock(),
-        symbol="NATURALGAS 23 SEP 275 CALL",
+        symbol="NATURALGAS SEP FUT",
         portfolio_risk=pra,
         execution_enabled=True,
     )
     sig = Signal(
         type="LONG", reason="t", entry=14.0, sl=13.0, tp=16.0, rr=2.0,
-        model_label="t", symbol="NATURALGAS 23 SEP 275 CALL", timestamp="t0",
+        model_label="t", symbol="NATURALGAS SEP FUT", timestamp="t0",
     )
     stub = MagicMock()
     stub.should_enter.return_value = _ApprovedDecision(sig)

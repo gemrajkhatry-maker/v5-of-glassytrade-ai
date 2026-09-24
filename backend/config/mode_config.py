@@ -270,8 +270,11 @@ class ModeConfigLoader:
         logger.info("    - Risk per Trade: %.2f%%", 
                     config.system_config.risk.risk_per_trade_pct * 100)
         logger.info("    - Effective Base Risk: %.2f%%", HMP_BASE_RISK_PCT * 100)
+        logger.info("    - HMP Tier: CONSERVATIVE")
         logger.info("    - Max Daily Loss: %.2f%%", 
                     config.system_config.risk.max_daily_loss_pct * 100)
+        logger.info("    - Max Consecutive Losses: %d",
+                    config.system_config.risk.max_consecutive_losses)
         logger.info("    - Max Positions: %d", 
                     config.system_config.risk.max_concurrent_positions)
         logger.info("=" * 70)

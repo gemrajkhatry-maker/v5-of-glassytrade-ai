@@ -73,7 +73,7 @@ from quant.engine.exit_manager import ExitManager
 from quant.amt.dto import empty_amt_dto
 from quant.contracts.contracts import ContractRef
 from quant.contracts.value_objects import OrderBook, OrderBookLevel
-from quant.decision.decision_service import DecisionService
+from quant.decision.decision_service import DecisionService, QuantDecision
 from quant.decision.context_builder import (
     DecisionContextBuilder,
     build_engine_context,
@@ -301,7 +301,10 @@ class QuantEngine:
                 )
         self._contract = contract
         self._portfolio_risk = portfolio_risk  # shared PortfolioRiskAuthority | None
-        self._execution_enabled = execution_enabled  # ponytail: False for underlying observer feeds in options mode
+        from quant.contracts.instrument_registry import is_option_contract
+        self._execution_enabled = bool(execution_enabled) and not (
+            is_option_contract(symbol) and underlying_gateway is None
+        )
         self.telemetry = telemetry
         self.symbol = symbol
         self._tick_size = tick_size
@@ -1223,14 +1226,14 @@ class QuantEngine:
     # 4. DECISIONS — entry gating, signal translation, submission
     #    Delegated to DecisionLoop (quant/engine/decision_loop.py)
     # =========================================================================
-    def _decide(self, amt_dto: dict, bar, execution_bar=None) -> None:
+    def _decide(self, amt_dto: dict, bar, execution_bar=None) -> QuantDecision | None:
         """Delegate entry evaluation to the DecisionLoop.
 
         The DecisionLoop encapsulates the full pipeline: entry guards, context
         build, strategy evaluation, signal translation, risk ceilings, sizing,
         OMS submission, and event emission.
         """
-        self._decision_loop.evaluate(amt_dto, bar, execution_bar)
+        return self._decision_loop.evaluate(amt_dto, bar, execution_bar)
 
     def _entry_guards(self, bar):
         """Debounce, risk-halt and post-trade cooldown gates.

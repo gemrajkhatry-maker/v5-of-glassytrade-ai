@@ -111,11 +111,11 @@ def simulate_contract_payoff(
         Risk = |Δ| · ΔS_adverse + |Θ| · Δt + ½ · spread
     """
     raw_delta = getattr(opt, "delta", None)
-    if raw_delta is None:
+    if raw_delta is None or isinstance(raw_delta, bool):
         return None
     try:
         delta = abs(float(raw_delta))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if not math.isfinite(delta) or not 0.0 < delta <= 1.0:
         return None
