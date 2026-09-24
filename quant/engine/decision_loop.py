@@ -14,6 +14,7 @@ it fully testable in isolation without constructing a QuantEngine.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import replace as _dc_replace
 from typing import Any, Callable, Optional
 
@@ -532,7 +533,8 @@ class DecisionLoop:
         else:
             decision = self._strategy.should_enter(ctx)
         quality = normalize_data_quality(ctx.data_quality)
-        failed_families = failed_evidence_families(ctx.evidence_provenance)
+        allow_proxy_cvd = os.getenv("DHAN_ALLOW_PROXY_CVD", "false").lower() in ("1", "true", "yes")
+        failed_families = failed_evidence_families(ctx.evidence_provenance, allow_proxy_cvd=allow_proxy_cvd)
         capability = getattr(self._oms, "is_live", None)
         configured_live = self._configured_live_mode
         configured_live = configured_live() if callable(configured_live) else configured_live

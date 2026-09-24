@@ -33,10 +33,15 @@ def gate_risk_reward(
         return GateResult(4, False, "Stop at/below zero", f"SL={sl:.4f} entry={entry:.2f}")
     risk = abs(entry - sl)
     from quant.contracts.instrument_registry import is_option_contract
+    is_option = (
+        is_option_contract(ctx.contract_symbol)
+        if ctx.contract_symbol
+        else (is_option_contract(ctx.symbol) or ctx.option_delta is not None)
+    )
     scaled_cap_ticks = amt_stop_distance_limit(
         entry,
         tick,
-        is_option=is_option_contract(ctx.symbol),
+        is_option=is_option,
         max_futures_ticks=max_distance_ticks,
     ) / tick
     if risk > scaled_cap_ticks * tick:

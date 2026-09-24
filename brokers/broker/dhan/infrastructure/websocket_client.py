@@ -509,11 +509,12 @@ class DhanWebSocketClient(IWebSocketClient):
                 pass
             self._message_queue.put_nowait(msg)
             self._dropped_message_count += 1
-            logger.warning(
-                "WS feed queue full — dropped oldest message "
-                "(total dropped=%d)",
-                self._dropped_message_count,
-            )
+            if self._dropped_message_count == 1 or self._dropped_message_count % 5000 == 0:
+                logger.warning(
+                    "WS feed queue full — dropped oldest message "
+                    "(total dropped=%d)",
+                    self._dropped_message_count,
+                )
 
     async def _attempt_reconnect(self) -> None:
         while self._reconnect_count < self._max_reconnect_attempts:

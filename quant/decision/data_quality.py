@@ -34,14 +34,17 @@ def normalize_evidence_provenance(value) -> dict[str, DataQuality]:
     }
 
 
-def failed_evidence_families(value) -> tuple[str, str, str, str, str]:
+def failed_evidence_families(value, *, allow_proxy_cvd: bool = False) -> tuple[str, ...]:
     provenance = normalize_evidence_provenance(value)
-    return tuple(
-        family
-        for family in REQUIRED_EVIDENCE_FAMILIES
-        if provenance[family] is not DataQuality.TICK_EXACT
-    )
+    failed = []
+    for family in REQUIRED_EVIDENCE_FAMILIES:
+        q = provenance[family]
+        if family == "cvd_delta" and allow_proxy_cvd and q in (DataQuality.TICK_EXACT, DataQuality.PRICE_DIRECTION_PROXY):
+            continue
+        if q is not DataQuality.TICK_EXACT:
+            failed.append(family)
+    return tuple(failed)
 
 
-def live_evidence_exact(value) -> bool:
-    return not failed_evidence_families(value)
+def live_evidence_exact(value, *, allow_proxy_cvd: bool = False) -> bool:
+    return not failed_evidence_families(value, allow_proxy_cvd=allow_proxy_cvd)

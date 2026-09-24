@@ -11,9 +11,9 @@ from typing import Any
 
 from app.core.correlation import get_correlation_id
 
-# Log rotation settings: 10MB per file, keep 5 rotated files (~60MB total)
-_LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
-_LOG_BACKUP_COUNT = 5
+# Log rotation settings: 50MB per file, keep 10 rotated files (~500MB total)
+_LOG_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+_LOG_BACKUP_COUNT = 10
 _LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
 
 
