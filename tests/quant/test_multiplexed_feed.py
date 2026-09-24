@@ -380,15 +380,22 @@ def test_unsubscribe_stops_routing_for_symbol():
         feed.close()
 
 
-def test_close_wakes_blocked_readers():
-    # Symbol "A" has NO packets — the reader is genuinely blocked on q.get()
-    # and can only be released by close()'s None sentinel.
+def test_close_wakes_blocked_readers(monkeypatch):
     md = _FakeMarketData({"A": []})
     feed = _make_feed(md)
     feed.set_symbols(["A"])
     result: list = []
 
+    read_entered = threading.Event()
     reader_done = threading.Event()
+    primary_queue = feed._queues["A"]
+    queue_get = primary_queue.get
+
+    def observed_get(*args, **kwargs):
+        read_entered.set()
+        return queue_get(*args, **kwargs)
+
+    monkeypatch.setattr(primary_queue, "get", observed_get)
 
     def reader():
         try:
@@ -399,7 +406,9 @@ def test_close_wakes_blocked_readers():
     t = threading.Thread(target=reader, daemon=True)
     t.start()
     try:
-        _wait_until(lambda: t.is_alive())  # reader parked on q.get()
+        assert read_entered.wait(timeout=2.0)
+        assert primary_queue.empty()
+        assert t.is_alive()
         feed.close()
         assert reader_done.wait(timeout=2.0)
         t.join(timeout=2.0)
@@ -411,12 +420,20 @@ def test_close_wakes_blocked_readers():
         assert not t.is_alive()
 
 
-def test_close_wakes_blocked_dedicated_reader():
+def test_close_wakes_blocked_dedicated_reader(monkeypatch):
     feed = _make_feed(_FakeMarketData({"FUT": []}))
     reader = feed.add_reader("FUT")
     result: list = []
 
+    read_entered = threading.Event()
     reader_done = threading.Event()
+    queue_get = reader.get
+
+    def observed_get(*args, **kwargs):
+        read_entered.set()
+        return queue_get(*args, **kwargs)
+
+    monkeypatch.setattr(reader, "get", observed_get)
 
     def read_dedicated_queue():
         try:
@@ -427,7 +444,9 @@ def test_close_wakes_blocked_dedicated_reader():
     t = threading.Thread(target=read_dedicated_queue, daemon=True)
     t.start()
     try:
-        _wait_until(t.is_alive)
+        assert read_entered.wait(timeout=2.0)
+        assert reader.empty()
+        assert t.is_alive()
         feed.close()
         assert reader_done.wait(timeout=2.0)
         t.join(timeout=2.0)
@@ -744,6 +763,75 @@ def test_close_cancels_failing_streams_and_is_idempotent(managed_feed):
     assert md.calls == 1
 
 
+def test_close_releases_cancel_suppressing_stream_without_thread_leak():
+    started = threading.Event()
+    cancellation_seen = threading.Event()
+    closed = threading.Event()
+    release = asyncio.Event()
+
+    class _CancelSuppressingStream:
+        def stream_full(self, symbols):
+            return self
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                cancellation_seen.set()
+                await release.wait()
+                raise
+
+        async def aclose(self):
+            closed.set()
+
+    feed = MultiplexedMarketFeed(_CancelSuppressingStream())
+    closer = None
+    producer = None
+    try:
+        feed.set_symbols(["NIFTY"])
+        assert started.wait(timeout=2.0)
+        producer = feed._thread
+        assert producer is not None
+        assert producer.daemon
+
+        close_done = threading.Event()
+
+        def close_feed():
+            try:
+                feed.close()
+            finally:
+                close_done.set()
+
+        closer = threading.Thread(target=close_feed, daemon=True)
+        closer.start()
+        assert cancellation_seen.wait(timeout=2.0)
+        assert not close_done.is_set()
+        loop = feed._loop
+        assert loop is not None
+        loop.call_soon_threadsafe(release.set)
+        assert close_done.wait(timeout=2.0)
+        closer.join(timeout=2.0)
+        assert not closer.is_alive()
+        assert feed._thread is None
+        assert not producer.is_alive()
+        assert closed.is_set()
+    finally:
+        loop = feed._loop
+        if loop is not None:
+            try:
+                loop.call_soon_threadsafe(release.set)
+            except RuntimeError:
+                pass
+        if closer is not None:
+            closer.join(timeout=2.0)
+            assert not closer.is_alive()
+        feed.close()
+
+
 def test_close_interrupts_retry_backoff(monkeypatch):
     class _RetryFailingMarketData:
         def __init__(self):
@@ -770,8 +858,10 @@ def test_close_interrupts_retry_backoff(monkeypatch):
     async def observed_sleep(delay):
         if delay > 0:
             retry_delays.append(delay)
-            backoff_started.set()
-        result = await original_sleep(delay)
+            asyncio.get_running_loop().call_soon(backoff_started.set)
+            result = await original_sleep(3600.0)
+        else:
+            result = await original_sleep(delay)
         if delay > 0 and not result:
             backoff_interrupted.set()
         return result
@@ -782,11 +872,7 @@ def test_close_interrupts_retry_backoff(monkeypatch):
         assert backoff_started.wait(timeout=2.0)
         assert md.calls == 1
         feed.close()
-        _wait_until(
-            lambda: feed._thread is None or not feed._thread.is_alive(),
-            timeout=2.0,
-        )
-        assert retry_delays
+        assert retry_delays == [1.5]
         assert backoff_interrupted.is_set()
     finally:
         feed.close()
