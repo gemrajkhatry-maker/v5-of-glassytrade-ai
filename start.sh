@@ -47,6 +47,7 @@ TIMESFM_ADVISOR_ENABLED="${TIMESFM_ADVISOR_ENABLED:-false}" \
 TIMESFM_CONTRACT_SELECTION="${TIMESFM_CONTRACT_SELECTION:-false}" \
 LLM_ADVISOR_ENABLED="${LLM_ADVISOR_ENABLED:-false}" \
 LAYA_MODEL_ENABLED="${LAYA_MODEL_ENABLED:-false}" \
+DHAN_ALLOW_PROXY_CVD="${DHAN_ALLOW_PROXY_CVD:-true}" \
 PYTHONPATH="$PROJECT_DIR:$BACKEND_DIR:/Users/apple/miniconda3/lib/python3.13/site-packages" \
 DEBUG=false \
 nohup "$VENV_PYTHON" -u -m uvicorn app.main:app \
@@ -90,7 +91,7 @@ else
 fi
 
 echo ""
-echo "Backend log:  tail -f $BACKEND_DIR/logs/backend.log  (rotated, 10MB × 5)"
+echo "Backend log:  tail -f $BACKEND_DIR/logs/backend.log  (rotated, 50MB × 10)"
 echo "Frontend log: tail -f $FRONTEND_DIR/frontend.log"
 echo ""
 echo "URLs:"
