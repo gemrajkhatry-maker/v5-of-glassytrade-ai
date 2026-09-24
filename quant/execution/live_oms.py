@@ -112,6 +112,11 @@ class LiveOMS:
                 f"{signal.symbol!r} != {self._contract.symbol!r}"
             )
         broker_signal = to_broker_signal(signal, size)
+        stop_price = float(getattr(signal, "sl", 0.0) or 0.0)
+        if stop_price > 0 and not self._broker.supports_native_stop_loss():
+            raise EmergencyFlattenError(
+                f"LiveOMS cannot submit {signal.symbol}: native stop loss is unavailable"
+            )
         try:
             broker_pos = self._broker.execute_order(
                 broker_signal, self._portfolio, signal.symbol,
@@ -165,8 +170,7 @@ class LiveOMS:
         )
 
         # Phase 2: Broker Contingent Stop-Loss Order Placement (SL-M)
-        stop_price = float(getattr(signal, "sl", 0.0) or 0.0)
-        if stop_price > 0 and filled_qty > 0 and hasattr(self._broker, "place_stop_loss"):
+        if stop_price > 0 and filled_qty > 0:
             stop_side = "SELL" if signal.type == "LONG" else "BUY"
             stop_qty = int(abs(filled_qty))
             stop_order_id = None
@@ -178,9 +182,6 @@ class LiveOMS:
                     stop_price=stop_price,
                     contract_ref=self._contract,
                 )
-            except NotImplementedError:
-                # Pre-v6 broker double / test mock without native SL-M support
-                stop_order_id = "mock_pass"
             except Exception as exc:
                 logger.critical(
                     "LiveOMS Phase 2 contingent stop placement failed for %s: %s",

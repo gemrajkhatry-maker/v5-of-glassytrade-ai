@@ -143,6 +143,9 @@ class DhanBrokerAdapter(IBroker):
                 access_token=self._access_token,
             )
 
+    def supports_native_stop_loss(self) -> bool:
+        return True
+
     def execute_order(
         self, signal: Signal, portfolio: Portfolio, symbol: str,
         contract_ref=None,

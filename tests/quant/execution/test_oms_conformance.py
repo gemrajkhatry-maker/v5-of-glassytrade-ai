@@ -54,6 +54,8 @@ class FakeBroker(IBroker):
         self.should_reject = should_reject
         self.close_call_count = 0
         self.last_close = None  # (symbol, side, quantity, reference_price)
+        self.stop_call_count = 0
+        self.last_stop_order_id = None
 
     def execute_order(self, signal, portfolio, symbol):
         if self.should_reject:
@@ -71,6 +73,16 @@ class FakeBroker(IBroker):
             take_profit=Decimal("0"),
             entry_time="2026-09-03T10:00:00+05:30",
         )
+
+    def supports_native_stop_loss(self) -> bool:
+        return True
+
+    def place_stop_loss(
+        self, symbol, side, quantity, stop_price, contract_ref=None
+    ) -> str | None:
+        self.stop_call_count += 1
+        self.last_stop_order_id = f"stop-{self.stop_call_count}"
+        return self.last_stop_order_id
 
     def close_position(self, symbol, side, quantity, portfolio, reference_price=None):
         self.close_call_count += 1

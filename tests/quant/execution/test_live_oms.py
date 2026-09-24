@@ -16,7 +16,7 @@ from quant.contracts.entities import Position as BrokerPosition
 from quant.contracts.enums import Side, SignalType, Source
 from quant.contracts.ports.broker import IBroker
 from quant.decision.signal_builder import Signal
-from quant.execution.live_oms import LiveOMS
+from quant.execution.live_oms import EmergencyFlattenError, LiveOMS
 from quant.execution.lots import snap_to_lot
 from quant.execution.order import Position
 
@@ -37,8 +37,16 @@ class MockBroker(IBroker):
         self.last_close_side = None
         self.last_close_qty = None
         self.close_call_count = 0
+        self.execute_order_call_count = 0
+        self.native_stop_supported = True
+        self.native_stop_capability_call_count = 0
+        self.stop_call_count = 0
+        self.last_stop_order_id = None
+        self.last_stop = None
+        self.stop_failure = False
 
     def execute_order(self, signal, portfolio, symbol):
+        self.execute_order_call_count += 1
         if self.should_reject:
             return None
         return BrokerPosition(
@@ -51,6 +59,28 @@ class MockBroker(IBroker):
             take_profit=Decimal("0"),
             entry_time="2026-08-26T10:00:00+05:30",
         )
+
+    def supports_native_stop_loss(self) -> bool:
+        self.native_stop_capability_call_count += 1
+        return self.native_stop_supported
+
+    def place_stop_loss(
+        self, symbol, side, quantity, stop_price, contract_ref=None
+    ) -> str | None:
+        self.stop_call_count += 1
+        self.last_stop = {
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity,
+            "stop_price": stop_price,
+            "contract_ref": contract_ref,
+        }
+        if self.stop_failure:
+            if isinstance(self.stop_failure, BaseException):
+                raise self.stop_failure
+            return None
+        self.last_stop_order_id = f"stop-{self.stop_call_count}"
+        return self.last_stop_order_id
 
     def close_position(self, symbol, side, quantity, portfolio, reference_price=None):
         self.last_close_symbol = symbol
@@ -169,6 +199,43 @@ class TestLiveOMSSubmit:
         signal = _make_signal()
         with pytest.raises(RuntimeError, match="broker rejected"):
             oms.submit(signal, quantity=100.0)
+
+    def test_live_submit_refuses_entry_when_native_stop_is_unavailable(self):
+        broker = MockBroker()
+        broker.native_stop_supported = False
+        portfolio = MagicMock(spec=Portfolio)
+        oms = LiveOMS(broker=broker, portfolio=portfolio)
+
+        with pytest.raises(EmergencyFlattenError, match="native stop"):
+            oms.submit(_make_signal(), quantity=100.0)
+
+        assert broker.execute_order_call_count == 0
+
+    def test_capable_broker_records_non_empty_stop_id(self):
+        broker = MockBroker(fill_price=102.0, fill_qty=130.0)
+        portfolio = MagicMock(spec=Portfolio)
+        oms = LiveOMS(broker=broker, portfolio=portfolio, lot_size=65.0)
+
+        oms.submit(_make_signal(entry=100.0), quantity=130.0)
+
+        assert broker.native_stop_capability_call_count == 1
+        assert broker.stop_call_count == 1
+        assert broker.last_stop_order_id
+        assert broker.last_stop["side"] == "SELL"
+        assert broker.last_stop["quantity"] == 130
+
+    def test_post_fill_stop_failure_attempts_emergency_flatten(self):
+        broker = MockBroker()
+        broker.stop_failure = NotImplementedError("native stop unavailable")
+        portfolio = MagicMock(spec=Portfolio)
+        oms = LiveOMS(broker=broker, portfolio=portfolio)
+
+        with pytest.raises(EmergencyFlattenError):
+            oms.submit(_make_signal(), quantity=100.0)
+
+        assert broker.native_stop_capability_call_count == 1
+        assert broker.close_call_count == 1
+        assert broker.last_close_side == "SELL"
 
 
 # ---------------------------------------------------------------------------

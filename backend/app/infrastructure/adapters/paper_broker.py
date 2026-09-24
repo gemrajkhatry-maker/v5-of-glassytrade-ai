@@ -59,6 +59,9 @@ class PaperBrokerAdapter(IBroker):
         self._cost_model_enabled = cost_model_enabled
         self._cancelled_orders: set[str] = set()
 
+    def supports_native_stop_loss(self) -> bool:
+        return False
+
     def execute_order(
         self, signal: Signal, portfolio: Portfolio, symbol: str,
         contract_ref=None,

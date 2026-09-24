@@ -22,6 +22,9 @@ class IBroker(ABC):
     def cancel_order(self, order_id: str) -> bool:
         ...
 
+    def supports_native_stop_loss(self) -> bool:
+        return False
+
     def place_stop_loss(
         self,
         symbol: str,
