@@ -10,6 +10,7 @@ from quant.amt.triple_a import AGGRESSION
 from quant.bars import Bar
 from quant.decision.context import DecisionContext
 from quant.decision.gates_edge import gate_triple_a_edge
+from quant.decision.setup_state import SetupEvidence
 
 
 def _long_bar(close: float, time: str = "t") -> Bar:
@@ -198,3 +199,33 @@ class TestCompressionBoxBreakoutConfirmation:
         )
         result = gate_triple_a_edge(ctx)
         assert result.passed is True
+
+    def test_complete_evidence_inside_compression_is_blocked(self):
+        evidence = SetupEvidence(
+            setup_type="TRIPLE_A",
+            direction="LONG",
+            absorption=True,
+            accumulation=True,
+            aggression=True,
+            acceptance=True,
+            cvd_agrees=True,
+            price_location="ABOVE_VAH",
+            breakout_beyond_cluster=True,
+            price=101.0,
+            session_vwap=100.0,
+            cluster_high=100.0,
+            cluster_low=99.0,
+            cvd_slope=1.0,
+        )
+        ctx = _ctx(
+            bar=_long_bar(close=101.0),
+            setup_evidence=evidence,
+            compression_box_bars=5,
+            compression_box_vah=102.0,
+            compression_box_val=98.0,
+            leg_lvn=100.95,
+            cvd_slope=1.0,
+        )
+        result = gate_triple_a_edge(ctx)
+        assert result.passed is False
+        assert "compression box VAH" in result.reason

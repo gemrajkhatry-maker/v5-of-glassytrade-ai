@@ -1,5 +1,7 @@
 """Gate 3 — the Triple-A edge (Fabio: absorption -> accumulation -> aggression)."""
 
+import math
+
 from quant.amt.orderflow.aggression import canonical_absorption_direction, AggressionScorer
 from quant.contracts.enums import MarketState
 
@@ -34,6 +36,14 @@ from quant.decision.setup_state import (
 # and refusing them would disable trading rather than filter probes.
 _FULL_BODY_MIN_RATIO = 0.6
 _CLOSE_NEAR_EXTREME_MIN = 0.75
+
+
+def _finite_float(value) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return numeric if math.isfinite(numeric) else None
 
 
 def rescore_aggression_with_direction(ctx: DecisionContext) -> float:
@@ -112,11 +122,15 @@ def _candle_acceptance(ctx: DecisionContext) -> GateResult | None:
     bar = ctx.bar
     if bar is None:
         return None
-    open_px = float(bar.open)
-    high = float(bar.high)
-    low = float(bar.low)
-    close = float(bar.close)
+    open_px = _finite_float(getattr(bar, "open", None))
+    high = _finite_float(getattr(bar, "high", None))
+    low = _finite_float(getattr(bar, "low", None))
+    close = _finite_float(getattr(bar, "close", None))
+    if any(value is None for value in (open_px, high, low, close)):
+        return GateResult(3, False, "Malformed bar prices")
     span = high - low
+    if not math.isfinite(span):
+        return GateResult(3, False, "Malformed bar range")
     if span <= 0:
         return None  # indeterminate: cannot judge a zero-range bar
 
@@ -168,10 +182,12 @@ def _check_guards(ctx: DecisionContext) -> GateResult | None:
     si_dir = getattr(ctx, "stacked_imbalance_direction", "")
     if si_dir and ctx.agent_direction:
         if (ctx.agent_direction == "LONG" and si_dir == "SELL") or (ctx.agent_direction == "SHORT" and si_dir == "BUY"):
-            mag = getattr(ctx, "stacked_imbalance_magnitude", 0)
-            lo = getattr(ctx, "stacked_imbalance_price_low", 0.0)
-            hi = getattr(ctx, "stacked_imbalance_price_high", 0.0)
-            return GateResult(3, False, f"Opposing stacked {si_dir} imbalance x{mag} at {lo:.2f}-{hi:.2f}")
+            mag = _finite_float(getattr(ctx, "stacked_imbalance_magnitude", 0))
+            lo = _finite_float(getattr(ctx, "stacked_imbalance_price_low", 0.0))
+            hi = _finite_float(getattr(ctx, "stacked_imbalance_price_high", 0.0))
+            if any(value is None for value in (mag, lo, hi)):
+                return GateResult(3, False, "Malformed stacked imbalance inputs")
+            return GateResult(3, False, f"Opposing stacked {si_dir} imbalance x{mag:g} at {lo:.2f}-{hi:.2f}")
     if getattr(ctx, "contested_bubble_zone", False):
         return GateResult(3, False, "Contested bubble zone — both sides stacked, stay flat")
     if ctx.agent_direction not in ("LONG", "SHORT"):
@@ -179,28 +195,42 @@ def _check_guards(ctx: DecisionContext) -> GateResult | None:
     ms_val = getattr(ctx.market_state, "value", ctx.market_state)
     if ms_val in (MarketState.DEAD.value, "DEAD", "DEAD_MARKET"):
         return GateResult(3, False, "Dead market — no edge")
-    close_px = float(ctx.bar.close) if ctx.bar else 0.0
-    # vwap_std is σ in PRICE units; report true σ-multiples for the veto reason.
+    close_px = _finite_float(getattr(ctx.bar, "close", None))
+    if close_px is None:
+        return GateResult(3, False, "Malformed bar close")
+    vwap_std = _finite_float(getattr(ctx, "vwap_std", 0.0))
+    vwap_upper_2 = _finite_float(getattr(ctx, "vwap_upper_2", 0.0))
+    vwap_lower_2 = _finite_float(getattr(ctx, "vwap_lower_2", 0.0))
+    if any(value is None for value in (vwap_std, vwap_upper_2, vwap_lower_2)):
+        return GateResult(3, False, "Malformed VWAP guard inputs")
+    session_vwap = _finite_float(getattr(ctx, "session_vwap", 0.0))
+    if session_vwap is None:
+        session_vwap = 0.0
     sigma_mult = 0.0
-    if ctx.vwap_std and ctx.vwap_std > 0 and ctx.session_vwap > 0:
-        sigma_mult = abs(close_px - ctx.session_vwap) / ctx.vwap_std
-    if ctx.agent_direction == "LONG" and ctx.vwap_upper_2 > 0 and close_px > ctx.vwap_upper_2:
+    if vwap_std and vwap_std > 0 and session_vwap > 0:
+        sigma_mult = abs(close_px - session_vwap) / vwap_std
+    if ctx.agent_direction == "LONG" and vwap_upper_2 > 0 and close_px > vwap_upper_2:
         return GateResult(3, False, f"Anti-Climax: LONG rejected at +{sigma_mult:.1f}σ extension")
-    if ctx.agent_direction == "SHORT" and ctx.vwap_lower_2 > 0 and close_px < ctx.vwap_lower_2:
+    if ctx.agent_direction == "SHORT" and vwap_lower_2 > 0 and close_px < vwap_lower_2:
         return GateResult(3, False, f"Anti-Climax: SHORT rejected at -{sigma_mult:.1f}σ extension")
     acceptance = _candle_acceptance(ctx)
     if acceptance:
         return acceptance
-    if getattr(ctx, "drive_number", 0) >= 3 and not getattr(ctx, "drive_entry_valid", False):
-        return GateResult(3, False, f"Drive count exhausted ({ctx.drive_number})")
-    cvd_slope = ctx.cvd_slope
+    drive_number = _finite_float(getattr(ctx, "drive_number", 0))
+    if drive_number is None:
+        return GateResult(3, False, "Malformed drive number")
+    if drive_number >= 3 and not getattr(ctx, "drive_entry_valid", False):
+        return GateResult(3, False, f"Drive count exhausted ({drive_number:g})")
+    cvd_slope = _finite_float(getattr(ctx, "cvd_slope", None))
+    if cvd_slope is None:
+        return GateResult(3, False, "Malformed CVD slope")
     market = getattr(ctx, "market", "NSE")
-    # Doc: NSE tighter (−0.3), MCX looser (−0.5) — was inverted.
     cvd_block_neg = -0.5 if str(market).upper() == "MCX" else -0.3
     cvd_block_pos = 0.5 if str(market).upper() == "MCX" else 0.3
-    # Lagging persisted CVD must not alone veto when this bar's fresh delta
-    # agrees with the trade direction (absorption→breakout sign-freeze).
-    fresh_delta = float(getattr(ctx, "norm_delta", 0.0) or 0.0)
+    fresh_delta_raw = getattr(ctx, "norm_delta", 0.0)
+    fresh_delta = 0.0 if fresh_delta_raw is None else _finite_float(fresh_delta_raw)
+    if fresh_delta is None:
+        return GateResult(3, False, "Malformed normalized delta")
     if (
         ctx.agent_direction == "LONG"
         and cvd_slope < cvd_block_neg
@@ -238,19 +268,12 @@ def _triple_a_aggression_failure(
         return "Triple-A has no trade direction"
     if canonical_absorption_direction(getattr(ctx, "absorption_side", "")) != direction:
         return "Triple-A missing or opposing absorption evidence"
-    try:
-        price = float(ctx.bar.close) if ctx.bar is not None else 0.0
-    except (TypeError, ValueError):
-        price = 0.0
-    try:
-        vwap = float(getattr(ctx, "session_vwap", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        vwap = 0.0
-    if vwap <= 0.0 and ctx.bar is not None:
-        try:
-            vwap = float(getattr(ctx.bar, "vwap", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            vwap = 0.0
+    price = _finite_float(getattr(ctx.bar, "close", None)) if ctx.bar is not None else None
+    if price is None or price <= 0.0:
+        return "Triple-A requires a positive finite price"
+    vwap = _finite_float(getattr(ctx, "session_vwap", None))
+    if vwap is None or vwap <= 0.0:
+        return "Triple-A requires a positive finite session VWAP"
     cluster_high = getattr(ctx, "absorption_cluster_high", None)
     cluster_low = getattr(ctx, "absorption_cluster_low", None)
     if not triple_a_cluster_valid(cluster_high, cluster_low):
@@ -266,15 +289,55 @@ def _triple_a_aggression_failure(
     return ""
 
 
+def _triple_a_compression_failure(ctx: DecisionContext, price: float) -> str:
+    bars = _finite_float(getattr(ctx, "compression_box_bars", 0))
+    if bars is None:
+        return "Malformed compression box bars"
+    if bars < 3:
+        return ""
+    vah = _finite_float(getattr(ctx, "compression_box_vah", 0.0))
+    val = _finite_float(getattr(ctx, "compression_box_val", 0.0))
+    if vah is None or val is None or not (0.0 < val < vah):
+        return "Malformed compression box bounds"
+    direction = str(getattr(ctx, "agent_direction", "") or "").upper()
+    if direction == "LONG" and price <= vah:
+        return (
+            f"Triple-A LONG blocked: close {price:.2f} did not break "
+            f"compression box VAH {vah:.2f} (bars={bars:g})"
+        )
+    if direction == "SHORT" and price >= val:
+        return (
+            f"Triple-A SHORT blocked: close {price:.2f} did not break "
+            f"compression box VAL {val:.2f} (bars={bars:g})"
+        )
+    return ""
+
+
+def _session_or_bar_vwap(ctx: DecisionContext) -> float:
+    session_vwap = _finite_float(getattr(ctx, "session_vwap", 0.0))
+    if session_vwap:
+        return session_vwap
+    bar_vwap = _finite_float(getattr(ctx.bar, "vwap", 0.0)) if ctx.bar is not None else None
+    return bar_vwap or 0.0
+
+
 def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | None:
     """Check each setup path (evidence, Triple-A, drive, LVN, initiative).
 
     When setup_evidence is present, is_complete() is the sole location/LVN/
     breakout certificate — this gate only applies phase permissions.
     """
-    price = float(ctx.bar.close) if ctx.bar else 0.0
-    tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
-    vwap = getattr(ctx, "session_vwap", 0.0) or (float(ctx.bar.vwap) if ctx.bar and getattr(ctx.bar, "vwap", 0.0) else 0.0)
+    price = _finite_float(getattr(ctx.bar, "close", None)) if ctx.bar is not None else None
+    if price is None:
+        return GateResult(3, False, "Malformed bar close")
+    tick = _finite_float(getattr(ctx, "tick_size", 0.0))
+    if tick is None:
+        return GateResult(3, False, "Malformed tick size")
+    if tick <= 0.0:
+        tick = 0.05
+    cvd_slope = _finite_float(cvd_slope)
+    if cvd_slope is None:
+        return GateResult(3, False, "Malformed CVD slope")
 
     if getattr(ctx, "setup_evidence", None) is not None:
         ev = ctx.setup_evidence
@@ -286,6 +349,9 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         stype = str(ev.setup_type or "").upper()
         if stype == "TRIPLE_A":
             failure = _triple_a_aggression_failure(ctx, cvd_slope)
+            if failure:
+                return GateResult(3, False, failure)
+            failure = _triple_a_compression_failure(ctx, price)
             if failure:
                 return GateResult(3, False, failure)
         if stype in ("TRIPLE_A", "LVN_SNIPER") and not getattr(ctx, "allow_trend", True):
@@ -301,46 +367,25 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         if failure:
             return GateResult(3, False, failure)
         if not getattr(ctx, "allow_trend", True):
-            # ponytail: gate-1 owns evidence-gated paths; here we catch the evidence-free ones
             return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
-        # Spec §5.2 Layer 2: compression box breakout confirmation. When a
-        # micro-balance range has formed (compression box detected), require
-        # the breakout close to exceed the micro-VAH (LONG) or micro-VAL
-        # (SHORT). This confirms a true out-of-balance condition — a close
-        # inside the box is range rotation, not a tradable breakout.
-        cb_bars = getattr(ctx, "compression_box_bars", 0) or 0
-        if cb_bars >= 3:
-            cb_vah = getattr(ctx, "compression_box_vah", 0.0) or 0.0
-            cb_val = getattr(ctx, "compression_box_val", 0.0) or 0.0
-            if ctx.agent_direction == "LONG" and cb_vah > 0 and price <= cb_vah:
-                return GateResult(
-                    3, False,
-                    f"Triple-A LONG blocked: close {price:.2f} did not break "
-                    f"compression box VAH {cb_vah:.2f} (bars={cb_bars})",
-                )
-            if ctx.agent_direction == "SHORT" and cb_val > 0 and price >= cb_val:
-                return GateResult(
-                    3, False,
-                    f"Triple-A SHORT blocked: close {price:.2f} did not break "
-                    f"compression box VAL {cb_val:.2f} (bars={cb_bars})",
-                )
-        # Fabio VWAP Bias: Trend continuation requires price on the correct side of session VWAP
-        vwap = getattr(ctx, "session_vwap", 0.0) or (float(ctx.bar.vwap) if ctx.bar and getattr(ctx.bar, "vwap", 0.0) else 0.0)
-        if vwap > 0:
-            if ctx.agent_direction == "LONG" and price < vwap - 1.0 * tick:
-                return GateResult(3, False, f"Triple-A LONG below session VWAP ({price:.2f} < {vwap:.2f}) violates auction bias")
-            if ctx.agent_direction == "SHORT" and price > vwap + 1.0 * tick:
-                return GateResult(3, False, f"Triple-A SHORT above session VWAP ({price:.2f} > {vwap:.2f}) violates auction bias")
+        failure = _triple_a_compression_failure(ctx, price)
+        if failure:
+            return GateResult(3, False, failure)
+        vwap = _finite_float(getattr(ctx, "session_vwap", None))
+        if vwap is None or vwap <= 0.0:
+            return GateResult(3, False, "Triple-A requires a positive finite session VWAP")
+        if ctx.agent_direction == "LONG" and price < vwap - 1.0 * tick:
+            return GateResult(3, False, f"Triple-A LONG below session VWAP ({price:.2f} < {vwap:.2f}) violates auction bias")
+        if ctx.agent_direction == "SHORT" and price > vwap + 1.0 * tick:
+            return GateResult(3, False, f"Triple-A SHORT above session VWAP ({price:.2f} > {vwap:.2f}) violates auction bias")
         return _pass(f"Triple-A AGGRESSION {tsignal}", "TRIPLE_A")
     if ctx.drive_entry_valid:
         return _pass("Second Drive reclaim confirmed", "SECOND_DRIVE")
-    leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0
+    leg_lvn = _finite_float(getattr(ctx, "leg_lvn", 0.0))
+    if leg_lvn is None:
+        return GateResult(3, False, "Malformed leg LVN")
     if leg_lvn > 0 and ctx.bar:
-        tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
-        price = float(ctx.bar.close)
         if abs(price - leg_lvn) <= 2.0 * tick:
-            # Canonical absorption mapping (SELL_ABSORBED->LONG, BUY_ABSORBED->SHORT).
-            # Opposing sides are already vetoed in _check_guards.
             absorbed = canonical_absorption_direction(ctx.absorption_side)
             if absorbed == "LONG" and ctx.agent_direction == "LONG" and cvd_slope >= -0.2:
                 if not getattr(ctx, "allow_trend", True):
@@ -353,10 +398,11 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
     break_dir = getattr(ctx, "break_direction", "") or ""
     break_type = getattr(ctx, "break_type", "") or ""
     if break_type == "INITIATIVE":
-        vwap = getattr(ctx, "session_vwap", 0.0) or (float(ctx.bar.vwap) if ctx.bar and getattr(ctx.bar, "vwap", 0.0) else 0.0)
-        price = float(ctx.bar.close) if ctx.bar else 0.0
-        tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
-        fresh_delta = float(getattr(ctx, "norm_delta", 0.0) or 0.0)
+        vwap = _session_or_bar_vwap(ctx)
+        fresh_delta_raw = getattr(ctx, "norm_delta", 0.0)
+        fresh_delta = 0.0 if fresh_delta_raw is None else _finite_float(fresh_delta_raw)
+        if fresh_delta is None:
+            return GateResult(3, False, "Malformed normalized delta")
         # CVD slope may lag through absorption→breakout; fresh bar delta can
         # confirm the initiative when persisted slope has not yet flipped.
         cvd_ok_long = cvd_slope > -0.2 or fresh_delta > 0.5
@@ -376,9 +422,10 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
     # Fabio Playbook #4: trapped-volume squeeze -> enter on first retest of trapped level
     sq_dir = getattr(ctx, "squeeze_direction", "") or ""
     if sq_dir and ctx.agent_direction == sq_dir:
-        trapped = float(getattr(ctx, "squeeze_trapped_level", 0.0) or 0.0)
-        tick = (ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05)
-        retested = ctx.bar and trapped > 0 and abs(float(ctx.bar.close) - trapped) <= 3.0 * tick
+        trapped = _finite_float(getattr(ctx, "squeeze_trapped_level", 0.0))
+        if trapped is None:
+            return GateResult(3, False, "Malformed squeeze level")
+        retested = ctx.bar and trapped > 0 and abs(price - trapped) <= 3.0 * tick
         if retested or getattr(ctx, "pullback_confirmed", False):
             if ctx.agent_direction == "LONG" and cvd_slope >= -0.1:
                 if not getattr(ctx, "allow_trend", True):

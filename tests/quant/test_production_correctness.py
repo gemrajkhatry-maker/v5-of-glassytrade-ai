@@ -426,6 +426,24 @@ def test_triple_a_machine_confirm_rejects_nonfinite_inputs(field, value):
     assert machine._confirm_direction("LONG", close, vwap, cvd_slope) is False
 
 
+@pytest.mark.parametrize("close", [0.0, -1.0])
+def test_triple_a_machine_rejects_nonpositive_close(close):
+    result = _absorbing_machine().update(
+        close=close,
+        high=close + 0.2,
+        low=close - 0.2,
+        vwap=100.0,
+        cvd_slope=-1.0,
+        absorption_side="BUY_ABSORBED",
+        absorption_active=True,
+        absorption_cluster_high=100.5,
+        absorption_cluster_low=99.5,
+        poc=100.0,
+        tick_size=0.05,
+    )
+    assert result.phase != AGGRESSION
+
+
 def test_float_epoch_normalizes_to_ist_date_not_prefix():
     from quant.state import _epoch_to_iso, session_date_key
 

@@ -5,6 +5,8 @@ auctions (the playbook trades the same absorption/VWAP-breakout setup
 everywhere); only a DEAD market rejects.
 """
 
+import pytest
+
 from quant.bars import Bar
 from quant.decision.context import DecisionContext
 from quant.decision.gates_edge import gate_triple_a_edge
@@ -13,7 +15,11 @@ from quant.decision.setup_state import SetupEvidence
 
 def _ctx(**kw):
     close = kw.pop("close", 100.0)
-    bar = Bar(time="t", open=close, high=close, low=close, close=close, volume=100.0)
+    bar_vwap = kw.pop("bar_vwap", 0.0)
+    bar = Bar(
+        time="t", open=close, high=close, low=close, close=close,
+        volume=100.0, vwap=bar_vwap,
+    )
     agent_direction = kw.pop("agent_direction", "LONG")
     market_state = kw.pop("market_state", "IMBALANCED")
     obi = kw.pop("obi", 0.0)
@@ -31,6 +37,9 @@ def _ctx(**kw):
     triple_a_phase = kw.pop("triple_a_phase", "")
     triple_a_signal = kw.pop("triple_a_signal", "")
     setup_evidence = kw.pop("setup_evidence", None)
+    compression_box_bars = kw.pop("compression_box_bars", 0)
+    compression_box_vah = kw.pop("compression_box_vah", 0.0)
+    compression_box_val = kw.pop("compression_box_val", 0.0)
     market = kw.pop("market", "NSE")
     session_vwap = kw.pop("session_vwap", 100.5 if agent_direction == "SHORT" else 99.0)
     cluster_high = kw.pop("absorption_cluster_high", 100.2 if agent_direction == "SHORT" else 99.9)
@@ -53,14 +62,18 @@ def _ctx(**kw):
         session_vwap=session_vwap,
         absorption_cluster_high=cluster_high,
         absorption_cluster_low=cluster_low,
-        tick_size=0.05,
-        triple_a_phase=triple_a_phase,
-        triple_a_signal=triple_a_signal,
-        setup_evidence=setup_evidence,
-    )
+         tick_size=0.05,
+         triple_a_phase=triple_a_phase,
+         triple_a_signal=triple_a_signal,
+         setup_evidence=setup_evidence,
+         compression_box_bars=compression_box_bars,
+         compression_box_vah=compression_box_vah,
+         compression_box_val=compression_box_val,
+     )
 
 
 def test_passes_on_aggression_signal():
+
     r = gate_triple_a_edge(_ctx(triple_a_phase="AGGRESSION", triple_a_signal="LONG", cvd_slope=1.5, leg_lvn=100.0))
     assert r.passed and r.gate == 3
 
@@ -260,4 +273,86 @@ def test_nse_triple_a_requires_negative_short_cvd():
         cvd_slope=-0.25,
     ))
     assert confirming.passed
+
+
+@pytest.mark.parametrize("close", [0.0, -1.0])
+def test_triple_a_rejects_nonpositive_close(close):
+    result = gate_triple_a_edge(_ctx(
+        agent_direction="SHORT",
+        triple_a_phase="AGGRESSION",
+        triple_a_signal="SHORT",
+        close=close,
+        cvd_slope=-1.0,
+    ))
+    assert result.passed is False
+
+
+@pytest.mark.parametrize(
+    "session_vwap",
+    [0.0, -1.0, None, float("nan"), float("inf")],
+)
+def test_triple_a_does_not_fallback_to_bar_vwap(session_vwap):
+    result = gate_triple_a_edge(_ctx(
+        agent_direction="SHORT",
+        triple_a_phase="AGGRESSION",
+        triple_a_signal="SHORT",
+        close=99.0,
+        bar_vwap=100.0,
+        session_vwap=session_vwap,
+        cvd_slope=-1.0,
+    ))
+    assert result.passed is False
+
+
+def test_complete_evidence_does_not_bypass_missing_session_vwap():
+    evidence = SetupEvidence(
+        setup_type="TRIPLE_A",
+        direction="LONG",
+        absorption=True,
+        accumulation=True,
+        aggression=True,
+        acceptance=True,
+        cvd_agrees=True,
+        price_location="ABOVE_VAH",
+        breakout_beyond_cluster=True,
+        price=101.0,
+        session_vwap=100.0,
+        cluster_high=99.9,
+        cluster_low=99.0,
+        cvd_slope=1.0,
+    )
+    result = gate_triple_a_edge(_ctx(
+        agent_direction="LONG",
+        triple_a_phase="",
+        triple_a_signal="",
+        setup_evidence=evidence,
+        close=101.0,
+        bar_vwap=100.0,
+        session_vwap=0.0,
+        cvd_slope=1.0,
+    ))
+    assert result.passed is False
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"cvd_slope": None},
+        {"cvd_slope": "bad"},
+        {"close": None},
+        {"close": "bad"},
+        {"compression_box_bars": "bad"},
+    ],
+)
+def test_direct_gate_fails_closed_for_malformed_numeric_inputs(overrides):
+    kwargs = {
+        "agent_direction": "SHORT",
+        "triple_a_phase": "AGGRESSION",
+        "triple_a_signal": "SHORT",
+        "cvd_slope": -1.0,
+    }
+    kwargs.update(overrides)
+    result = gate_triple_a_edge(_ctx(**kwargs))
+    assert result.gate == 3
+    assert result.passed is False
 

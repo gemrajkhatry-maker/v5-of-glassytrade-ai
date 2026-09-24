@@ -80,7 +80,7 @@ class TripleAMachine:
         try:
             high = float(cluster_high)
             low = float(cluster_low)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return False
         return math.isfinite(high) and math.isfinite(low) and 0.0 < low < high
 
@@ -255,12 +255,13 @@ class TripleAMachine:
             price = float(close)
             vwap_value = float(vwap)
             slope = float(cvd_slope)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return False
         if not all(math.isfinite(value) for value in (price, vwap_value, slope)):
             return False
         if (
-            vwap_value <= 0
+            price <= 0
+            or vwap_value <= 0
             or not self._valid_cluster(self._cluster_high, self._cluster_low)
         ):
             return False

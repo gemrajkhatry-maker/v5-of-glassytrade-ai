@@ -1,7 +1,13 @@
 # tests/quant/decision/test_setup_state.py
 """Tests for SetupEvidence and Fabio Setup State Transitions (Task 2)."""
 
-from quant.decision.setup_state import SetupEvidence
+import pytest
+
+from quant.decision.setup_state import (
+    SetupEvidence,
+    triple_a_breakout_confirmed,
+    triple_a_vwap_confirmed,
+)
 
 
 def test_imbalanced_regime_is_not_a_setup():
@@ -46,7 +52,63 @@ def test_triple_a_partial_evidence_fails_closed():
     assert evidence.is_complete() is False
 
 
-def test_triple_a_rejects_invalid_cluster_evidence():
+@pytest.mark.parametrize(
+    ("direction", "close", "cluster_high", "cluster_low"),
+    [
+        ("LONG", 0.0, 100.5, 99.5),
+        ("LONG", -1.0, 100.5, 99.5),
+        ("SHORT", 0.0, 100.5, 99.5),
+        ("SHORT", -1.0, 100.5, 99.5),
+    ],
+)
+def test_triple_a_breakout_requires_positive_price(
+    direction, close, cluster_high, cluster_low
+):
+    assert triple_a_breakout_confirmed(
+        direction, close, cluster_high, cluster_low
+    ) is False
+
+
+@pytest.mark.parametrize(
+    ("direction", "close", "vwap"),
+    [
+        ("LONG", 0.0, 100.0),
+        ("LONG", -1.0, 100.0),
+        ("SHORT", 0.0, 100.0),
+        ("SHORT", -1.0, 100.0),
+        ("LONG", 101.0, 0.0),
+        ("LONG", 101.0, -1.0),
+        ("LONG", 101.0, float("nan")),
+        ("LONG", 101.0, float("inf")),
+    ],
+)
+def test_triple_a_vwap_requires_positive_finite_price_and_vwap(
+    direction, close, vwap
+):
+    assert triple_a_vwap_confirmed(direction, close, vwap) is False
+
+
+@pytest.mark.parametrize("close", [0.0, -1.0])
+def test_triple_a_evidence_rejects_nonpositive_price(close):
+    evidence = SetupEvidence(
+        setup_type="TRIPLE_A",
+        direction="SHORT",
+        absorption=True,
+        accumulation=True,
+        aggression=True,
+        acceptance=True,
+        cvd_agrees=True,
+        price_location="BELOW_VAL",
+        breakout_beyond_cluster=True,
+        price=close,
+        session_vwap=100.0,
+        cluster_high=100.5,
+        cluster_low=99.5,
+        cvd_slope=-1.0,
+    )
+    assert evidence.is_complete() is False
+
+
     evidence = SetupEvidence(
         setup_type="TRIPLE_A",
         direction="LONG",

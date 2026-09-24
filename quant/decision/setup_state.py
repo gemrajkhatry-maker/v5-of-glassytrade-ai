@@ -28,7 +28,7 @@ def triple_a_cluster_valid(cluster_high, cluster_low) -> bool:
     try:
         high = float(cluster_high)
         low = float(cluster_low)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
     return math.isfinite(high) and math.isfinite(low) and 0.0 < low < high
 
@@ -36,7 +36,7 @@ def triple_a_cluster_valid(cluster_high, cluster_low) -> bool:
 def triple_a_cvd_confirmed(direction, cvd_slope) -> bool:
     try:
         slope = float(cvd_slope)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
     if not math.isfinite(slope):
         return False
@@ -52,9 +52,9 @@ def triple_a_breakout_confirmed(direction, close, cluster_high, cluster_low) -> 
         return False
     try:
         price = float(close)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
-    if not math.isfinite(price):
+    if not math.isfinite(price) or price <= 0.0:
         return False
     if str(direction).upper() == "LONG":
         return price > float(cluster_high)
@@ -67,9 +67,14 @@ def triple_a_vwap_confirmed(direction, close, vwap) -> bool:
     try:
         price = float(close)
         reference = float(vwap)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
-    if not math.isfinite(price) or not math.isfinite(reference) or reference <= 0.0:
+    if (
+        not math.isfinite(price)
+        or price <= 0.0
+        or not math.isfinite(reference)
+        or reference <= 0.0
+    ):
         return False
     if str(direction).upper() == "LONG":
         return price > reference

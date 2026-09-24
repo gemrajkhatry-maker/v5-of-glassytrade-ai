@@ -306,7 +306,7 @@ class DecisionContextBuilder:
             tick = 0.05
         vah = self._df(amt_dto, "valueAreaHigh")
         val = self._df(amt_dto, "valueAreaLow")
-        session_vwap = self._df(amt_dto, "sessionVwap") or self._df(amt_dto, "vwap")
+        session_vwap = self._df(amt_dto, "sessionVwap")
         price_loc = "IN_VA"
         if close_px > 0 and vah > 0 and val > 0:
             if close_px > vah:
@@ -365,6 +365,7 @@ class DecisionContextBuilder:
                     cvd_slope=cvd_val,
                     lvn_proximity_ok=_lvn_ok(nearest_leg_lvn, max_ticks=5.0),
                 )
+        tolerant_session_vwap = session_vwap or self._df(amt_dto, "vwap")
         if is_second_drive:
             direction = setup_dir or ("SHORT" if rejection_at_high else "LONG")
             setup_cvd = bool(
@@ -378,7 +379,7 @@ class DecisionContextBuilder:
                 rejection=rejection_at_high or rejection_at_low,
                 cvd_agrees=setup_cvd,
                 price_location=price_loc,
-                price=close_px, tick_size=tick, session_vwap=session_vwap,
+                price=close_px, tick_size=tick, session_vwap=tolerant_session_vwap,
                 departed_and_reapproached=bool(departed),
             )
         if rejection_at_high or rejection_at_low:
@@ -393,7 +394,7 @@ class DecisionContextBuilder:
                 acceptance=self._db(amt_dto, "acceptanceAbove") or self._db(amt_dto, "acceptanceBelow"),
                 cvd_agrees=setup_cvd,
                 price_location=price_loc,
-                price=close_px, tick_size=tick, session_vwap=session_vwap,
+                price=close_px, tick_size=tick, session_vwap=tolerant_session_vwap,
             )
         if nearest_leg_lvn > 0 and absorption_direction(amt_dto.get("absorptionSide")):
             direction = absorption_direction(amt_dto.get("absorptionSide"))
@@ -405,7 +406,7 @@ class DecisionContextBuilder:
                 setup_type="LVN_SNIPER", direction=direction,
                 level=nearest_leg_lvn, absorption=True, cvd_agrees=setup_cvd,
                 price_location=price_loc,
-                price=close_px, tick_size=tick, session_vwap=session_vwap,
+                price=close_px, tick_size=tick, session_vwap=tolerant_session_vwap,
                 lvn_proximity_ok=_lvn_ok(nearest_leg_lvn, max_ticks=3.0),
             )
         return None
@@ -664,6 +665,8 @@ class DecisionContextBuilder:
         range_bars_enabled: bool = False,
         live_range_bars: int = 0,
         live_minutes: float = 0.0,
+        triple_a_phase: str = "",
+        triple_a_signal: str = "",
     ) -> dict:
         """Build the keyword-argument dict for the DecisionContext constructor."""
         df, ds, db, di = self._df, self._ds, self._db, self._di
@@ -674,6 +677,15 @@ class DecisionContextBuilder:
             if vwap_std_override is not None
             else df(amt_dto, "vwapDeviationSigmas")
         )
+        session_vwap = df(amt_dto, "sessionVwap")
+        evidence_type = str(getattr(setup_evidence, "setup_type", "") or "").upper()
+        strict_triple_a = (
+            evidence_type == "TRIPLE_A"
+            or str(triple_a_phase).upper() == "AGGRESSION"
+            or str(triple_a_signal).upper() in ("LONG", "SHORT")
+        )
+        if not strict_triple_a and not session_vwap and bar and getattr(bar, "vwap", None):
+            session_vwap = float(bar.vwap)
         return dict(
             state=None,
             bar=bar,
@@ -727,7 +739,7 @@ class DecisionContextBuilder:
             npoc_above=df(amt_dto, "npocAbove"),
             npoc_below=df(amt_dto, "npocBelow"),
             tick_size=tick_size,
-            session_vwap=df(amt_dto, "sessionVwap") or (float(bar.vwap) if bar and getattr(bar, "vwap", None) else 0.0),
+            session_vwap=session_vwap,
             vwap_std=vwap_std,
             vwap_upper_2=df(amt_dto, "vwapUpper2"),
             vwap_lower_2=df(amt_dto, "vwapLower2"),
@@ -915,6 +927,8 @@ class DecisionContextBuilder:
             range_bars_enabled=range_bars_enabled,
             live_range_bars=live_range_bars,
             live_minutes=live_minutes,
+            triple_a_phase=self._ds(effective_dto, "tripleAPhase"),
+            triple_a_signal=self._ds(effective_dto, "tripleASignal"),
         )
         return DecisionContext(**ctx_kwargs)
 

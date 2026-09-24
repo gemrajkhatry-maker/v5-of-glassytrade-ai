@@ -538,3 +538,25 @@ def test_builder_rejects_close_inside_triple_a_cluster():
     ctx = _build_triple_a_context(leg_lvns=[100.6], close=100.5)
     assert ctx.setup_evidence is None or ctx.setup_evidence.is_complete() is False
     assert gate_triple_a_edge(ctx).passed is False
+
+
+def test_builder_does_not_use_vwap_alias_for_triple_a_certificate():
+    evidence = DecisionContextBuilder()._build_setup_evidence(
+        {
+            "tripleAPhase": "AGGRESSION",
+            "tripleASignal": "LONG",
+            "absorptionSide": "SELL_ABSORBED",
+            "acceptanceAbove": True,
+            "cvdSlope": 1.0,
+            "absorptionClusterHigh": 100.5,
+            "absorptionClusterLow": 99.5,
+            "sessionVwap": 0.0,
+            "vwap": 100.0,
+        },
+        "LONG",
+        0.0,
+        bar=_triple_a_bar("LONG"),
+    )
+    assert evidence is not None
+    assert evidence.session_vwap == 0.0
+    assert evidence.is_complete() is False
