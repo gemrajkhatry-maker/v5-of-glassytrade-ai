@@ -388,21 +388,27 @@ def test_close_wakes_blocked_readers():
     feed.set_symbols(["A"])
     result: list = []
 
-    def reader():
-        result.append(feed.next_tick("A"))
+    reader_done = threading.Event()
 
-    t = threading.Thread(target=reader)
+    def reader():
+        try:
+            result.append(feed.next_tick("A"))
+        finally:
+            reader_done.set()
+
+    t = threading.Thread(target=reader, daemon=True)
     t.start()
     try:
         _wait_until(lambda: t.is_alive())  # reader parked on q.get()
         feed.close()
+        assert reader_done.wait(timeout=2.0)
         t.join(timeout=2.0)
         assert not t.is_alive(), "close() must wake a blocked reader with None"
         assert result == [None]
     finally:
-        if t.is_alive():
-            feed.close()
-            t.join(timeout=1.0)
+        feed.close()
+        t.join(timeout=2.0)
+        assert not t.is_alive()
 
 
 def test_close_wakes_blocked_dedicated_reader():
@@ -410,21 +416,28 @@ def test_close_wakes_blocked_dedicated_reader():
     reader = feed.add_reader("FUT")
     result: list = []
 
-    def read_dedicated_queue():
-        result.append(reader.get())
+    reader_done = threading.Event()
 
-    t = threading.Thread(target=read_dedicated_queue)
+    def read_dedicated_queue():
+        try:
+            result.append(reader.get())
+        finally:
+            reader_done.set()
+
+    t = threading.Thread(target=read_dedicated_queue, daemon=True)
     t.start()
     try:
         _wait_until(t.is_alive)
         feed.close()
+        assert reader_done.wait(timeout=2.0)
         t.join(timeout=2.0)
         assert not t.is_alive(), "close() must wake a dedicated reader with None"
         assert result == [None]
     finally:
         feed.remove_reader("FUT", reader)
-        t.join(timeout=1.0)
         feed.close()
+        t.join(timeout=2.0)
+        assert not t.is_alive()
 
 
 def test_route_drops_unknown_symbol_with_rate_limited_warning(caplog):
@@ -710,7 +723,7 @@ def test_close_cancels_failing_streams_and_is_idempotent(managed_feed):
     feed = managed_feed
     md = feed._md
     reader = feed.add_reader("NIFTY")
-    for _ in range(4096):
+    for _ in range(reader.maxsize):
         reader.put(object())
     feed.subscribe("NIFTY")
 
@@ -731,16 +744,14 @@ def test_close_cancels_failing_streams_and_is_idempotent(managed_feed):
     assert md.calls == 1
 
 
-def test_close_interrupts_retry_backoff():
+def test_close_interrupts_retry_backoff(monkeypatch):
     class _RetryFailingMarketData:
         def __init__(self):
             self.calls = 0
-            self.failed = threading.Event()
 
         def stream_full(self, symbols):
             self.calls += 1
             if self.calls == 1:
-                self.failed.set()
                 raise RuntimeError("broker down")
 
             async def _generator():
@@ -751,12 +762,32 @@ def test_close_interrupts_retry_backoff():
 
     md = _RetryFailingMarketData()
     feed = MultiplexedMarketFeed(md)
+    backoff_started = threading.Event()
+    backoff_interrupted = threading.Event()
+    retry_delays = []
+    original_sleep = feed._sleep_with_stop
+
+    async def observed_sleep(delay):
+        if delay > 0:
+            retry_delays.append(delay)
+            backoff_started.set()
+        result = await original_sleep(delay)
+        if delay > 0 and not result:
+            backoff_interrupted.set()
+        return result
+
+    monkeypatch.setattr(feed, "_sleep_with_stop", observed_sleep)
     try:
         feed.set_symbols(["NIFTY"])
-        assert md.failed.wait(timeout=2.0)
-        started = time.monotonic()
+        assert backoff_started.wait(timeout=2.0)
+        assert md.calls == 1
         feed.close()
-        assert time.monotonic() - started < 0.5
+        _wait_until(
+            lambda: feed._thread is None or not feed._thread.is_alive(),
+            timeout=2.0,
+        )
+        assert retry_delays
+        assert backoff_interrupted.is_set()
     finally:
         feed.close()
     assert feed._thread is None
