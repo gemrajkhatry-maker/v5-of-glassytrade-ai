@@ -102,9 +102,11 @@ def test_portfolio_risk_rejects_breach_across_engines():
     assert auth.open_risk == 0.0
     assert auth.realized_pnl == -30_000
 
-    # Next entry is allowed again (open risk freed, loss below 6% kill).
+    # The realized loss is beyond the 2% portfolio MDL, so the next entry
+    # remains blocked even though open risk was released.
     ok, why = auth.can_accept(10_000)
-    assert ok, why
+    assert not ok
+    assert "daily-loss halt" in why
 
 
 def test_portfolio_risk_daily_loss_kill():

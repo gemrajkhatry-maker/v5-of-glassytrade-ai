@@ -288,14 +288,14 @@ class MultiplexedMarketFeed:
             try:
                 q.put_nowait(None)
                 return
-            except queue.Full:
+            except queue.Full:  # silent-except - replace one stale queue item
                 try:
                     q.get_nowait()
-                except queue.Empty:
+                except queue.Empty:  # silent-except - queue race while replacing sentinel
                     pass
             try:
                 q.put_nowait(None)
-            except queue.Full:
+            except queue.Full:  # silent-except - sentinel cannot be inserted immediately
                 pass
             return
         while True:
@@ -378,7 +378,7 @@ class MultiplexedMarketFeed:
         if loop is not None and loop.is_running():
             try:
                 loop.call_soon_threadsafe(self._set_async_resync)
-            except RuntimeError:
+            except RuntimeError:  # silent-except - loop may close during shutdown
                 pass
 
     def _wake_stop(self) -> None:
@@ -386,7 +386,7 @@ class MultiplexedMarketFeed:
         if loop is not None and loop.is_running():
             try:
                 loop.call_soon_threadsafe(self._stop_producer)
-            except RuntimeError:
+            except RuntimeError:  # silent-except - loop may close during shutdown
                 pass
 
     def _stop_producer(self) -> None:
@@ -412,7 +412,7 @@ class MultiplexedMarketFeed:
         self._loop = loop
         try:
             loop.run_until_complete(self._consume_loop())
-        except asyncio.CancelledError:
+        except asyncio.CancelledError:  # silent-except - cancellation is normal feed shutdown
             pass
         except Exception:
             logger.exception("MultiplexedMarketFeed producer crashed")
@@ -567,9 +567,9 @@ class MultiplexedMarketFeed:
     async def _aclose_quietly(stream) -> None:
         try:
             await stream.aclose()
-        except asyncio.CancelledError:
+        except asyncio.CancelledError:  # silent-except - cancellation is normal feed shutdown
             pass
-        except Exception:
+        except Exception:  # silent-except - best-effort close during shutdown
             pass
 
     # ------------------------------------------------------------------

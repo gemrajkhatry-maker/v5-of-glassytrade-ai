@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glassytrade.local/contracts/event_v1.schema.json",
+  "title": "GlassyTrade Ledger Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "aggregate_id", "aggregate_sequence", "event_type", "schema_version", "occurred_at", "received_at", "correlation_id", "causation_id", "payload", "checksum"],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "aggregate_id": {"type": "string", "minLength": 1},
+    "aggregate_sequence": {"type": "integer", "minimum": 1},
+    "event_type": {"type": "string", "minLength": 1},
+    "schema_version": {"type": "integer", "minimum": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "received_at": {"type": "string", "format": "date-time"},
+    "correlation_id": {"type": "string", "minLength": 1},
+    "causation_id": {"type": ["string", "null"]},
+    "payload": {"type": "object"},
+    "checksum": {"type": ["string", "null"]}
+  }
+}

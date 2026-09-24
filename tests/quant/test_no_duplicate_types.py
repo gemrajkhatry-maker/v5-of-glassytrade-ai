@@ -19,6 +19,7 @@ LAYERED = {
         "quant/decision/signal_builder.py",
     ],
     "Position": [
+        "backend/src/glassytrade/domain/execution/types.py",
         "quant/contracts/entities.py",
         "quant/execution/order.py",
         "shared/entities/models.py",

@@ -1,0 +1,39 @@
+import pytest
+
+from glassytrade.adapters.persistence.sqlite.journal import SqliteExecutionJournal
+from glassytrade.application.oms.command_service import OmsCommandService
+from glassytrade.domain.common.ids import ContractId
+from glassytrade.domain.strategy.intent import EntryIntent
+from decimal import Decimal
+
+
+def entry_intent():
+    return EntryIntent(
+        intent_id="entry-1",
+        contract_id=ContractId("NFO", "NIFTY", "2026-09-24", "OPTION", "100", "CE", "sec-1"),
+        side="BUY",
+        desired_quantity=2,
+        entry_price=Decimal("100"),
+        stop_price=Decimal("95"),
+        target_price=Decimal("110"),
+        setup="test-setup",
+    )
+
+
+@pytest.mark.parametrize("stage", ["after_event_append", "before_commit"])
+def test_command_crash_before_commit_leaves_no_half_applied_state(tmp_path, stage):
+    from glassytrade.adapters.persistence.sqlite.migrations import create_database
+
+    connection = create_database(tmp_path / "oms.sqlite3")
+
+    def fail(stage_seen):
+        if stage_seen == stage:
+            raise RuntimeError("simulated crash")
+
+    journal = SqliteExecutionJournal(connection, failure_hook=fail)
+    service = OmsCommandService(connection, journal=journal)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        service.prepare_entry(entry_intent())
+    assert connection.execute("SELECT COUNT(*) FROM execution_events").fetchone()[0] == 0
+    assert connection.execute("SELECT COUNT(*) FROM order_intents").fetchone()[0] == 0
+    assert connection.execute("SELECT COUNT(*) FROM order_attempts").fetchone()[0] == 0

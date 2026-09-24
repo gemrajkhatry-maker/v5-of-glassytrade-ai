@@ -8,6 +8,7 @@ This conftest.py provides:
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -46,4 +47,18 @@ sys.path.insert(0, _root)
 # No global mocks needed — stub modules provide importable types.
 # Tests that require network/hardware should mock at the test level.
 # ---------------------------------------------------------------------------
+
+# ``backend/tests`` is a package named ``tests`` and can shadow the root
+# ``tests`` package while pytest imports plugins. Load the shared fixture by
+# path so backend-only invocations still receive the same profile.
+_hermetic_path = Path(_project_root) / "tests" / "helpers" / "hermetic.py"
+_hermetic_spec = importlib.util.spec_from_file_location(
+    "glassytrade_hermetic_profile", _hermetic_path
+)
+if _hermetic_spec is None or _hermetic_spec.loader is None:
+    raise RuntimeError(f"could not load hermetic profile: {_hermetic_path}")
+_hermetic_module = importlib.util.module_from_spec(_hermetic_spec)
+_hermetic_spec.loader.exec_module(_hermetic_module)
+hermetic_test_profile = _hermetic_module.hermetic_test_profile
+pytest_configure = _hermetic_module.pytest_configure
 

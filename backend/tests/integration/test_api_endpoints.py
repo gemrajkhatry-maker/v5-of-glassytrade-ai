@@ -20,8 +20,13 @@ class TestHealthEndpoint:
 
 
 class TestTradingEndpoints:
-    def test_create_portfolio(self):
-        r = client.post("/api/trading/portfolio/create")
+    def test_create_portfolio(self, monkeypatch):
+        monkeypatch.setenv("GLASSYTRADE_ENV", "paper")
+        monkeypatch.setenv("GLASSYTRADE_DEV_OPERATOR_TOKEN", "test-operator-token")
+        r = client.post(
+            "/api/trading/portfolio/create",
+            headers={"Authorization": "Bearer test-operator-token"},
+        )
         assert r.status_code == 200
         body = r.json()
         assert "balance" in body

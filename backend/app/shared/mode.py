@@ -4,7 +4,7 @@ import os
 from typing import Final
 
 
-_VALID_MODES: Final = frozenset({"development", "paper", "live"})
+_VALID_MODES: Final = frozenset({"development", "shadow", "paper", "live"})
 
 
 def resolve_runtime_mode() -> str:

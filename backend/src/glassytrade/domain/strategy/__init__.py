@@ -1,0 +1,1 @@
+"""Canonical strategy intent contracts."""

@@ -129,9 +129,15 @@ def amt_result_to_dto(r) -> dict:
         )
     si_dir, si_mag, si_low, si_high = _derive_stacked_imbalance(getattr(r, "footprints", {}) or {})
     leg_lvns = getattr(r, "leg_lvns", ()) or ()
+    footprint_keys = tuple(getattr(r, "footprints", {}) or ())
+    raw_drive_number = getattr(r, "drive_number", 0)
+    try:
+        drive_number = int(raw_drive_number)
+    except (TypeError, ValueError):
+        drive_number = 0
     return {
         "marketState": r.market_state,
-        "time": _epoch_to_iso(max(r.footprints.keys())) if r.footprints else "",
+        "time": _epoch_to_iso(max(footprint_keys)) if footprint_keys else "",
         "poc": r.poc,
         "valueAreaHigh": r.value_area_high,
         "valueAreaLow": r.value_area_low,
@@ -254,13 +260,13 @@ def amt_result_to_dto(r) -> dict:
         # after an observe()d leave-and-return, so drive_number >= 2 IS
         # "departed and re-approached". SetupEvidence reads this key instead
         # of re-asking isSecondDrive / driveEntryValid.
-        "departed": bool(getattr(r, "drive_number", 0) >= 2),
+        "departed": drive_number >= 2,
         # Phase 4: context_builder.py's drive-exhaustion guard reads
         # "driveNumber" but this key was never emitted here, so
         # gates_edge.py's "3+ drives -> exhausted" guard could never fire —
         # AMTResult.drive_number is real, already-tracked state (analyzer.py
         # _track_drives), it just never reached the wire.
-        "driveNumber": r.drive_number,
+        "driveNumber": drive_number,
         # Higher Timeframe Levels
         "dailyVah": r.daily_vah,
         "dailyVal": r.daily_val,

@@ -1,4 +1,4 @@
-.PHONY: test test-backend test-quant test-brokers test-frontend test-ci lint clean parity pre-release plan plan-json plan-mermaid
+.PHONY: test test-backend test-quant test-brokers test-frontend test-ci test-hermetic lint clean parity pre-release plan plan-json plan-mermaid
 
 # Python interpreter: override with `make PYTHON=/path/to/python`
 PYTHON ?= $(CURDIR)/.venv/bin/python
@@ -6,10 +6,10 @@ PYTHON ?= $(CURDIR)/.venv/bin/python
 test: test-backend test-quant test-brokers test-frontend
 
 test-backend:
-	cd backend && PYTHONPATH=..:. $(PYTHON) -m pytest tests/ -q --no-header
+	cd backend && PYTHONPATH=..:src:. $(PYTHON) -m pytest tests/ -q --no-header
 
 test-quant:
-	PYTHONPATH=backend:. $(PYTHON) -m pytest tests/ -q --no-header
+	PYTHONPATH=backend:backend/src:. $(PYTHON) -m pytest tests/ -q --no-header
 
 test-brokers:
 	cd brokers && PYTHONPATH=..:. $(PYTHON) -m pytest -q --no-header
@@ -19,10 +19,18 @@ test-frontend:
 
 # Fast CI pass: backend + quant unit/offline tests, brokers, frontend.
 test-ci:
-	cd backend && PYTHONPATH=..:. $(PYTHON) -m pytest tests/ -q --no-header -m "not slow and not live"
-	PYTHONPATH=backend:. $(PYTHON) -m pytest tests/ -q --no-header -m "not slow and not live"
+	cd backend && PYTHONPATH=..:src:. $(PYTHON) -m pytest tests/ -q --no-header -m "not slow and not live"
+	PYTHONPATH=backend:backend/src:. $(PYTHON) -m pytest tests/ -q --no-header -m "not slow and not live"
 	cd brokers && PYTHONPATH=..:. $(PYTHON) -m pytest -q --no-header -m "not slow and not live"
 	cd frontend && npm test
+
+# Isolated profile: no user .env, broker credentials, live subprocesses, or
+# external network access; all runtime persistence is redirected to tmp_path.
+test-hermetic:
+	GLASSYTRADE_HERMETIC=1 \
+	GLASSYTRADE_ENV=paper \
+	PYTHONPATH=backend:backend/src:. \
+	$(PYTHON) -m pytest tests/ backend/tests/ -q -m "not slow and not live"
 
 # Certification parity gate: golden suites + journal-replay determinism battery.
 parity:
@@ -36,7 +44,7 @@ pre-release:
 	PYTHONPATH=backend:. $(PYTHON) scripts/pre_release_decision_check.py
 
 lint:
-	$(PYTHON) -m ruff check quant backend/app brokers shared tests backend/tests
+	$(PYTHON) -m ruff check quant backend/app backend/src brokers shared tests backend/tests
 	cd frontend && npx tsc --noEmit
 
 # Refactoring workstream schedule: which tasks can run in parallel and which are

@@ -4,6 +4,8 @@ Originally written as TDD for the StateProjector replacement. The replacement
 is now complete — EventStore.fold() + project_state() is the sole authority.
 """
 
+import importlib
+
 import pytest
 
 from quant.event_store import EventStore
@@ -41,4 +43,4 @@ class TestFoldIsSoleAuthority:
     def test_state_projector_removed(self):
         """StateProjector has been removed — importing it raises ImportError."""
         with pytest.raises(ImportError):
-            pass
+            importlib.import_module("quant.state_projector")

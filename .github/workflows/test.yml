@@ -21,34 +21,38 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov pytest-asyncio pytest-timeout
-          # mlx* is Apple-Silicon-only; quant/amt/compute.py already guards the import.
+          python -m pip install pytest pytest-cov pytest-asyncio pytest-timeout pytest-mock hypothesis jsonschema ruff
           grep -v -E '^(mlx|mlx-lm|mlx-vlm)' backend/requirements.txt > /tmp/backend-requirements-ci.txt
-          pip install -r /tmp/backend-requirements-ci.txt
-          pip install -r brokers/requirements.txt
-          pip install ruff
+          python -m pip install -r /tmp/backend-requirements-ci.txt
+          python -m pip install -r brokers/requirements.txt
 
-      - name: Lint with ruff
-        run: |
-          ruff check quant/ backend/app/ brokers/broker/ --exit-zero
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
 
-      - name: Quant + system tests
-        run: |
-          # Collecting tests/ and backend/tests together shadows the `tests`
-          # package (backend/ is on pythonpath). Run the trees separately.
-          PYTHONPATH=. python -m pytest tests/ --ignore=tests/e2e -q --tb=short --cov=quant --cov-report=xml
+      - name: Lint with Ruff
+        run: python -m ruff check quant backend/app backend/src brokers shared tests backend/tests
 
-      - name: Backend unit/integration tests
-        run: |
-          PYTHONPATH=backend:. python -m pytest backend/tests/ -q --tb=short
+      - name: Backend tests
+        run: cd backend && PYTHONPATH=..:src:. python -m pytest tests/ -q --maxfail=1
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          file: coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
+      - name: Quant and system tests
+        run: PYTHONPATH=backend:backend/src:. python -m pytest tests/ -q --maxfail=1 --ignore=tests/e2e
+
+      - name: Broker tests
+        run: cd brokers && PYTHONPATH=..:. python -m pytest -q
+
+      - name: Frontend tests
+        run: cd frontend && npm test
+
+      - name: Frontend typecheck
+        run: cd frontend && npx tsc --noEmit

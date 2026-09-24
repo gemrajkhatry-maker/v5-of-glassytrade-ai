@@ -207,9 +207,9 @@ def test_stop_out_exits_at_sl_with_loss():
     from quant.execution.risk import SessionRisk
 
     SessionRisk(storage=None, symbol="SYM_STOP_TEST").reset_session()
-    ticks = [Tick(f"t{i}", 100.0 + (0.05 if i % 2 else -0.05), 10, 6, 4)
+    ticks = [Tick(f"t{i}", 100.0 + (0.05 if i % 2 else -0.05), 10, 5, 5)
              for i in range(20)]
-    ticks += [Tick(f"t{20 + i}", 79.0, 10, 4, 6) for i in range(10)]
+    ticks += [Tick(f"t{20 + i}", 79.0, 10, 5, 5) for i in range(10)]
     eng = QuantEngine(SyntheticGateway(ticks), "SYM_STOP_TEST", interval_seconds=1)
     eng._strategy = _FixedStrategy(_healthy_stop_signal())
     trace = eng.run()
@@ -252,7 +252,12 @@ def test_zero_size_position_never_opens():
 
     # Tiny account: 50% deployment = 50K budget; 120-lot × 14912 × 0.15
     # = 268K/lot → 0 lots affordable.
-    r = SessionRisk(starting_equity=100_000.0, storage=None, symbol="S")
+    r = SessionRisk(
+        starting_equity=100_000.0,
+        storage=None,
+        symbol="S",
+        aggressive_mode=True,
+    )
     q = r.position_size(entry=14912.20, sl=14939.46, lot_size=120)
     assert q == 0.0, "sizing must return 0 when budget < 1 lot risk"
 

@@ -5,7 +5,11 @@ cd "$(dirname "$0")"
 # Use python-dotenv to load .env (handles special characters properly)
 # This is safer than bash source for complex .env files
 export KMP_DUPLICATE_LIB_OK=TRUE
-export PYTHONPATH="${PYTHONPATH:-$PWD:$(dirname "$PWD")}"
+export PYTHONPATH="${PYTHONPATH:-$PWD:$(dirname "$PWD"):$PWD/src"
+export GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}"
+export CLEAR_POSITIONS_ON_RESTART="${CLEAR_POSITIONS_ON_RESTART:-false}"
+export RECONCILE_DELETE_STALE="${RECONCILE_DELETE_STALE:-0}"
+export DHAN_ALLOW_PROXY_CVD="${DHAN_ALLOW_PROXY_CVD:-false}"
 unset MLX_DISABLE_METAL || true
 
 # CRITICAL: Prevent Metal GPU thread contention that causes segfaults
@@ -25,4 +29,4 @@ export PYTHONFAULTHANDLER=1
 
 # CRITICAL: Use single worker to prevent MLX multiprocessing segfaults
 # MLX models cannot be safely shared across multiple worker processes
-exec venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 9090 --workers 1 "$@"
+exec venv/bin/uvicorn app.main:app --host "${BIND_HOST:-127.0.0.1}" --port 9090 --workers 1 "$@"

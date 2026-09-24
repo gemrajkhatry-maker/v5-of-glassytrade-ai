@@ -22,6 +22,8 @@ import threading
 import time
 from typing import Any, Dict, Optional, Tuple
 
+from quant.contracts.enums import MarketState
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -701,7 +703,11 @@ class LayaDecisionAdvisor:
 
         phase = str(getattr(ctx, "session_phase", "REGULAR") or "REGULAR")
         m_state = getattr(ctx, "market_state", None)
-        market_state = m_state.value if hasattr(m_state, "value") else str(m_state or "BALANCED")
+        market_state = (
+            m_state.value
+            if hasattr(m_state, "value")
+            else str(m_state or MarketState.BALANCED.value)
+        )
 
         session_vwap = float(getattr(ctx, "session_vwap", 0.0) or (float(bar.vwap) if bar and getattr(bar, "vwap", None) else 0.0))
         vwap_std = float(getattr(ctx, "vwap_std", 0.0))

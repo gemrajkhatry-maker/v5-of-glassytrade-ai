@@ -70,7 +70,22 @@ class SettingsAdapter:
             self._initialized = False
     
     def _load_secrets_from_env(self):
-        """Load sensitive data from .env (API keys, tokens)."""
+        """Load sensitive data from .env only outside hermetic tests."""
+        hermetic = os.environ.get("GLASSYTRADE_HERMETIC", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if hermetic:
+            self.DHAN_CLIENT_ID = ""
+            self.DHAN_ACCESS_TOKEN = ""
+            self.DHAN_API_KEY = ""
+            self.DHAN_API_SECRET = ""
+            self.TELEGRAM_BOT_TOKEN = ""
+            self.TELEGRAM_CHAT_ID = ""
+            return
+
         # Find .env file
         env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
         

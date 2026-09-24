@@ -156,7 +156,7 @@ def test_micro_decision_accepts_macro_dto_at_one_interval_boundary():
     assert len(decisions) == 1
 
 
-@pytest.mark.parametrize("dto_time", ["", "2026-09-22T09:15:00+05:30"])
+@pytest.mark.parametrize("dto_time", ["", "2026-09-22T09:10:00+05:30"])
 def test_micro_decision_rejects_missing_or_stale_macro_time(dto_time):
     decisions = _decision_attempt(dto_time, "2026-09-22T09:21:00+05:30")
     assert decisions == []

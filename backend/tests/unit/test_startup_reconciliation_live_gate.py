@@ -55,6 +55,15 @@ def test_live_mode_refuses_boot_on_reconciliation_failure(monkeypatch):
 
     monkeypatch.setenv("GLASSYTRADE_ENV", "live")
     monkeypatch.setenv("TRADING_MODE", "live")
+    monkeypatch.setenv("GLASSYTRADE_ACCOUNT_ID", "test-live-account")
+    monkeypatch.setenv("GLASSYTRADE_LIVE_DATABASE_PATH", "/tmp/test-live.sqlite3")
+    monkeypatch.setenv("GLASSYTRADE_EVIDENCE_POLICY", "EXACT_ONLY")
+    monkeypatch.setenv("GLASSYTRADE_CONFIG_FINGERPRINT", "test-live-fingerprint")
+    monkeypatch.setenv("DHAN_CLIENT_ID", "test-client")
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "test-token")
+    monkeypatch.setenv(
+        "GLASSYTRADE_BROKER_CAPABILITIES", "native_stop,order_lookup,fills"
+    )
     _patch_reconcile_to_raise(monkeypatch)
     _patch_live_broker_off_network(monkeypatch)
 

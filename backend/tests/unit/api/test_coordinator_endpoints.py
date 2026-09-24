@@ -125,6 +125,7 @@ def test_health_includes_coordinator_check(client):
         "symbols": ["SYM"],
         "crashedEngines": [],  # F1 liveness surface (engine crash guard)
         "staleEngines": [],  # tick-starvation liveness surface
+        "integrityFlags": [],
         "status": "ok",
     }
 
@@ -164,12 +165,19 @@ class _NoUnhaltCoordinator:
     """Fake WITHOUT unhalt_all (coordinator present but halt surface absent)."""
 
 
-def test_unhalt_via_dependency():
+@pytest.fixture
+def operator_headers(monkeypatch):
+    monkeypatch.setenv("GLASSYTRADE_ENV", "paper")
+    monkeypatch.setenv("GLASSYTRADE_DEV_OPERATOR_TOKEN", "test-operator-token")
+    return {"Authorization": "Bearer test-operator-token"}
+
+
+def test_unhalt_via_dependency(operator_headers):
     # Fake coordinator WITH unhalt_all -> {"status": "ok", "unhalted_engines": N}
     _live_app.dependency_overrides[get_coordinator] = lambda: _UnhaltingCoordinator(unhalted=2)
     try:
         c = TestClient(_live_app)
-        resp = c.post("/api/trading/risk/unhalt")
+        resp = c.post("/api/trading/risk/unhalt", headers=operator_headers)
         assert resp.status_code == 200
         assert resp.json() == {
             "status": "ok",
@@ -180,12 +188,12 @@ def test_unhalt_via_dependency():
         _live_app.dependency_overrides.pop(get_coordinator, None)
 
 
-def test_unhalt_via_dependency_no_coordinator():
+def test_unhalt_via_dependency_no_coordinator(operator_headers):
     # Fake coordinator WITHOUT unhalt_all -> {"status": "ok", "unhalted_engines": 0, ...}
     _live_app.dependency_overrides[get_coordinator] = lambda: _NoUnhaltCoordinator()
     try:
         c = TestClient(_live_app)
-        resp = c.post("/api/trading/risk/unhalt")
+        resp = c.post("/api/trading/risk/unhalt", headers=operator_headers)
         assert resp.status_code == 200
         assert resp.json() == {
             "status": "ok",
@@ -196,7 +204,7 @@ def test_unhalt_via_dependency_no_coordinator():
         _live_app.dependency_overrides.pop(get_coordinator, None)
 
 
-def test_unhalt_via_lifespan_sync():
+def test_unhalt_via_lifespan_sync(operator_headers):
     # Lifespan-sync path: set_coordinator(fake) then hit route with NO
     # dependency override — proves the DI singleton (not app.state) serves it.
     from app.api.dependencies import get_coordinator as _get_coord
@@ -207,7 +215,7 @@ def test_unhalt_via_lifespan_sync():
     set_coordinator(_UnhaltingCoordinator(unhalted=2))
     try:
         c = TestClient(_live_app)
-        resp = c.post("/api/trading/risk/unhalt")
+        resp = c.post("/api/trading/risk/unhalt", headers=operator_headers)
         assert resp.status_code == 200
         assert resp.json() == {
             "status": "ok",

@@ -68,7 +68,7 @@ def test_thin_stop_helpers():
 
 
 def test_builder_happy_path_long():
-    sig, why = SignalBuilder().build_or_reason(_ctx_double("LONG", 100.0), _passing())
+    sig, why = SignalBuilder().build_or_reason(_ctx_double("LONG", 100.0), _passing(), "TEST")
     assert sig is not None and why == ""
     assert sig.type == "LONG" and sig.entry == 100.0
     assert sig.sl < sig.entry < sig.tp

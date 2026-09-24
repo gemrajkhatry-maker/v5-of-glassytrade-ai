@@ -7,7 +7,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEFAULT_ADAPTER_PATH="$REPO_ROOT/poc18/adapters"
 
-# Set NSE mode environment variables
+# Stop a failed startup cooperatively before escalating.
+stop_backend() {
+  local pid="$1"
+  kill -TERM "$pid" 2>/dev/null || true
+  for _ in $(seq 1 10); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+  kill -KILL "$pid" 2>/dev/null || true
+}
+
 export GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}"
 export GLASSYTRADE_STRATEGY="${GLASSYTRADE_STRATEGY:-nse_options}"
 export KMP_DUPLICATE_LIB_OK=TRUE
@@ -58,7 +70,7 @@ if [ "${ENFORCE_STARTUP_LOG_CONTRACT:-0}" = "1" ]; then
   if [ "$elapsed" -ge "$BACKEND_READY_TIMEOUT" ]; then
     echo "Backend failed readiness check on $BACKEND_READY_URL within ${BACKEND_READY_TIMEOUT}s."
     echo "Check startup logs: $BACKEND_RUNTIME_LOG_PATH"
-    kill -9 "$BACKEND_PID" 2>/dev/null || true
+    stop_backend "$BACKEND_PID"
     exit 1
   fi
 
@@ -67,7 +79,7 @@ if [ "${ENFORCE_STARTUP_LOG_CONTRACT:-0}" = "1" ]; then
     PYTHON_BIN="python3"
   fi
   if ! "$PYTHON_BIN" "$SCRIPT_DIR/check_startup_log_contract.py"; then
-    kill -9 "$BACKEND_PID" 2>/dev/null || true
+    stop_backend "$BACKEND_PID"
     exit 1
   fi
   wait "$BACKEND_PID"

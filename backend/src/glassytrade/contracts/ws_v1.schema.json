@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glassytrade.local/contracts/ws_v1.schema.json",
+  "title": "GlassyTrade Projection Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "projectionVersion",
+    "projectionId",
+    "scope",
+    "sequence",
+    "baseSequence",
+    "asOf",
+    "releaseId",
+    "configFingerprint",
+    "mode",
+    "type",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "projectionVersion": {"type": "integer", "minimum": 1},
+    "projectionId": {"type": "string", "minLength": 1},
+    "scope": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["type"], "properties": {"type": {"const": "runtime"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "accountId"], "properties": {"type": {"const": "portfolio"}, "accountId": {"type": "string", "minLength": 1}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "contractId"], "properties": {"type": {"const": "contract"}, "contractId": {"type": "string", "minLength": 1}}},
+        {"type": "object", "additionalProperties": false, "required": ["type"], "properties": {"type": {"const": "journal"}}}
+      ]
+    },
+    "sequence": {"type": "integer", "minimum": 0},
+    "baseSequence": {"type": ["integer", "null"], "minimum": 0},
+    "asOf": {"type": "string", "format": "date-time"},
+    "releaseId": {"type": "string", "minLength": 1},
+    "configFingerprint": {"type": "string", "minLength": 1},
+    "mode": {"enum": ["shadow", "paper", "live"]},
+    "type": {"enum": ["snapshot", "delta"]},
+    "payload": {"type": "object"}
+  }
+}

@@ -1,18 +1,71 @@
-#!/bin/bash
-# Stop backend and frontend for GlassyTrade AI
+#!/usr/bin/env bash
+# Stop backend and frontend for GlassyTrade AI.
+set -euo pipefail
 
-echo "Stopping GlassyTrade AI services..."
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${PROJECT_DIR:-$SCRIPT_DIR}"
+BACKEND_PID_FILE="$PROJECT_DIR/backend/.target-architecture-backend.pid"
+FRONTEND_PID_FILE="$PROJECT_DIR/frontend/.target-architecture-frontend.pid"
 
-# Kill processes on known ports
-PIDS=$(lsof -ti:9090 -ti:8090 -ti:5190 -ti:5191 2>/dev/null || true)
-if [ -n "$PIDS" ]; then
-  echo "Terminating PIDs on ports 8090/5191: $PIDS"
-  echo "$PIDS" | xargs kill -9 2>/dev/null || true
+pids=""
+add_pid() {
+  local pid="$1"
+  case "$pid" in
+    ''|*[!0-9]*) return 0 ;;
+  esac
+  pids="$pids $pid"
+}
+
+for pid_file in "$BACKEND_PID_FILE" "$FRONTEND_PID_FILE"; do
+  if [ -f "$pid_file" ]; then
+    add_pid "$(<"$pid_file")"
+  fi
+done
+
+if command -v lsof >/dev/null 2>&1; then
+  for port in 8090 5191; do
+    for pid in $(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true); do
+      add_pid "$pid"
+    done
+  done
 fi
 
-# Kill any lingering uvicorn or vite processes for this project
-pkill -9 -f "uvicorn app.main:app.*8090" 2>/dev/null || true
-pkill -9 -f "vite.*5191" 2>/dev/null || true
+pids="$(printf '%s\n' $pids | sort -u | tr '\n' ' ')"
+if [ -z "$pids" ]; then
+  echo "No GlassyTrade AI processes found."
+  exit 0
+fi
 
-sleep 1
-echo "✅ All GlassyTrade AI processes have been stopped."
+echo "Sending SIGTERM to: $pids"
+for pid in $pids; do
+  kill -TERM "$pid" 2>/dev/null || true
+done
+
+for _ in $(seq 1 10); do
+  still_running=""
+  for pid in $pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+      still_running="yes"
+      break
+    fi
+  done
+  [ -z "$still_running" ] && break
+  sleep 1
+done
+
+still_running=""
+for pid in $pids; do
+  if kill -0 "$pid" 2>/dev/null; then
+    still_running="yes"
+    break
+  fi
+done
+if [ -n "$still_running" ]; then
+  echo "Processes did not exit within 10 seconds; sending SIGKILL." >&2
+  for pid in $pids; do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+fi
+
+rm -f "$BACKEND_PID_FILE" "$FRONTEND_PID_FILE"
+echo "GlassyTrade AI processes stopped."

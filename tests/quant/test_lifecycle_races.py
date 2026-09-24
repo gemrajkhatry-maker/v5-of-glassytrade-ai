@@ -5,6 +5,7 @@ switch_symbol(old, new) calls used to both pass the membership check and
 spawn DUPLICATE engines for `new` (duplicate ticks -> duplicate orders).
 """
 
+from datetime import date, timedelta
 import threading
 
 import quant.multi_engine as multi_engine
@@ -41,8 +42,35 @@ def _make_coordinator(futures: dict[str, str]) -> QuantCoordinator:
             # Persisted-selection bypass: force a fresh scan each start by
             # pointing contracts_file at a path that will not exist.
             "contracts_file": "/tmp/nonexistent-contracts-race.json",
+            "contract_expiries": {
+                "GOLDM 28 AUG 159500 CALL": (date.today() + timedelta(days=30)).isoformat(),
+                "SILVERM 24 AUG 246000 PUT": (date.today() + timedelta(days=30)).isoformat(),
+                "CRUDEOIL 17 SEP 8300 CALL": (date.today() + timedelta(days=30)).isoformat(),
+            },
         },
     )
+
+
+def test_start_failure_closes_feed_and_engine_pool(monkeypatch):
+    _force_trading_day(monkeypatch)
+    coord = _make_coordinator({"GOLDM": "GOLDM SEP FUT"})
+    monkeypatch.setattr(coord, "_scan", lambda force=False: ["GOLDM SEP FUT"], raising=True)
+    monkeypatch.setattr(
+        coord,
+        "_spawn_engine",
+        lambda symbol: (_ for _ in ()).throw(ValueError("bad contract metadata")),
+        raising=True,
+    )
+
+    try:
+        coord.start()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("start should fail")
+
+    assert coord.started is False
+    assert coord._feed._thread is None
 
 
 def test_concurrent_switch_spawns_exactly_one_engine(monkeypatch):

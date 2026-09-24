@@ -106,14 +106,20 @@ def _session_bars():
 def _session_ticks():
     """Convert each session bar to two ticks (open, close) with matching time
     epochs so the interval aggregator reconstructs exactly those bars."""
+    def depth(price):
+        return {
+            "bids": [{"price": price - TICK_SIZE / 2, "quantity": 10}],
+            "asks": [{"price": price + TICK_SIZE / 2, "quantity": 10}],
+        }
+
     out = []
     for b in _session_bars():
         ep = int(b.time.lstrip("t"))
-        out.append(Tick(f"t{2 * ep}", b.open, b.volume / 2, b.buy_volume / 2, b.sell_volume / 2))
-        out.append(Tick(f"t{2 * ep + 1}", b.close, b.volume / 2, b.buy_volume / 2, b.sell_volume / 2))
+        out.append(Tick(f"t{2 * ep}", b.open, b.volume / 2, b.buy_volume / 2, b.sell_volume / 2, depth=depth(b.open)))
+        out.append(Tick(f"t{2 * ep + 1}", b.close, b.volume / 2, b.buy_volume / 2, b.sell_volume / 2, depth=depth(b.close)))
     # Flush tick to close the 240th bar
     if out:
-        out.append(Tick(f"t{2 * 240}", out[-1].price, 0, 0, 0))
+        out.append(Tick(f"t{2 * 240}", out[-1].price, 0, 0, 0, depth=depth(out[-1].price)))
     return out
 
 

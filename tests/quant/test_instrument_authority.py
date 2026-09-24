@@ -7,7 +7,6 @@ DEFAULT_REGISTRY. YAML cannot disagree. Unknown roots must not become MCX.
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 import pytest
@@ -115,16 +114,14 @@ def test_coordinator_spawn_uses_symbol_session_profile():
     assert coord._session_profile_for("SENSEX 28 AUG 81000 CALL") == "NSE"
 
 
-def test_frontend_mcx_set_matches_registry():
-    ts = (_ROOT / "frontend/utils/profileInfo.ts").read_text()
-    match = re.search(r"MCX_UNDERLYINGS = new Set\(\[([^\]]+)\]", ts)
-    assert match, "MCX_UNDERLYINGS set not found in profileInfo.ts"
-    roots = {
-        tok.strip().strip("'\"")
-        for tok in match.group(1).split(",")
-        if tok.strip().strip("'\"")
-    }
-    assert roots == set(DEFAULT_REGISTRY.mcx_roots())
+def test_frontend_projection_has_no_legacy_underlying_authority():
+    projection_root = _ROOT / "frontend" / "src" / "projection"
+    sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in projection_root.glob("*.ts")
+    )
+    assert "MCX_UNDERLYINGS" not in sources
+    assert "lot_size" not in sources
 
 
 def test_unknown_root_does_not_default_tick_or_lot():

@@ -1,0 +1,8 @@
+{
+  "session_complete": true,
+  "eod_verified": true,
+  "reconciliation_clean": true,
+  "unresolved_cases": 0,
+  "max_loss": "0.01",
+  "loss_limit": "0.02"
+}

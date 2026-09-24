@@ -157,6 +157,7 @@ class FakePositionManager:
         self.manage_tick_exit_calls.append({
             "position": position, "tick_price": tick_price, "tick_time": tick_time,
         })
+        self.current_position = None
         return None
 
     def _execute_full_close(self, position, exit_dec, time_str, **kwargs):

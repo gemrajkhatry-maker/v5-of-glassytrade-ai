@@ -288,9 +288,9 @@ def test_s10_pyramid_adds_only_when_all_gates_align():
     pm3.check_pyramid(dto3, bar(100.05), pos3, bar_index=6)
     assert pm3.pyramid_count == 2, "P2 did not fire"
     p2_size = abs(pm3.pyramid_positions[1].size)
-    # 25% of 10 = 2.5 units → snapped to 3 (lot rounding rounds half UP,
-    # never under-sizing an approved add).
-    assert p2_size == pytest.approx(3.0)
+    # 25% of 10 = 2.5 units; production floors to whole lots rather than
+    # rounding up and adding more risk than approved.
+    assert p2_size == pytest.approx(2.0)
     pm3.check_pyramid(dto3, bar(100.05), pos3, bar_index=7)
     assert pm3.pyramid_count == 2, "P3 must be refused (max 2)"
 

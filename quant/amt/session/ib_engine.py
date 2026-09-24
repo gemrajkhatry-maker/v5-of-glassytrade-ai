@@ -174,7 +174,10 @@ class InitialBalanceEngine:
                         self.ib_val,
                     )
             except (ValueError, TypeError):
-                logger.warning("IB profile publish failed; consumers keep last IB levels", exc_info=True)
+                logger.debug(
+                    "IB profile window uses a synthetic or non-ISO timestamp; "
+                    "consumers keep the current IB levels"
+                )
 
         # Classify price location
         c_price = float(candle.close)

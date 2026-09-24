@@ -13,5 +13,8 @@ echo ""
 
 export GLASSYTRADE_ENV=paper
 export GLASSYTRADE_STRATEGY=mcx_options
+export CLEAR_POSITIONS_ON_RESTART="${CLEAR_POSITIONS_ON_RESTART:-false}"
+export RECONCILE_DELETE_STALE="${RECONCILE_DELETE_STALE:-0}"
+export DHAN_ALLOW_PROXY_CVD="${DHAN_ALLOW_PROXY_CVD:-false}"
 
-exec ./venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 9090
+exec ./venv/bin/uvicorn app.main:app --host "${BIND_HOST:-127.0.0.1}" --port 9090

@@ -19,6 +19,12 @@ class TestInitialBalanceEngine:
         engine = InitialBalanceEngine(ib_minutes=30)
         assert not engine.is_complete
 
+    def test_synthetic_timestamps_do_not_emit_repeated_warning(self, caplog):
+        engine = InitialBalanceEngine(ib_minutes=30)
+        with caplog.at_level("WARNING"):
+            engine.update(_make_candle("t0", 100, 105, 95, 102))
+        assert not caplog.records
+
     def test_ib_tracks_high_low(self):
         engine = InitialBalanceEngine(ib_minutes=30)
         engine.update(_make_candle("2024-01-01T09:15:00", 100, 105, 95, 102))

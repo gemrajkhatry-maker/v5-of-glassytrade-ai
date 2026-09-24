@@ -468,6 +468,7 @@ class SessionRisk:
                 return 0.0
 
             raw_qty = risk_amount / loss_per_unit
+            one_lot_allowed = False
             if lot_size and lot_size > 1.0:
                 # Expiry half-size must not round UP past half of the full-day size.
                 qty = (
@@ -492,11 +493,13 @@ class SessionRisk:
                     # Floor at 1 lot when stop-loss risk fits within risk budget
                     if deployment_lots == 0 and risk_per_lot > 0 and risk_per_lot <= risk_amount:
                         deployment_lots = 1
+                    one_lot_allowed = deployment_lots >= 1 and risk_per_lot <= risk_amount
                     qty = min(qty, float(deployment_lots * lot_size))
                 if max_lots is not None and max_lots > 0:
                     qty = min(qty, float(max_lots * lot_size))
             else:
                 qty = raw_qty
+                one_lot_allowed = qty >= lot_size if lot_size and lot_size > 1.0 else True
                 if self._capital_deployment_pct is not None and entry > 0:
                     qty = min(qty, (sizing_equity * self._capital_deployment_pct) / entry)
                 if max_lots is not None and max_lots > 0:
@@ -509,7 +512,7 @@ class SessionRisk:
             if lot_size and lot_size > 1.0:
                 floored = float(int(qty // lot_size) * lot_size)
                 # Mon/Fri half-size must not zero a viable 1-lot setup.
-                if floored <= 0 and qty > 0:
+                if floored <= 0 and qty > 0 and one_lot_allowed:
                     floored = float(lot_size)
                 qty = floored
 

@@ -95,6 +95,15 @@ def test_decide_golden_short_does_not_enter_without_triple_a():
     assert not any(d["approved"] for d in result["decisions"])
 
 
+def test_missing_bid_ask_book_remains_an_explicit_fail_closed_gate():
+    result = _capture_decide_trace(_ticks())
+    assert any(
+        "No bid/ask book — cannot verify spread" in reason
+        for decision in result["decisions"]
+        for reason in decision["block_reasons"]
+    )
+
+
 def test_decide_golden_long_has_expected_gate_results():
     """Decisions fire, but Gate 3 does not pass without AGGRESSION."""
     result = _capture_decide_trace(_ticks())

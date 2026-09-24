@@ -23,6 +23,19 @@ from app.application.di.container import DIContainer
 logger = logging.getLogger(__name__)
 
 
+def target_runtime_requested() -> bool:
+    return os.getenv("GLASSYTRADE_RUNTIME_ENGINE", "legacy").strip().lower() == "target"
+
+
+def assert_shadow_has_no_write_adapter(broker: object) -> None:
+    """Fail closed if target shadow mode receives a broker writer."""
+
+    if os.getenv("GLASSYTRADE_ENV", "paper").strip().lower() != "shadow":
+        return
+    if callable(getattr(broker, "place_order", None)):
+        raise RuntimeError("shadow mode cannot receive a broker-write adapter")
+
+
 def compose_container(config: "Configuration") -> DIContainer:
     """Build the complete dependency graph.
 

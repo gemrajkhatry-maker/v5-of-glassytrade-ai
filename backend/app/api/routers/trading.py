@@ -6,6 +6,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.dependencies import get_coordinator, get_storage, get_trade_journal
+from app.api.security import require_operator
 from app.application.services.trading_query_service import TradingQueryService
 from app.core.async_boundary import ensure_sync_adapter_result
 from app.infrastructure.serialization.schemas import (
@@ -21,7 +22,7 @@ _trading_query_service = TradingQueryService()
 router = APIRouter(prefix="/trading", tags=["trading"])
 
 
-@router.post("/portfolio/create")
+@router.post("/portfolio/create", dependencies=[Depends(require_operator)])
 async def create_portfolio():
     """Create a default greenfield portfolio (legacy session service removed)."""
     from app.config import settings
@@ -88,7 +89,7 @@ async def get_position_lifecycle(
     return _trading_query_service.build_lifecycle_summary(events)
 
 
-@router.post("/risk/unhalt")
+@router.post("/risk/unhalt", dependencies=[Depends(require_operator)])
 async def unhalt_trading(coordinator=Depends(get_coordinator)):
     """Operator endpoint to unhalt all trading engines after emergency or restart halt."""
     unhalt = getattr(coordinator, "unhalt_all", None)
@@ -98,7 +99,7 @@ async def unhalt_trading(coordinator=Depends(get_coordinator)):
     return {"status": "ok", "unhalted_engines": count, "message": f"Cleared risk halts across {count} engines"}
 
 
-@router.post("/risk/reset")
+@router.post("/risk/reset", dependencies=[Depends(require_operator)])
 async def reset_trading_risk(coordinator=Depends(get_coordinator)):
     """Operator endpoint to reset session risk (P&L, streaks, trade counts, halts) across all engines."""
     reset_fn = getattr(coordinator, "reset_all_risk", None)

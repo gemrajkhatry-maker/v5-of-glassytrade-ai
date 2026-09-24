@@ -512,38 +512,44 @@ class QuantCoordinator:
                 )
                 self.started = True
                 return
-            symbols = self._scan()
-            self._refresh_gex()
-            self._feed.set_symbols(symbols)
-            # Paper position reconciliation: classify persisted positions
-            # against the active universe. Only OPEN positions are restored;
-            # stale contracts are quarantined (preserved in storage but not
-            # loaded into any engine).
-            self._reconciliation_result = PaperPositionReconciler(
-                self._storage, active_universe=set(symbols)
-            ).reconcile()
-            self._unresolved_startup = set()
-            self._load_inflight_orders_for_startup()
-            self._quarantined = {
-                q.symbol for q in self._reconciliation_result.quarantined
-            }
-            if self._quarantined:
-                logger.warning(
-                    "QuantCoordinator: %d paper position(s) quarantined "
-                    "(not in active universe): %s",
-                    len(self._quarantined), sorted(self._quarantined),
-                )
-            for symbol in symbols:
-                self._spawn_engine(symbol)
-            # Startup reconciliation: rebuild each engine's state from its event store
-            with self._lock:
-                for eng in self._engines.values():
-                    try:
-                        eng.startup_reconcile()
-                    except Exception:
-                        logger.exception("startup_reconcile failed for %s", eng.symbol)
-            self._start_eod_watchdog()
-            self.started = True
+            try:
+                symbols = self._scan()
+                self._refresh_gex()
+                self._feed.set_symbols(symbols)
+                # Paper position reconciliation: classify persisted positions
+                # against the active universe. Only OPEN positions are restored;
+                # stale contracts are quarantined (preserved in storage but not
+                # loaded into any engine).
+                self._reconciliation_result = PaperPositionReconciler(
+                    self._storage, active_universe=set(symbols)
+                ).reconcile()
+                self._unresolved_startup = set()
+                self._load_inflight_orders_for_startup()
+                self._quarantined = {
+                    q.symbol for q in self._reconciliation_result.quarantined
+                }
+                if self._quarantined:
+                    logger.warning(
+                        "QuantCoordinator: %d paper position(s) quarantined "
+                        "(not in active universe): %s",
+                        len(self._quarantined), sorted(self._quarantined),
+                    )
+                for symbol in symbols:
+                    self._spawn_engine(symbol)
+                # Startup reconciliation: rebuild each engine's state from its event store
+                with self._lock:
+                    for eng in self._engines.values():
+                        try:
+                            eng.startup_reconcile()
+                        except Exception:
+                            logger.exception("startup_reconcile failed for %s", eng.symbol)
+                self._start_eod_watchdog()
+                self.started = True
+            except Exception:
+                self._stop_engines()
+                self._feed.close()
+                self.started = False
+                raise
 
     def rescan(self) -> list[str]:
         with self._lifecycle_lock:

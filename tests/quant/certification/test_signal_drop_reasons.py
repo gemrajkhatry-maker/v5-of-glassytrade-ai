@@ -64,8 +64,14 @@ def minimal_ctx_factory():
             poc=poc,
             vah=vah,
             val=val,
+            bid=entry - 0.05,
+            ask=entry + 0.05,
             tick_size=0.05,
             cvd_slope=1.0,
+            session_vwap=entry - 0.5,
+            absorption_side="SELL_ABSORBED",
+            absorption_cluster_low=entry - 1.0,
+            absorption_cluster_high=entry - 0.5,
             triple_a_phase="AGGRESSION",
             triple_a_signal="LONG",
             leg_lvn=entry,  # Fabio Trend Model: pullback to the impulse LVN
@@ -86,7 +92,7 @@ def test_thin_stop_drop_reports_reason(minimal_ctx_factory):
     # The anchor now walks to a deeper structural level when the nearest is
     # noise. Force the guard by demanding an implausibly wide minimum stop so
     # even the deepest anchor is rejected as thin noise.
-    sig, why = SignalBuilder(min_stop_distance_pct=500.0).build_or_reason(ctx, [])
+    sig, why = SignalBuilder(min_stop_distance_pct=500.0).build_or_reason(ctx, [], "TEST")
     assert sig is None
     assert why == "thin stop"
 
@@ -95,7 +101,7 @@ def test_inverted_levels_drop_reports_reason(minimal_ctx_factory):
     ctx = minimal_ctx_factory(inverted=True)
     # Force inverted TP: LONG expects tp > entry, return below entry to trigger monotonic fail
     with patch.object(SignalBuilder, "_structural_tp", return_value=float(ctx.bar.close) - 5.0):
-        sig, why = SignalBuilder().build_or_reason(ctx, [])
+        sig, why = SignalBuilder().build_or_reason(ctx, [], "TEST")
         assert sig is None
         assert why.startswith("inverted signal")
 

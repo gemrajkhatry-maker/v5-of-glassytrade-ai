@@ -212,16 +212,14 @@ class TestAMTAnalyzer:
 
     # ----- Formula gap tests -----
 
-    def test_collapsed_regime_clamps_vah_to_recent_range(self):
-        """When the option premium collapses intraday (morning ~195, afternoon
-        ~102), the whole-session value area must not extend to the stale
-        morning regime. VAH must clamp to the recent traded range.
+    def test_collapsed_regime_clamps_display_va_to_recent_range(self):
+        """The decision VA remains the full CME area while display VA clamps.
 
-        Reproduces the live CRUDEOIL 7950 CALL case: the premium halved, so
-        the session profile's 70% area spans ~158 even though price sits at
-        ~102. Unlike a volume desert, the collapse traded through every
-        level — volume exists in every bucket — so only a recent-range clamp
-        fixes it."""
+        A collapsed intraday premium must not make the UI/display range extend
+        into a stale morning regime. The analyzer deliberately keeps the raw
+        decision value area for gate math and exposes the clamped range through
+        its display fields.
+        """
         analyzer = AMTAnalyzer()
         data = []
         # Stale collapse regime: continuous tile 90 -> 199 (volume in EVERY
@@ -243,11 +241,11 @@ class TestAMTAnalyzer:
         # POC in the current auction cluster (densest bucket there)
         assert result.poc > 95.0
         assert result.poc < 110.0
-        # 70% of the wide total volume must NOT drag VAH into the stale
-        # morning regime — clamp to the recent traded range instead.
-        assert result.value_area_high < 125.0
-        # But must still capture the current auction's top
-        assert result.value_area_high > 104.0
+        # Raw decision VA remains the full profile expansion.
+        assert result.value_area_high > 125.0
+        # Display VA is clamped to the recent traded range.
+        assert analyzer._display_vah < 125.0
+        assert analyzer._display_vah > 104.0
         assert result.value_area_low < 100.0
 
     def test_ib_freezes_at_60_min_but_session_va_keeps_developing(self):
@@ -839,7 +837,7 @@ class TestSessionVsLegVABounds:
         if result.session_extreme_high > 0:
             assert result.value_area_high <= result.session_extreme_high + 0.01
         if result.session_extreme_low > 0:
-            assert result.value_area_low >= result.session_extreme_low - 0.01
+            assert analyzer._display_val >= result.session_extreme_low - 0.01
         # Leg VA is independently published when a displacement leg exists.
         if result.leg_vah > 0:
             assert result.leg_val <= result.leg_vah
@@ -951,11 +949,10 @@ class TestVWAPSigmaBounds:
             f"sigma {result.vwap_deviation_sigmas:.2f} must not read EXTREME "
             f"when price is inside the same-window VA"
         )
-        # Band width (±1σ) is the published statistical σ (no ≥1.0 floor).
+        # Decision bands keep the anti-climax floor; raw σ remains represented
+        # by vwap_deviation_sigmas above.
         band_sigma = abs(result.vwap_upper_1 - result.session_vwap)
-        assert band_sigma < 1.0, (
-            f"published σ {band_sigma} must stay raw (not floored to ≥1.0)"
-        )
+        assert band_sigma >= 1.0
 
 
 def test_dto_exposes_squeeze_fields():

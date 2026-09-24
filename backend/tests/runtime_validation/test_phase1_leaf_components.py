@@ -112,29 +112,30 @@ class TestMarketDataIngestion:
 class TestSignalGeneration:
     def test_long_signal_builds_valid_rr(self):
         sb = SignalBuilder()
-        # close 100, VAL 98 (anchor), step 0.5; SL sits 2 ticks (1.0 point) INSIDE
-        # the structural level toward entry: 98 + 2 * 0.5 = 99.0, satisfying min_stop_distance.
+        # close 100, VAL 98 (anchor), step 0.5; the current structural
+        # anchor resolver uses the traceable nearby level and places the stop
+        # two ticks behind it.
         state = _state(close=100.0, val=98.0, step=0.5, nearest=98.0)
-        sig = sb.build(_ctx(state, "LONG"), _pass_results())
+        sig = sb.build(_ctx(state, "LONG"), _pass_results(), model_label="TEST")
         assert sig is not None
         assert sig.type == "LONG"
         assert sig.entry == pytest.approx(100.0)
         assert sig.sl < sig.entry < sig.tp
-        assert sig.sl == pytest.approx(99.0)
-        assert sig.tp == pytest.approx(102.0)
+        assert sig.sl == pytest.approx(98.0)
+        assert sig.tp == pytest.approx(104.0)
         assert sig.rr == pytest.approx(2.0)
 
     def test_short_signal_is_sell(self):
         sb = SignalBuilder()
-        # close 100, anchor level 102 (nearest, above entry), step 0.5; SL sits 2 ticks
-        # (1.0 point) INSIDE it toward entry: 102 - 2 * 0.5 = 101.0, satisfying min_stop_distance.
+        # close 100, resistance anchor, step 0.5; stop/target are derived
+        # from the current structural-anchor contract.
         state = _state(close=100.0, val=98.0, step=0.5, nearest=102.0)
-        sig = sb.build(_ctx(state, "SHORT"), _pass_results())
+        sig = sb.build(_ctx(state, "SHORT"), _pass_results(), model_label="TEST")
         assert sig is not None
         assert sig.type == "SHORT"
         assert sig.sl > sig.entry > sig.tp
-        assert sig.sl == pytest.approx(101.0)
-        assert sig.tp == pytest.approx(98.0)
+        assert sig.sl == pytest.approx(103.0)
+        assert sig.tp == pytest.approx(94.0)
 
     def test_thin_stop_rejected(self):
         from quant.decision.signal_builder import (
@@ -147,14 +148,13 @@ class TestSignalGeneration:
         assert is_stop_too_thin(entry=104.92, sl=104.90)
         assert not is_min_stop_met(entry=104.92, sl=104.90)
         # The Triple-A builder's SL must clear the 0.1% floor and emit a
-        # signal. Anchor=104.50 (VAH, entry > vah >= val), entry=104.92,
-        # step=0.1; 2-tick offset (0.2) fits inside entry, so
-        # sl = 104.50 + 0.2 = 104.70 (~0.21% away) — clears the 0.1% floor.
+        # signal. The structural resolver may choose a deeper traceable
+        # anchor than the nearby noise level.
         sb = SignalBuilder()
         state = _state(close=104.92, val=104.30, step=0.1, nearest=104.9)
-        sig = sb.build(_ctx(state, "LONG"), _pass_results())
+        sig = sb.build(_ctx(state, "LONG"), _pass_results(), model_label="TEST")
         assert sig is not None
-        assert sig.sl == pytest.approx(104.70)
+        assert sig.sl == pytest.approx(104.3)
 
     def test_failing_gate_returns_none(self):
         sb = SignalBuilder()

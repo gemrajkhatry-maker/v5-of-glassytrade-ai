@@ -10,15 +10,23 @@ This module sets up the dependency injection graph and starts the FastAPI applic
 import faulthandler
 import hashlib
 import json
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import MappingProxyType
 from typing import AsyncGenerator
 
-# Load .env BEFORE any other imports that read os.getenv()
+# Load .env BEFORE any other imports that read os.getenv(), except in the
+# explicitly isolated hermetic test profile.
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+if os.environ.get("GLASSYTRADE_HERMETIC", "").strip().lower() not in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}:
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 # Enable faulthandler to print Python traceback on segfault
 faulthandler.enable()
@@ -54,6 +62,7 @@ from app.shared.mode import resolve_runtime_mode  # noqa: E402
 from quant.contracts.ports.broker import IBroker  # noqa: E402
 from quant.contracts.ports.market_data import IMarketData  # noqa: E402
 from quant.contracts.ports.storage import IStorage  # noqa: E402
+from glassytrade.bootstrap.runtime_config import RuntimeConfig, StartupError  # noqa: E402
 
 
 def _build_startup_contracts(
@@ -164,6 +173,68 @@ def _set_active_symbols(app, symbols) -> tuple:
     app.state.active_symbols = normalized
     set_active_symbols(normalized)
     return normalized
+
+
+def _runtime_config_from_environment(settings, runtime_mode: str) -> RuntimeConfig:
+    """Build the immutable target config before any runtime adapter is created."""
+
+    mode = "paper" if runtime_mode == "development" else runtime_mode
+
+    def env_value(*names: str, default: str = "") -> str:
+        for name in names:
+            value = os.environ.get(name)
+            if value is not None and value.strip():
+                return value.strip()
+        return default
+
+    runtime_engine = env_value("GLASSYTRADE_RUNTIME_ENGINE", default="legacy")
+    default_database_path = str(getattr(settings, "db_path", "glassytrade.db"))
+    capabilities = frozenset(
+        item.strip()
+        for item in env_value("GLASSYTRADE_BROKER_CAPABILITIES").split(",")
+        if item.strip()
+    )
+    if mode == "live" and not capabilities:
+        raise StartupError("missing runtime config: ['broker_capabilities']")
+
+    risk = getattr(settings, "risk", None)
+    if hasattr(risk, "model_dump"):
+        risk_policy = risk.model_dump()
+    elif isinstance(risk, dict):
+        risk_policy = risk
+    else:
+        risk_policy = {}
+
+    return RuntimeConfig.from_mapping(
+        {
+            "mode": mode,
+            "account_id": env_value("GLASSYTRADE_ACCOUNT_ID", "ACCOUNT_ID", default="paper-account"),
+            "exchange": env_value(
+                "GLASSYTRADE_EXCHANGE", "DEFAULT_EXCHANGE", default="NSE"
+            ),
+            "database_path": env_value(
+                "GLASSYTRADE_LIVE_DATABASE_PATH",
+                "GLASSYTRADE_DATABASE_PATH",
+                "DATABASE_PATH",
+                default=default_database_path,
+            ),
+            "evidence_policy": env_value(
+                "GLASSYTRADE_EVIDENCE_POLICY",
+                "EVIDENCE_POLICY",
+                default="EXACT_ONLY" if mode == "paper" else "",
+            ),
+            "risk_policy": risk_policy,
+            "broker_capabilities": capabilities,
+            "config_fingerprint": env_value(
+                "GLASSYTRADE_CONFIG_FINGERPRINT",
+                default="paper-default" if mode == "paper" else "",
+            ),
+            "runtime_engine": runtime_engine,
+            "clear_positions_on_restart": env_value("CLEAR_POSITIONS_ON_RESTART"),
+            "reconcile_delete_stale": env_value("RECONCILE_DELETE_STALE"),
+            "allow_proxy_cvd": env_value("DHAN_ALLOW_PROXY_CVD"),
+        }
+    )
 
 
 class WebSocketLogMiddleware:
@@ -381,6 +452,8 @@ def create_application() -> FastAPI:
         mode = _settings.get_mode_config()
         config = mode.system_config if mode is not None else None
         logger.info(f"Loaded configuration: {config}")
+        runtime_config = _runtime_config_from_environment(_settings, runtime_mode)
+        app.state.runtime_config = runtime_config
 
         # Add CORS middleware
         # Origins loaded from the settings adapter (env CORS_ORIGINS)
@@ -397,16 +470,23 @@ def create_application() -> FastAPI:
         app.add_middleware(WebSocketLogMiddleware)
 
         # Initialize DI container from composition root
-        from app.application.di.composition_root import compose_container
+        from app.application.di.composition_root import (
+            assert_shadow_has_no_write_adapter,
+            compose_container,
+            target_runtime_requested,
+        )
         container = compose_container(config)
 
         # Resolve services from container
         broker = container.resolve(IBroker)
+        if target_runtime_requested():
+            assert_shadow_has_no_write_adapter(broker)
         storage = container.resolve(IStorage)
         market_data = container.resolve(IMarketData)
 
         # Store in app state for backward compatibility
         app.state.runtime_mode = runtime_mode
+        app.state.runtime_engine = runtime_config.runtime_engine
         app.state.container = container
         app.state.market_data = market_data
         app.state.broker = broker

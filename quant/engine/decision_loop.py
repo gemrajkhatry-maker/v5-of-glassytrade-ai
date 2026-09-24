@@ -486,7 +486,7 @@ class DecisionLoop:
         if not amt_dto and self._get_underlying_amt_dto is not None:
             try:
                 amt_dto = self._get_underlying_amt_dto() or amt_dto
-            except Exception:
+            except Exception:  # silent-except - underlying snapshot is optional
                 pass
         risk_st = self._risk.state()
 

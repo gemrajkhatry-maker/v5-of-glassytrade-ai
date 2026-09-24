@@ -1,0 +1,6 @@
+{
+  "mode": "shadow",
+  "sequence": 4,
+  "positions": [{"contractId": "NIFTY", "quantity": 0}],
+  "readiness": "DEGRADED_NO_NEW_ENTRIES"
+}

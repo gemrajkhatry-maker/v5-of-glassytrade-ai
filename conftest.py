@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 
 _root = Path(__file__).resolve()
+
+pytest_plugins = ("tests.helpers.hermetic",)
 for parent in (_root, *_root.parents):
     backend = parent / "backend"
     if backend.is_dir() and (backend / "app").is_dir():

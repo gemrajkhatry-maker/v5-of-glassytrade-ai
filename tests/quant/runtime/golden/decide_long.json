@@ -112,10 +112,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -126,10 +127,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -140,10 +142,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -154,10 +157,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No direction",
         "RISK_REWARD: RR fail"
       ],
@@ -169,10 +173,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -183,10 +188,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -197,10 +203,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -211,10 +218,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -225,10 +233,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -239,10 +248,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -253,10 +263,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -267,10 +278,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -281,10 +293,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -295,10 +308,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -309,10 +323,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -323,10 +338,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -337,10 +353,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -351,10 +368,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -365,10 +383,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -379,10 +398,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -393,10 +413,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -407,10 +428,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -421,10 +443,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -435,10 +458,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -449,10 +473,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -463,10 +488,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -477,10 +503,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -491,10 +518,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -505,10 +533,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -519,10 +548,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -533,10 +563,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -547,10 +578,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -561,10 +593,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -575,10 +608,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -589,10 +623,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -603,10 +638,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -617,10 +653,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -631,10 +668,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -645,10 +683,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -659,10 +698,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -673,10 +713,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -687,10 +728,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -701,10 +743,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -715,10 +758,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -729,10 +773,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -743,10 +788,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -757,10 +803,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -771,10 +818,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -785,10 +833,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -799,10 +848,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -813,10 +863,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -827,10 +878,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -841,10 +893,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -855,10 +908,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -869,10 +923,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -883,10 +938,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -897,10 +953,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -911,10 +968,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -925,10 +983,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -939,10 +998,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -953,10 +1013,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -967,10 +1028,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -981,10 +1043,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -995,10 +1058,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1009,10 +1073,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1023,10 +1088,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1037,10 +1103,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1051,10 +1118,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1065,10 +1133,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1079,10 +1148,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1093,10 +1163,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1107,10 +1178,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1121,10 +1193,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1135,10 +1208,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1149,10 +1223,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1163,10 +1238,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1177,10 +1253,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1191,10 +1268,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1205,10 +1283,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1219,10 +1298,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1233,10 +1313,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1247,10 +1328,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1261,10 +1343,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1275,10 +1358,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1289,10 +1373,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1303,10 +1388,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1317,10 +1403,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1331,10 +1418,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1345,10 +1433,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1359,10 +1448,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1373,10 +1463,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1387,10 +1478,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1401,10 +1493,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1415,10 +1508,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No direction",
         "RISK_REWARD: RR fail"
       ],
@@ -1430,10 +1524,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1444,10 +1539,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1458,10 +1554,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1472,10 +1569,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1486,10 +1584,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1500,10 +1599,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1514,10 +1614,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1528,10 +1629,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1542,10 +1644,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1556,10 +1659,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1570,10 +1674,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1584,10 +1689,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1598,10 +1704,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1612,10 +1719,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1626,10 +1734,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1640,10 +1749,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1654,10 +1764,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1668,10 +1779,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1682,10 +1794,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1696,10 +1809,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1710,10 +1824,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1724,10 +1839,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1738,10 +1854,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1752,10 +1869,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1766,10 +1884,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1780,10 +1899,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1794,10 +1914,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1808,10 +1929,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1822,10 +1944,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1836,10 +1959,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1850,10 +1974,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1864,10 +1989,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1878,10 +2004,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1892,10 +2019,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1906,10 +2034,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1920,10 +2049,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1934,10 +2064,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1948,10 +2079,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1962,10 +2094,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1976,10 +2109,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -1990,10 +2124,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2004,10 +2139,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2018,10 +2154,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2032,10 +2169,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2046,10 +2184,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2060,10 +2199,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2074,10 +2214,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2088,10 +2229,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2102,10 +2244,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2116,10 +2259,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2130,10 +2274,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2144,10 +2289,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2158,10 +2304,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2172,10 +2319,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2186,10 +2334,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2200,10 +2349,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2214,10 +2364,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2228,10 +2379,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2242,10 +2394,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2256,10 +2409,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2270,10 +2424,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2284,10 +2439,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2298,10 +2454,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2312,10 +2469,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2326,10 +2484,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2340,10 +2499,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2354,10 +2514,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2368,10 +2529,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2382,10 +2544,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2396,10 +2559,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2410,10 +2574,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2424,10 +2589,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2438,10 +2604,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2452,10 +2619,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2466,10 +2634,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2480,10 +2649,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2494,10 +2664,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2508,10 +2679,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2522,10 +2694,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2536,10 +2709,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2550,10 +2724,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2564,10 +2739,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2578,10 +2754,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2592,10 +2769,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2606,10 +2784,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2620,10 +2799,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2634,10 +2814,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2648,10 +2829,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2662,10 +2844,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2676,10 +2859,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2690,10 +2874,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2704,10 +2889,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2718,10 +2904,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2732,10 +2919,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2746,10 +2934,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2760,10 +2949,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2774,10 +2964,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2788,10 +2979,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2802,10 +2994,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2816,10 +3009,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2830,10 +3024,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2844,10 +3039,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2858,10 +3054,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2872,10 +3069,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2886,10 +3084,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2900,10 +3099,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2914,10 +3114,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2928,10 +3129,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2942,10 +3144,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2956,10 +3159,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2970,10 +3174,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2984,10 +3189,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -2998,10 +3204,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3012,10 +3219,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3026,10 +3234,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3040,10 +3249,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3054,10 +3264,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3068,10 +3279,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3082,10 +3294,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3096,10 +3309,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3110,10 +3324,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3124,10 +3339,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3138,10 +3354,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3152,10 +3369,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3166,10 +3384,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3180,10 +3399,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3194,10 +3414,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3208,10 +3429,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3222,10 +3444,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3236,10 +3459,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3250,10 +3474,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3264,10 +3489,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3278,10 +3504,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3292,10 +3519,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3306,10 +3534,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3320,10 +3549,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3334,10 +3564,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3348,10 +3579,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3362,10 +3594,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3376,10 +3609,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3390,10 +3624,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3404,10 +3639,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3418,10 +3654,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3432,10 +3669,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3446,10 +3684,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3460,10 +3699,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3474,10 +3714,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3488,10 +3729,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3502,10 +3744,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3516,10 +3759,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3530,10 +3774,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3544,10 +3789,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3558,10 +3804,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3572,10 +3819,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3586,10 +3834,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3600,10 +3849,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3614,10 +3864,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3628,10 +3879,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3642,10 +3894,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3656,10 +3909,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3670,10 +3924,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3684,10 +3939,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3698,10 +3954,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3712,10 +3969,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3726,10 +3984,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3740,10 +3999,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3754,10 +4014,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3768,10 +4029,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3782,10 +4044,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3796,10 +4059,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3810,10 +4074,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3824,10 +4089,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3838,10 +4104,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3852,10 +4119,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3866,10 +4134,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3880,10 +4149,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3894,10 +4164,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3908,10 +4179,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3922,10 +4194,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3936,10 +4209,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3950,10 +4224,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3964,10 +4239,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3978,10 +4254,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -3992,10 +4269,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4006,10 +4284,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4020,10 +4299,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4034,10 +4314,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4048,10 +4329,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4062,10 +4344,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4076,10 +4359,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4090,10 +4374,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4104,10 +4389,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4118,10 +4404,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4132,10 +4419,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4146,10 +4434,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4160,10 +4449,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4174,10 +4464,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4188,10 +4479,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4202,10 +4494,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4216,10 +4509,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4230,10 +4524,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4244,10 +4539,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4258,10 +4554,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4272,10 +4569,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4286,10 +4584,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,
@@ -4300,10 +4599,11 @@
     },
     {
       "approved": false,
-      "reason": "NO_EDGE",
+      "reason": "GATE_REJECTED",
       "phase": "",
       "model_label": "",
       "block_reasons": [
+        "SESSION_PHASE: No bid/ask book \u2014 cannot verify spread",
         "TRIPLE_A_EDGE: No Triple-A edge: no valid setup"
       ],
       "signal_type": null,

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glassytrade.local/contracts/release_manifest.schema.json",
+  "title": "GlassyTrade Release Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["release_id", "git_sha", "config_fingerprint", "database_schema_version", "created_at", "artifacts"],
+  "properties": {
+    "release_id": {"type": "string", "minLength": 1},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"},
+    "config_fingerprint": {"type": "string", "minLength": 1},
+    "database_schema_version": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "artifacts": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}
