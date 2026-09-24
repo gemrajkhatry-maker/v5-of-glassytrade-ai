@@ -15,6 +15,15 @@ def _bar(close=100.0):
 def _ctx(agent_direction="LONG", market_state="IMBALANCED", **kw):
     bar = kw.get("bar") or _bar(kw.get("close", 100.0))
     close = float(bar.close)
+    direction = str(agent_direction or "").upper()
+    default_side = (
+        "SELL_ABSORBED" if direction == "LONG"
+        else "BUY_ABSORBED" if direction == "SHORT"
+        else ""
+    )
+    default_vwap = close - 1.0 if direction == "LONG" else close + 0.5
+    default_high = close - 0.1 if direction == "LONG" else close + 0.2
+    default_low = close - 1.0 if direction == "LONG" else close + 0.1
     return DecisionContext(
         state=None,
         bar=bar,
@@ -28,7 +37,10 @@ def _ctx(agent_direction="LONG", market_state="IMBALANCED", **kw):
         val=kw.get("val", 99.5),
         tick_size=kw.get("tick_size", 0.05),
         cvd_slope=kw.get("cvd_slope", 0.0),
-        absorption_side=kw.get("absorption_side", ""),
+        session_vwap=kw.get("session_vwap", default_vwap),
+        absorption_cluster_high=kw.get("absorption_cluster_high", default_high),
+        absorption_cluster_low=kw.get("absorption_cluster_low", default_low),
+        absorption_side=kw.get("absorption_side", default_side),
         obi=kw.get("obi", 0.0),
         leg_lvn=kw.get("leg_lvn", 0.0),
         risk_halted=kw.get("risk_halted", False),

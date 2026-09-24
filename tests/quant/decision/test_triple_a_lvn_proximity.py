@@ -20,6 +20,9 @@ def _make_ctx(**overrides):
         poc=100.0,
         val=98.0,
         vah=102.0,
+        session_vwap=100.0,
+        absorption_cluster_high=100.5,
+        absorption_cluster_low=99.5,
         leg_lvn=0.0,
     )
     defaults.update(overrides)

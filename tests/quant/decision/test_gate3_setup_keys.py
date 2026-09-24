@@ -12,7 +12,10 @@ def _ctx(**kw):
     base = dict(symbol="NIFTY", agent_direction="LONG", tick_size=0.05,
                 bar=_bar(), triple_a_phase="AGGRESSION", triple_a_signal="LONG",
                 allow_trend=True, cvd_slope=0.5, absorption_side="SELL_ABSORBED",
+                session_vwap=100.0, absorption_cluster_high=100.5,
+                absorption_cluster_low=99.5,
                 poc=100.0, val=98.0, vah=102.0, leg_lvn=101.5)
+
     base.update(kw)
     return DecisionContext(**{k: v for k, v in base.items()
                              if k in DecisionContext.__dataclass_fields__})

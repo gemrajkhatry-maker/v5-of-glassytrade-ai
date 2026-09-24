@@ -210,6 +210,7 @@ def test_triple_a_playbook_a_does_not_require_leg_lvn_proximity():
         triple_a_phase=AGGRESSION,
         triple_a_signal="LONG",
         cvd_slope=1.0,
+        absorption_side="SELL_ABSORBED",
         session_vwap=100.0,
         absorption_cluster_high=100.5,
         absorption_cluster_low=99.5,
@@ -363,6 +364,41 @@ def test_triple_a_machine_requires_close_outside_absorption_cluster(
         tick_size=0.05,
     )
     assert result.phase != AGGRESSION
+
+
+def test_triple_a_machine_clears_stale_cluster_when_current_cluster_is_missing():
+    machine = _absorbing_machine()
+    first = machine.update(
+        close=100.0,
+        high=100.2,
+        low=99.8,
+        vwap=100.0,
+        cvd_slope=0.1,
+        absorption_active=True,
+        absorption_cluster_high=0.0,
+        absorption_cluster_low=0.0,
+        poc=100.0,
+        tick_size=0.05,
+    )
+    assert first.cluster_high == 0.0
+    assert first.cluster_low == 0.0
+
+    result = machine.update(
+        close=101.0,
+        high=101.2,
+        low=100.0,
+        vwap=100.0,
+        cvd_slope=1.0,
+        absorption_side="SELL_ABSORBED",
+        absorption_active=True,
+        absorption_cluster_high=0.0,
+        absorption_cluster_low=0.0,
+        poc=100.0,
+        tick_size=0.05,
+    )
+    assert result.phase != AGGRESSION
+    assert result.cluster_high == 0.0
+    assert result.cluster_low == 0.0
 
 
 def test_float_epoch_normalizes_to_ist_date_not_prefix():

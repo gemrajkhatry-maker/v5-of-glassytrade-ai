@@ -24,7 +24,13 @@ def _ctx(**kw):
     agent_direction = kw.pop("agent_direction", "LONG")
     market_state = kw.pop("market_state", "IMBALANCED")
     cvd_slope = kw.pop("cvd_slope", 0.0)
-    absorption_side = kw.pop("absorption_side", "")
+    absorption_side = kw.pop(
+        "absorption_side",
+        "BUY_ABSORBED" if agent_direction == "SHORT" else "SELL_ABSORBED",
+    )
+    session_vwap = kw.pop("session_vwap", 100.5 if agent_direction == "SHORT" else 99.0)
+    cluster_high = kw.pop("absorption_cluster_high", 100.2 if agent_direction == "SHORT" else 99.9)
+    cluster_low = kw.pop("absorption_cluster_low", 100.1 if agent_direction == "SHORT" else 99.0)
     return DecisionContext(
         state=None,
         bar=bar,
@@ -43,6 +49,9 @@ def _ctx(**kw):
         vwap_lower_2=kw.pop("lower_2", 97.0),
         cvd_slope=cvd_slope,
         absorption_side=absorption_side,
+        session_vwap=session_vwap,
+        absorption_cluster_high=cluster_high,
+        absorption_cluster_low=cluster_low,
         tick_size=0.05,
         triple_a_phase=kw.pop("triple_a_phase", ""),
         triple_a_signal=kw.pop("triple_a_signal", ""),
@@ -91,8 +100,8 @@ class TestOpposingAbsorptionBlocksEntry:
         assert not result.passed
 
 
-class TestAgreeingAndAbsentAbsorptionStillPass:
-    """The guard must not break the canonical paths."""
+class TestAgreeingAbsorptionAndFailClosedPaths:
+    """Agreeing absorption passes; missing or unknown evidence fails closed."""
 
     def test_long_passes_with_agreeing_absorption(self):
         result = gate_triple_a_edge(
@@ -118,8 +127,7 @@ class TestAgreeingAndAbsentAbsorptionStillPass:
         )
         assert result.passed
 
-    def test_aggression_path_unaffected_when_absorption_absent(self):
-        """No absorption reading must not block — preserves existing behaviour."""
+    def test_aggression_path_rejects_missing_absorption(self):
         result = gate_triple_a_edge(
             _ctx(
                 agent_direction="LONG",
@@ -129,9 +137,10 @@ class TestAgreeingAndAbsentAbsorptionStillPass:
                 absorption_side="",
             )
         )
-        assert result.passed
+        assert not result.passed
+        assert "absorption" in result.reason.lower()
 
-    def test_unknown_absorption_side_does_not_block(self):
+    def test_unknown_absorption_side_fails_closed(self):
         result = gate_triple_a_edge(
             _ctx(
                 agent_direction="LONG",
@@ -141,7 +150,36 @@ class TestAgreeingAndAbsentAbsorptionStillPass:
                 absorption_side="NONE",
             )
         )
-        assert result.passed
+        assert not result.passed
+        assert "absorption" in result.reason.lower()
+
+    def test_evidence_free_aggression_rejects_missing_cluster(self):
+        result = gate_triple_a_edge(
+            _ctx(
+                agent_direction="LONG",
+                triple_a_phase="AGGRESSION",
+                triple_a_signal="LONG",
+                cvd_slope=1.5,
+                absorption_side="SELL_ABSORBED",
+                absorption_cluster_high=0.0,
+                absorption_cluster_low=0.0,
+            )
+        )
+        assert not result.passed
+        assert "cluster" in result.reason.lower()
+
+    def test_evidence_free_aggression_rejects_zero_cvd(self):
+        result = gate_triple_a_edge(
+            _ctx(
+                agent_direction="LONG",
+                triple_a_phase="AGGRESSION",
+                triple_a_signal="LONG",
+                cvd_slope=0.0,
+                absorption_side="SELL_ABSORBED",
+            )
+        )
+        assert not result.passed
+        assert "cvd" in result.reason.lower()
 
 
 class TestLvnSniperStillUsesCanonicalMapping:

@@ -22,6 +22,10 @@ def _ctx(**kw):
         triple_a_phase=kw.get("triple_a_phase", "AGGRESSION"),
         triple_a_signal=kw.get("triple_a_signal", kw.get("agent_direction", "LONG")),
         cvd_slope=kw.get("cvd_slope", 1.0),
+        absorption_side=kw.get("absorption_side", ""),
+        session_vwap=kw.get("session_vwap", 0.0),
+        absorption_cluster_high=kw.get("absorption_cluster_high", 0.0),
+        absorption_cluster_low=kw.get("absorption_cluster_low", 0.0),
         leg_lvn=kw.get("leg_lvn", close),
         bid=kw.get("bid", close - 0.05),
         ask=kw.get("ask", close + 0.05),
@@ -64,13 +68,26 @@ def test_sl_offset_above_vah():
 
 def test_pipeline_runs_all_gates():
     pipe = GatePipeline()
-    results = pipe.evaluate(_ctx(val=99.5))
+    results = pipe.evaluate(_ctx(
+        val=99.5,
+        session_vwap=99.0,
+        absorption_cluster_high=99.9,
+        absorption_cluster_low=99.0,
+        absorption_side="SELL_ABSORBED",
+    ))
     assert [r.gate for r in results] == [1, 2, 3, 4]
     assert all(r.passed for r in results)
 
 
 def test_pipeline_position_open_fails_gate2_but_runs_rest():
-    ctx = _ctx(val=99.5, position_open=True)
+    ctx = _ctx(
+        val=99.5,
+        position_open=True,
+        session_vwap=99.0,
+        absorption_cluster_high=99.9,
+        absorption_cluster_low=99.0,
+        absorption_side="SELL_ABSORBED",
+    )
     results = GatePipeline().evaluate(ctx)
     assert results[0].passed        # gate1 session open
     assert not results[1].passed    # gate2 position open

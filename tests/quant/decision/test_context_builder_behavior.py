@@ -7,7 +7,10 @@ Verifies that:
 3. Stale or incomplete evidence leaves setup_evidence incomplete.
 """
 
+import pytest
+
 from quant.decision.context_builder import DecisionContextBuilder
+from quant.decision.gates_edge import gate_triple_a_edge
 from quant.contracts.enums import MarketState
 from quant.contracts.value_objects import AMTResult
 from quant.amt.snapshot import analysis_snapshot_from_result
@@ -394,3 +397,144 @@ def test_initiative_up_with_fresh_sell_delta_traps_to_short():
         market="NSE",
     )
     assert direction == "SHORT"
+
+
+def _triple_a_bar(direction: str, close: float | None = None):
+    if direction == "SHORT":
+        close = 99.2 if close is None else close
+        return Bar(
+            time="2026-08-19T10:00:00+05:30",
+            open=100.0,
+            high=100.2,
+            low=99.0,
+            close=close,
+            volume=1000.0,
+            buy_volume=400.0,
+            sell_volume=600.0,
+            delta=-200.0,
+        )
+    close = 100.8 if close is None else close
+    return Bar(
+        time="2026-08-19T10:00:00+05:30",
+        open=100.0,
+        high=101.0,
+        low=99.8,
+        close=close,
+        volume=1000.0,
+        buy_volume=600.0,
+        sell_volume=400.0,
+        delta=200.0,
+    )
+
+
+def _build_triple_a_context(
+    direction: str = "LONG",
+    *,
+    cluster_high: float = 100.5,
+    cluster_low: float = 99.5,
+    cvd_slope: float = 1.0,
+    leg_lvns: list[float] | None = None,
+    close: float | None = None,
+):
+    dto = {
+        "marketState": "BALANCED",
+        "tripleAPhase": "AGGRESSION",
+        "tripleASignal": direction,
+        "absorptionSide": "SELL_ABSORBED" if direction == "LONG" else "BUY_ABSORBED",
+        "acceptanceAbove": direction == "LONG",
+        "acceptanceBelow": direction == "SHORT",
+        "cvdSlope": cvd_slope,
+        "absorptionClusterHigh": cluster_high,
+        "absorptionClusterLow": cluster_low,
+        "sessionVwap": 100.0,
+        "valueAreaHigh": 101.0,
+        "valueAreaLow": 99.0,
+    }
+    if leg_lvns is not None:
+        dto["legLvns"] = leg_lvns
+    return DecisionContextBuilder().build(
+        bar=_triple_a_bar(direction, close),
+        symbol="NIFTY",
+        market="NSE",
+        contract_expiry=None,
+        tick_size=0.05,
+        bar_index=20,
+        warm_bars=0,
+        cooldown_remaining_sec=0.0,
+        risk_state=DummyRisk(),
+        amt_dto=dto,
+    )
+
+
+def test_builder_accepts_no_lvn_triple_a_and_gate_uses_real_evidence():
+    ctx = _build_triple_a_context()
+    assert ctx.setup_evidence is not None
+    assert ctx.setup_evidence.level == 0.0
+    assert ctx.setup_evidence.is_complete() is True
+    result = gate_triple_a_edge(ctx)
+    assert result.passed is True
+    assert result.setup_key == "TRIPLE_A"
+
+
+@pytest.mark.parametrize(
+    ("cluster_high", "cluster_low"),
+    [
+        (0.0, 0.0),
+        (100.5, 0.0),
+        (0.0, 99.5),
+        (99.0, 100.0),
+    ],
+)
+def test_builder_rejects_missing_or_invalid_long_cluster(cluster_high, cluster_low):
+    ctx = _build_triple_a_context(
+        cluster_high=cluster_high,
+        cluster_low=cluster_low,
+        leg_lvns=[100.6],
+    )
+    assert ctx.setup_evidence is None or ctx.setup_evidence.is_complete() is False
+    assert gate_triple_a_edge(ctx).passed is False
+
+
+@pytest.mark.parametrize(
+    ("cluster_high", "cluster_low"),
+    [
+        (0.0, 0.0),
+        (100.5, 0.0),
+        (0.0, 99.5),
+        (100.0, 99.0),
+    ],
+)
+def test_builder_rejects_missing_or_invalid_short_cluster(cluster_high, cluster_low):
+    ctx = _build_triple_a_context(
+        "SHORT",
+        cluster_high=cluster_high,
+        cluster_low=cluster_low,
+        leg_lvns=[99.4],
+    )
+    assert ctx.setup_evidence is None or ctx.setup_evidence.is_complete() is False
+    assert gate_triple_a_edge(ctx).passed is False
+
+
+@pytest.mark.parametrize(
+    ("direction", "cvd_slope"),
+    [
+        ("LONG", -0.1),
+        ("LONG", 0.0),
+        ("SHORT", 0.1),
+        ("SHORT", 0.0),
+    ],
+)
+def test_builder_rejects_non_directional_triple_a_cvd(direction, cvd_slope):
+    ctx = _build_triple_a_context(
+        direction,
+        cvd_slope=cvd_slope,
+        leg_lvns=[100.6] if direction == "LONG" else [99.4],
+    )
+    assert ctx.setup_evidence is None or ctx.setup_evidence.is_complete() is False
+    assert gate_triple_a_edge(ctx).passed is False
+
+
+def test_builder_rejects_close_inside_triple_a_cluster():
+    ctx = _build_triple_a_context(leg_lvns=[100.6], close=100.5)
+    assert ctx.setup_evidence is None or ctx.setup_evidence.is_complete() is False
+    assert gate_triple_a_edge(ctx).passed is False

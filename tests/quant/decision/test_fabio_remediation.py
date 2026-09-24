@@ -99,7 +99,11 @@ def test_vwap_bias_vetoes_trend_long_below_vwap():
         agent_direction="LONG",
         agent_probability=0.8,
         market_state="IMBALANCED",
+        cvd_slope=1.0,
         session_vwap=101.0,  # price (99.9) is below VWAP (101.0)
+        absorption_cluster_high=99.5,
+        absorption_cluster_low=98.5,
+        absorption_side="SELL_ABSORBED",
         tick_size=0.05,
         leg_lvn=99.9,        # price at LVN
         triple_a_phase="AGGRESSION",
@@ -124,7 +128,11 @@ def test_vwap_bias_permits_trend_long_above_vwap():
         agent_direction="LONG",
         agent_probability=0.8,
         market_state="IMBALANCED",
+        cvd_slope=1.0,
         session_vwap=100.5,  # price (101.4) is above VWAP (100.5)
+        absorption_cluster_high=100.5,
+        absorption_cluster_low=99.5,
+        absorption_side="SELL_ABSORBED",
         tick_size=0.05,
         leg_lvn=101.4,
         triple_a_phase="AGGRESSION",

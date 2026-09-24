@@ -2,10 +2,11 @@
 
 These tests validate that the implementation is aligned with Fabio's model:
   * 2-state market model (BALANCED / IMBALANCED) — no NO_TRADE/PROBING.
-  * The Triple-A edge requires a trend pullback to the impulse LVN; Gate 3 does
-    NOT know the market state, because the model router (BALANCED ->
-    MEAN_REVERSION, IMBALANCED -> TREND; evidence may override) is enforced once
-    in DecisionService (2026-09-17 decision D2).
+  * Triple-A aggression uses the current absorption cluster, VWAP, and CVD;
+    LVN proximity is reserved for LVN-specific paths. Gate 3 does NOT know the
+    market state, because the model router (BALANCED -> MEAN_REVERSION,
+    IMBALANCED -> TREND; evidence may override) is enforced once in
+    DecisionService (2026-09-17 decision D2).
   * The reversion (VA-fade) tier requires a failed probe reclaimed back inside
     the VA and targets the POC; it refuses dead markets.
   * Session phases cover the full trading day.
@@ -73,20 +74,24 @@ def _ctx(**kw):
         triple_a_phase=kw.get("triple_a_phase", "AGGRESSION"),
         triple_a_signal=kw.get("triple_a_signal", kw.get("agent_direction", "LONG")),
         cvd_slope=kw.get("cvd_slope", 1.0),
+        session_vwap=kw.get("session_vwap", 99.0),
+        absorption_cluster_high=kw.get("absorption_cluster_high", 99.9),
+        absorption_cluster_low=kw.get("absorption_cluster_low", 99.0),
         leg_lvn=kw.get("leg_lvn", 100.0),
         bid=kw.get("bid", close - 0.05),
         ask=kw.get("ask", close + 0.05),
     )
 
 
-def test_triple_a_edge_requires_lvn_proximity():
-    # Gate 3 is state-agnostic (the model router lives in DecisionService), but
-    # the trend trigger is a pullback to the impulse LVN (Fabio Trend Model).
+def test_triple_a_edge_does_not_require_lvn_proximity():
     at_lvn = gate_triple_a_edge(_ctx())
     assert at_lvn.passed
 
     away = gate_triple_a_edge(_ctx(leg_lvn=90.0))
-    assert not away.passed
+    assert away.passed
+
+    no_lvn = gate_triple_a_edge(_ctx(leg_lvn=0.0))
+    assert no_lvn.passed
 
 
 def test_dead_market_refused_by_gate3():

@@ -15,12 +15,67 @@ here — gates_edge must not re-implement them.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
 SetupType = Literal["TRIPLE_A", "SECOND_DRIVE", "LVN_SNIPER", "VA_FADE", "NONE"]
 
 _TRIPLE_A_BLOCKED_LOCS = frozenset({"IN_COMPRESSION", "INSIDE_BOX", "IN_CHOP"})
+
+
+def triple_a_cluster_valid(cluster_high, cluster_low) -> bool:
+    try:
+        high = float(cluster_high)
+        low = float(cluster_low)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(high) and math.isfinite(low) and 0.0 < low < high
+
+
+def triple_a_cvd_confirmed(direction, cvd_slope) -> bool:
+    try:
+        slope = float(cvd_slope)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(slope):
+        return False
+    if str(direction).upper() == "LONG":
+        return slope > 0.0
+    if str(direction).upper() == "SHORT":
+        return slope < 0.0
+    return False
+
+
+def triple_a_breakout_confirmed(direction, close, cluster_high, cluster_low) -> bool:
+    if not triple_a_cluster_valid(cluster_high, cluster_low):
+        return False
+    try:
+        price = float(close)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(price):
+        return False
+    if str(direction).upper() == "LONG":
+        return price > float(cluster_high)
+    if str(direction).upper() == "SHORT":
+        return price < float(cluster_low)
+    return False
+
+
+def triple_a_vwap_confirmed(direction, close, vwap) -> bool:
+    try:
+        price = float(close)
+        reference = float(vwap)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(price) or not math.isfinite(reference) or reference <= 0.0:
+        return False
+    if str(direction).upper() == "LONG":
+        return price > reference
+    if str(direction).upper() == "SHORT":
+        return price < reference
+    return False
 
 
 @dataclass(frozen=True)
@@ -49,6 +104,9 @@ class SetupEvidence:
     tick_size: float = 0.05
     session_vwap: float = 0.0
     breakout_beyond_cluster: bool = False
+    cluster_high: float | None = None
+    cluster_low: float | None = None
+    cvd_slope: float | None = None
     lvn_proximity_ok: bool = False
     # Tracker-derived: DriveTracker recorded a leave-and-return (DTO `departed`
     # = drive_count >= 2). context_builder passes it through — never re-derived
@@ -64,6 +122,19 @@ class SetupEvidence:
         return abs(self.price - self.level) <= (max_ticks * tick + 1e-9)
 
     def _vwap_side_ok(self) -> bool:
+        if (
+            self.setup_type == "TRIPLE_A"
+            and (
+                self.cvd_slope is not None
+                or self.cluster_high is not None
+                or self.cluster_low is not None
+            )
+        ):
+            return triple_a_vwap_confirmed(
+                self.direction,
+                self.price,
+                self.session_vwap,
+            )
         if self.session_vwap <= 0 or self.price <= 0:
             return True
         tick = self.tick_size if self.tick_size > 0 else 0.05
@@ -72,6 +143,28 @@ class SetupEvidence:
         if self.direction == "SHORT":
             return self.price <= self.session_vwap + tick
         return False
+
+    def _triple_a_cvd_ok(self) -> bool:
+        if self.cvd_slope is None:
+            return True
+        return triple_a_cvd_confirmed(self.direction, self.cvd_slope)
+
+    def _triple_a_cluster_ok(self) -> bool:
+        if self.cluster_high is None and self.cluster_low is None:
+            return True
+        return triple_a_cluster_valid(self.cluster_high, self.cluster_low)
+
+    def _triple_a_breakout_ok(self) -> bool:
+        if not self.breakout_beyond_cluster:
+            return False
+        if self.cluster_high is None and self.cluster_low is None:
+            return True
+        return triple_a_breakout_confirmed(
+            self.direction,
+            self.price,
+            self.cluster_high,
+            self.cluster_low,
+        )
 
     def is_complete(self) -> bool:
         """Return True if the evidence satisfies all mandatory criteria for its setup type."""
@@ -94,9 +187,11 @@ class SetupEvidence:
                 and self.acceptance
             ):
                 return False
-            if not self.breakout_beyond_cluster:
+            if not self._triple_a_cvd_ok():
                 return False
-            if not self.lvn_proximity_ok and not self._lvn_near(max_ticks=5.0):
+            if not self._triple_a_cluster_ok():
+                return False
+            if not self._triple_a_breakout_ok():
                 return False
             if not self._vwap_side_ok():
                 return False
@@ -156,10 +251,14 @@ class SetupEvidence:
                 missing.append("Acceptance")
             if missing:
                 return f"Incomplete Triple-A: missing {', '.join(missing)}"
+            if not self._triple_a_cvd_ok():
+                return "Triple-A CVD does not confirm trade direction"
+            if not self._triple_a_cluster_ok():
+                return "Missing or invalid absorption cluster bounds"
             if not self.breakout_beyond_cluster:
                 return "Close did not break beyond absorption cluster"
-            if not self.lvn_proximity_ok and not self._lvn_near(max_ticks=5.0):
-                return "Triple-A without LVN proximity"
+            if not self._triple_a_breakout_ok():
+                return "Close did not break beyond absorption cluster"
             if not self._vwap_side_ok():
                 return "Triple-A on wrong side of session VWAP"
             return "Incomplete Triple-A"

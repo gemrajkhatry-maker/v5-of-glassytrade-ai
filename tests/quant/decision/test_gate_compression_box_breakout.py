@@ -56,6 +56,7 @@ def _ctx(**overrides) -> DecisionContext:
     if "bar" not in overrides:
         overrides["bar"] = _long_bar(close=105.0)
     bar = overrides.pop("bar")
+    direction = str(overrides.get("agent_direction", "LONG")).upper()
     fields = dict(
         bar=bar,
         symbol="NIFTY",
@@ -64,8 +65,12 @@ def _ctx(**overrides) -> DecisionContext:
         triple_a_signal="LONG",
         leg_lvn=104.0,  # near the close for LVN proximity
         allow_trend=True,
-        cvd_slope=0.5,
+        cvd_slope=0.5 if direction == "LONG" else -0.5,
         market_state="IMBALANCED",
+        session_vwap=98.0 if direction == "LONG" else 101.0,
+        absorption_cluster_high=100.0 if direction == "LONG" else 101.0,
+        absorption_cluster_low=99.0 if direction == "LONG" else 100.0,
+        absorption_side="SELL_ABSORBED" if direction == "LONG" else "BUY_ABSORBED",
         tick_size=0.05,
     )
     fields.update(overrides)
@@ -76,7 +81,7 @@ class TestCompressionBoxBreakoutConfirmation:
     """Compression box breakout required for Triple-A AGGRESSION."""
 
     def test_passes_without_compression_box(self):
-        """No compression box → standard LVN proximity gate applies."""
+        """No compression box → the current cluster breakout check applies."""
         ctx = _ctx(
             bar=_long_bar(close=105.0),
             compression_box_bars=0,

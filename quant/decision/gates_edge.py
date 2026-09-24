@@ -5,6 +5,12 @@ from quant.contracts.enums import MarketState
 
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
+from quant.decision.setup_state import (
+    triple_a_breakout_confirmed,
+    triple_a_cluster_valid,
+    triple_a_cvd_confirmed,
+    triple_a_vwap_confirmed,
+)
 
 # _ABSORPTION_MAX_AGE_BARS: fresh absorption window (bars); the absorption must
 # be recent enough to back the breakout — older footprints are re-tested, not
@@ -224,6 +230,42 @@ def _pass(reason: str, setup_key: str = "") -> GateResult:
     return GateResult(3, True, reason, setup_key=setup_key)
 
 
+def _triple_a_aggression_failure(
+    ctx: DecisionContext, cvd_slope: float
+) -> str:
+    direction = str(getattr(ctx, "agent_direction", "") or "").upper()
+    if direction not in ("LONG", "SHORT"):
+        return "Triple-A has no trade direction"
+    if canonical_absorption_direction(getattr(ctx, "absorption_side", "")) != direction:
+        return "Triple-A missing or opposing absorption evidence"
+    try:
+        price = float(ctx.bar.close) if ctx.bar is not None else 0.0
+    except (TypeError, ValueError):
+        price = 0.0
+    try:
+        vwap = float(getattr(ctx, "session_vwap", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        vwap = 0.0
+    if vwap <= 0.0 and ctx.bar is not None:
+        try:
+            vwap = float(getattr(ctx.bar, "vwap", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            vwap = 0.0
+    cluster_high = getattr(ctx, "absorption_cluster_high", None)
+    cluster_low = getattr(ctx, "absorption_cluster_low", None)
+    if not triple_a_cluster_valid(cluster_high, cluster_low):
+        return "Triple-A requires positive ordered absorption cluster bounds"
+    if not triple_a_cvd_confirmed(direction, cvd_slope):
+        return "Triple-A CVD does not confirm trade direction"
+    if not triple_a_vwap_confirmed(direction, price, vwap):
+        if direction == "LONG":
+            return "Triple-A LONG below session VWAP"
+        return "Triple-A SHORT above session VWAP"
+    if not triple_a_breakout_confirmed(direction, price, cluster_high, cluster_low):
+        return "Triple-A close did not break beyond the absorption cluster"
+    return ""
+
+
 def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | None:
     """Check each setup path (evidence, Triple-A, drive, LVN, initiative).
 
@@ -242,6 +284,14 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
             return GateResult(3, False, f"Evidence direction {ev.direction} conflicts with trade direction {ctx.agent_direction}")
 
         stype = str(ev.setup_type or "").upper()
+        if stype == "TRIPLE_A" and (
+            getattr(ev, "cluster_high", None) is not None
+            or getattr(ev, "cluster_low", None) is not None
+            or getattr(ev, "cvd_slope", None) is not None
+        ):
+            failure = _triple_a_aggression_failure(ctx, cvd_slope)
+            if failure:
+                return GateResult(3, False, failure)
         if stype in ("TRIPLE_A", "LVN_SNIPER") and not getattr(ctx, "allow_trend", True):
             return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
         if stype in ("VA_FADE", "SECOND_DRIVE") and not getattr(ctx, "allow_reversion", True):
@@ -251,6 +301,9 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
     phase = getattr(ctx, "triple_a_phase", "") or ""
     tsignal = getattr(ctx, "triple_a_signal", "") or ""
     if phase == "AGGRESSION" and tsignal == ctx.agent_direction:
+        failure = _triple_a_aggression_failure(ctx, cvd_slope)
+        if failure:
+            return GateResult(3, False, failure)
         if not getattr(ctx, "allow_trend", True):
             # ponytail: gate-1 owns evidence-gated paths; here we catch the evidence-free ones
             return GateResult(3, False, "Trend continuation blocked in reversion-only phase")

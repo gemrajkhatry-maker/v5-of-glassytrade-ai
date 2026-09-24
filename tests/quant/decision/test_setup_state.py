@@ -27,6 +27,46 @@ def test_triple_a_requires_all_three_legs_and_acceptance():
     assert evidence.is_complete() is True
 
 
+def test_triple_a_rejects_invalid_cluster_evidence():
+    evidence = SetupEvidence(
+        setup_type="TRIPLE_A",
+        direction="LONG",
+        absorption=True,
+        accumulation=True,
+        aggression=True,
+        acceptance=True,
+        cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        cluster_high=0.0,
+        cluster_low=0.0,
+        cvd_slope=1.0,
+        price=101.0,
+        session_vwap=100.0,
+    )
+    assert evidence.is_complete() is False
+    assert "cluster" in evidence.rejection_reason().lower()
+
+
+def test_triple_a_rejects_non_directional_cvd_evidence():
+    evidence = SetupEvidence(
+        setup_type="TRIPLE_A",
+        direction="LONG",
+        absorption=True,
+        accumulation=True,
+        aggression=True,
+        acceptance=True,
+        cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        cluster_high=100.5,
+        cluster_low=99.5,
+        cvd_slope=-0.1,
+        price=101.0,
+        session_vwap=100.0,
+    )
+    assert evidence.is_complete() is False
+    assert "cvd" in evidence.rejection_reason().lower()
+
+
 def test_triple_a_without_accumulation_is_incomplete():
     evidence = SetupEvidence(
         setup_type="TRIPLE_A",

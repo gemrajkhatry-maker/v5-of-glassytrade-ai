@@ -28,13 +28,14 @@ from quant.decision.gates_edge import gate_triple_a_edge
 
 def _ctx(open_, high, low, close, **kw):
     bar = Bar(time="t", open=open_, high=high, low=low, close=close, volume=100.0)
+    direction = str(kw.pop("agent_direction", "LONG")).upper()
     return DecisionContext(
         state=None,
         bar=bar,
         symbol="SYM",
         time_str="t",
         market=kw.pop("market", "NSE"),
-        agent_direction=kw.pop("agent_direction", "LONG"),
+        agent_direction=direction,
         agent_probability=0.7,
         market_state=kw.pop("market_state", "IMBALANCED"),
         obi=kw.pop("obi", 0.0),
@@ -44,8 +45,14 @@ def _ctx(open_, high, low, close, **kw):
         break_type=kw.pop("break_type", ""),
         vwap_upper_2=kw.pop("upper_2", 103.0),
         vwap_lower_2=kw.pop("lower_2", 97.0),
-        cvd_slope=kw.pop("cvd_slope", 1.5),
-        absorption_side=kw.pop("absorption_side", ""),
+        cvd_slope=kw.pop("cvd_slope", 1.5 if direction == "LONG" else -1.5),
+        absorption_side=kw.pop(
+            "absorption_side",
+            "SELL_ABSORBED" if direction == "LONG" else "BUY_ABSORBED",
+        ),
+        session_vwap=kw.pop("session_vwap", 97.0 if direction == "LONG" else 100.5),
+        absorption_cluster_high=kw.pop("absorption_cluster_high", 99.0 if direction == "LONG" else 100.2),
+        absorption_cluster_low=kw.pop("absorption_cluster_low", 98.0 if direction == "LONG" else 100.1),
         tick_size=0.05,
         triple_a_phase=kw.pop("triple_a_phase", "AGGRESSION"),
         triple_a_signal=kw.pop("triple_a_signal", "LONG"),

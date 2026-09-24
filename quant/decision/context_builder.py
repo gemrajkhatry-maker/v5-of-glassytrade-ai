@@ -284,19 +284,21 @@ class DecisionContextBuilder:
     def _build_setup_evidence(self, amt_dto: dict, agent_direction: str | None,
                               nearest_leg_lvn: float, bar=None) -> object | None:
         """Construct SetupEvidence from AMT state."""
-        from quant.decision.setup_state import SetupEvidence
+        from quant.decision.setup_state import (
+            SetupEvidence,
+            triple_a_breakout_confirmed,
+            triple_a_cluster_valid,
+            triple_a_cvd_confirmed,
+        )
         setup_dir = str(agent_direction or "").upper()
         cvd_val = self._df(amt_dto, "cvdSlope")
-        bool(
-            (setup_dir == "LONG" and cvd_val >= -0.2)
-            or (setup_dir == "SHORT" and cvd_val <= 0.2)
-        )
         rejection_at_high = self._db(amt_dto, "rejectionAtHigh")
         rejection_at_low = self._db(amt_dto, "rejectionAtLow")
         is_second_drive = self._db(amt_dto, "isSecondDrive")
         drive_number = self._di(amt_dto, "driveNumber")
         triple_phase = self._ds(amt_dto, "tripleAPhase")
         triple_signal = self._ds(amt_dto, "tripleASignal")
+        absorption_side = self._ds(amt_dto, "absorptionSide")
 
         close_px = float(bar.close) if bar is not None else 0.0
         tick = float(getattr(bar, "tick_size", 0.0) or 0.0) if bar is not None else 0.0
@@ -331,19 +333,14 @@ class DecisionContextBuilder:
             return abs(close_px - level) <= (max_ticks * tick + 1e-9)
 
         def _breakout(direction: str) -> bool:
-            if direction == "LONG":
-                if cluster_high > 0:
-                    return close_px > cluster_high
-                if cb_bars >= 3 and cb_vah > 0:
-                    return close_px > cb_vah
-                return price_loc in ("ABOVE_VAH", "AT_LVN") or not in_compression
-            if direction == "SHORT":
-                if cluster_low > 0:
-                    return close_px < cluster_low
-                if cb_bars >= 3 and cb_val > 0:
-                    return close_px < cb_val
-                return price_loc in ("BELOW_VAL", "AT_LVN") or not in_compression
-            return False
+            if not triple_a_cluster_valid(cluster_high, cluster_low):
+                return False
+            return triple_a_breakout_confirmed(
+                direction,
+                close_px,
+                cluster_high,
+                cluster_low,
+            )
 
         if triple_phase == "AGGRESSION" and (triple_signal in ("LONG", "SHORT") or agent_direction in ("LONG", "SHORT")):
             direction = triple_signal or agent_direction
@@ -353,18 +350,19 @@ class DecisionContextBuilder:
             )
             if accepted:
                 # Only mark cvd_agrees against the setup's own direction.
-                setup_cvd = bool(
-                    (direction == "LONG" and cvd_val >= -0.2)
-                    or (direction == "SHORT" and cvd_val <= 0.2)
-                )
+                setup_cvd = triple_a_cvd_confirmed(direction, cvd_val)
                 return SetupEvidence(
                     setup_type="TRIPLE_A", direction=direction,
-                    absorption=True, accumulation=True, aggression=True,
+                    absorption=absorption_direction(absorption_side) == direction,
+                    accumulation=True, aggression=True,
                     acceptance=True, cvd_agrees=setup_cvd,
                     price_location="IN_COMPRESSION" if in_compression else price_loc,
                     price=close_px, tick_size=tick, session_vwap=session_vwap,
                     level=nearest_leg_lvn,
                     breakout_beyond_cluster=_breakout(direction),
+                    cluster_high=cluster_high,
+                    cluster_low=cluster_low,
+                    cvd_slope=cvd_val,
                     lvn_proximity_ok=_lvn_ok(nearest_leg_lvn, max_ticks=5.0),
                 )
         if is_second_drive:

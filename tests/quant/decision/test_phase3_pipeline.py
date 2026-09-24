@@ -128,6 +128,10 @@ def test_all_setup_paths_pass_gate3():
         triple_a_signal="LONG",
         cvd_slope=0.8,
         vwap_upper_2=105.0,
+        session_vwap=99.0,
+        absorption_cluster_high=99.5,
+        absorption_cluster_low=98.5,
+        absorption_side="SELL_ABSORBED",
         leg_lvn=100.0,
     )
     res_aaa = gate_triple_a_edge(ctx_aaa)

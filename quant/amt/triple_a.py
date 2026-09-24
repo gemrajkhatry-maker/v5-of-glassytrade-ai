@@ -15,6 +15,7 @@ Anti-stale: resets to WAITING after ``_STALE_BARS`` without progression.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 WAITING = "WAITING"
@@ -74,6 +75,15 @@ class TripleAMachine:
         self._bars_in_phase = 0
         self._pending_side = ""
 
+    @staticmethod
+    def _valid_cluster(cluster_high, cluster_low) -> bool:
+        try:
+            high = float(cluster_high)
+            low = float(cluster_low)
+        except (TypeError, ValueError):
+            return False
+        return math.isfinite(high) and math.isfinite(low) and 0.0 < low < high
+
     def snapshot(self) -> TripleASnapshot:
         return TripleASnapshot(
             phase=self._phase,
@@ -125,9 +135,12 @@ class TripleAMachine:
             self.reset()
 
         # --- Update cluster bounds from the latest absorption reading ---
-        if absorption_active and absorption_cluster_high > 0:
+        if self._valid_cluster(absorption_cluster_high, absorption_cluster_low):
             self._cluster_high = float(absorption_cluster_high)
             self._cluster_low = float(absorption_cluster_low)
+        else:
+            self._cluster_high = 0.0
+            self._cluster_low = 0.0
 
         # --- Track pending side from active (not yet broken out) absorption ---
         if absorption_active and not absorption_side and self._pending_side:
@@ -244,7 +257,7 @@ class TripleAMachine:
             or cvd_slope is None
             or self._cluster_high <= 0
             or self._cluster_low <= 0
-            or self._cluster_low > self._cluster_high
+            or self._cluster_low >= self._cluster_high
         ):
             return False
         if signal == "LONG":

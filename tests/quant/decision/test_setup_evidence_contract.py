@@ -71,7 +71,7 @@ def test_second_drive_without_departure_is_incomplete():
     assert ev.is_complete() is False
 
 
-def test_complete_triple_a_requires_breakout_and_lvn():
+def test_complete_triple_a_requires_breakout_without_lvn_requirement():
     incomplete = SetupEvidence(
         setup_type="TRIPLE_A",
         direction="LONG",
@@ -105,3 +105,20 @@ def test_complete_triple_a_requires_breakout_and_lvn():
         tick_size=0.05,
     )
     assert complete.is_complete() is True
+
+
+def test_triple_a_does_not_require_leg_lvn_proximity():
+    ev = SetupEvidence(
+        setup_type="TRIPLE_A",
+        direction="LONG",
+        absorption=True,
+        accumulation=True,
+        aggression=True,
+        acceptance=True,
+        cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        price=101.0,
+        session_vwap=100.0,
+        tick_size=0.05,
+    )
+    assert ev.is_complete() is True

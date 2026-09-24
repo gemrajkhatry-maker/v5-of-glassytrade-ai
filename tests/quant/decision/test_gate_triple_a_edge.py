@@ -23,10 +23,16 @@ def _ctx(**kw):
     vwap_upper_2 = kw.pop("upper_2", 103.0)
     vwap_lower_2 = kw.pop("lower_2", 97.0)
     cvd_slope = kw.pop("cvd_slope", 0.0)
-    absorption_side = kw.pop("absorption_side", "")
+    absorption_side = kw.pop(
+        "absorption_side",
+        "BUY_ABSORBED" if agent_direction == "SHORT" else "SELL_ABSORBED",
+    )
     triple_a_phase = kw.pop("triple_a_phase", "")
     triple_a_signal = kw.pop("triple_a_signal", "")
     market = kw.pop("market", "NSE")
+    session_vwap = kw.pop("session_vwap", 100.5 if agent_direction == "SHORT" else 99.0)
+    cluster_high = kw.pop("absorption_cluster_high", 100.2 if agent_direction == "SHORT" else 99.9)
+    cluster_low = kw.pop("absorption_cluster_low", 100.1 if agent_direction == "SHORT" else 99.0)
     return DecisionContext(
         state=None, bar=bar, symbol="SYM", time_str="t",
         market=market,
@@ -42,6 +48,9 @@ def _ctx(**kw):
         vwap_lower_2=vwap_lower_2,
         cvd_slope=cvd_slope,
         absorption_side=absorption_side,
+        session_vwap=session_vwap,
+        absorption_cluster_high=cluster_high,
+        absorption_cluster_low=cluster_low,
         tick_size=0.05,
         triple_a_phase=triple_a_phase,
         triple_a_signal=triple_a_signal,
@@ -165,68 +174,70 @@ def test_gate3_rejects_when_triple_a_signal_conflicts_with_agent_direction():
     assert not result.passed
 
 
-def test_mcx_cvd_slope_conflict_guard():
-    """In MCX, CVD slope < -0.5 blocks LONG and > 0.5 blocks SHORT (doc)."""
-    # -0.40 is allowed for LONG in MCX
-    r_allowed = gate_triple_a_edge(_ctx(
+def test_mcx_triple_a_requires_positive_long_cvd():
+    adverse = gate_triple_a_edge(_ctx(
         market="MCX", agent_direction="LONG",
         triple_a_phase="AGGRESSION", triple_a_signal="LONG",
-        cvd_slope=-0.40, leg_lvn=100.0,
+        cvd_slope=-0.40,
     ))
-    assert r_allowed.passed
+    assert not adverse.passed
+    assert "CVD" in adverse.reason
 
-    # -0.55 is blocked for LONG in MCX
-    r_blocked = gate_triple_a_edge(_ctx(
+    confirming = gate_triple_a_edge(_ctx(
         market="MCX", agent_direction="LONG",
         triple_a_phase="AGGRESSION", triple_a_signal="LONG",
-        cvd_slope=-0.55, leg_lvn=100.0,
+        cvd_slope=0.40,
     ))
-    assert not r_blocked.passed
-    assert "CVD slope aggressively negative" in r_blocked.reason
+    assert confirming.passed
 
-    # +0.40 is allowed for SHORT in MCX
-    r_short_allowed = gate_triple_a_edge(_ctx(
+
+def test_mcx_triple_a_requires_negative_short_cvd():
+    adverse = gate_triple_a_edge(_ctx(
         market="MCX", agent_direction="SHORT",
         triple_a_phase="AGGRESSION", triple_a_signal="SHORT",
-        cvd_slope=0.40, leg_lvn=100.0,
+        cvd_slope=0.40,
     ))
-    assert r_short_allowed.passed
+    assert not adverse.passed
+    assert "CVD" in adverse.reason
 
-    # +0.55 is blocked for SHORT in MCX
-    r_short_blocked = gate_triple_a_edge(_ctx(
+    confirming = gate_triple_a_edge(_ctx(
         market="MCX", agent_direction="SHORT",
         triple_a_phase="AGGRESSION", triple_a_signal="SHORT",
-        cvd_slope=0.55, leg_lvn=100.0,
+        cvd_slope=-0.40,
     ))
-    assert not r_short_blocked.passed
-    assert "CVD slope aggressively positive" in r_short_blocked.reason
+    assert confirming.passed
 
 
-def test_nse_cvd_slope_conflict_guard():
-    """In NSE, CVD slope threshold is ±0.3 (tighter than MCX)."""
-    # -0.25 is allowed for LONG in NSE
-    r_allowed = gate_triple_a_edge(_ctx(
+def test_nse_triple_a_requires_positive_long_cvd():
+    adverse = gate_triple_a_edge(_ctx(
         market="NSE", agent_direction="LONG",
         triple_a_phase="AGGRESSION", triple_a_signal="LONG",
-        cvd_slope=-0.25, leg_lvn=100.0,
+        cvd_slope=-0.25,
     ))
-    assert r_allowed.passed
+    assert not adverse.passed
+    assert "CVD" in adverse.reason
 
-    # -0.40 is blocked for LONG in NSE
-    r_blocked = gate_triple_a_edge(_ctx(
+    confirming = gate_triple_a_edge(_ctx(
         market="NSE", agent_direction="LONG",
         triple_a_phase="AGGRESSION", triple_a_signal="LONG",
-        cvd_slope=-0.40, leg_lvn=100.0,
+        cvd_slope=0.25,
     ))
-    assert not r_blocked.passed
-    assert "CVD slope aggressively negative" in r_blocked.reason
+    assert confirming.passed
 
-    # -0.55 is blocked for LONG in NSE
-    r_blocked = gate_triple_a_edge(_ctx(
-        market="NSE", agent_direction="LONG",
-        triple_a_phase="AGGRESSION", triple_a_signal="LONG",
-        cvd_slope=-0.55,
+
+def test_nse_triple_a_requires_negative_short_cvd():
+    adverse = gate_triple_a_edge(_ctx(
+        market="NSE", agent_direction="SHORT",
+        triple_a_phase="AGGRESSION", triple_a_signal="SHORT",
+        cvd_slope=0.25,
     ))
-    assert not r_blocked.passed
-    assert "CVD slope aggressively negative" in r_blocked.reason
+    assert not adverse.passed
+    assert "CVD" in adverse.reason
+
+    confirming = gate_triple_a_edge(_ctx(
+        market="NSE", agent_direction="SHORT",
+        triple_a_phase="AGGRESSION", triple_a_signal="SHORT",
+        cvd_slope=-0.25,
+    ))
+    assert confirming.passed
 
