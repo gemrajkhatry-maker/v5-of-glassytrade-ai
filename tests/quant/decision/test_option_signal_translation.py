@@ -169,3 +169,27 @@ def test_short_sl_anchors_to_broken_val_not_session_vah():
     assert sig is not None
     # SL = 2 ticks behind broken VAL: 101.0 + 0.10
     assert sig.sl == pytest.approx(101.10), f"SL {sig.sl} anchored wrong"
+
+
+def test_option_spread_policy_matches_amt_and_expiry_tightens_limit():
+    from quant.bars import Bar
+    from quant.decision.context import DecisionContext
+    from quant.decision.gate_session_phase import gate_session_phase
+
+    def context(is_expiry: bool) -> DecisionContext:
+        return DecisionContext(
+            bar=Bar(time="t0", open=50.0, high=50.2, low=49.8, close=50.0, volume=1.0),
+            symbol="NIFTY 29 SEP 24600 CALL",
+            session_open=True,
+            warmup_complete=True,
+            bid=49.825,
+            ask=50.175,
+            tick_size=0.05,
+            is_expiry=is_expiry,
+        )
+
+    normal = gate_session_phase(context(False))
+    expiry = gate_session_phase(context(True))
+
+    assert normal.passed is True
+    assert expiry.passed is False

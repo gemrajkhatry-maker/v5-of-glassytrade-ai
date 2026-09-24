@@ -11,6 +11,7 @@ No complex scoring — just follow the momentum with liquid contracts.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ class ScanResult:
     score: float = 0.0
     bias: str = ""  # "BULLISH" | "BEARISH" | "NEUTRAL"
     bias_reason: str = ""
-    delta: float = 0.0
+    delta: float | None = None
     iv: float = 0.0
     expected_roc: float = 0.0
     timesfm_edge: float = 0.0
@@ -99,6 +100,19 @@ class OptionScannerService:
         return []
 
     @staticmethod
+    def _option_delta(opt) -> float | None:
+        raw = getattr(opt, "delta", None)
+        if raw is None:
+            return None
+        try:
+            value = abs(float(raw))
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(value) or not 0.0 < value <= 1.0:
+            return None
+        return value
+
+    @staticmethod
     def _score_contract(
         strike, atm, interval, oi, vol, opt, ltp, bid, ask, underlying_upper,
         bias=None, opt_type=None, median_vol=1000, timesfm_forecast=None,
@@ -108,9 +122,10 @@ class OptionScannerService:
         Returns (score, atm_dist, delta_val).
         """
         atm_dist = abs(strike - atm) / interval if interval > 0 else 0
-        delta_val = abs(float(opt.delta or 0.5))
+        delta_val = OptionScannerService._option_delta(opt)
+        if delta_val is None:
+            return 0, atm_dist, None
 
-        # DEAD market check
         if vol <= 0:
             return 0, atm_dist, delta_val
 
@@ -436,6 +451,8 @@ class OptionScannerService:
 
         opt = option_map.get(float(strike))
         if opt is None:
+            return None
+        if self._option_delta(opt) is None:
             return None
 
         ltp = float(opt.ltp or 0)
@@ -863,7 +880,8 @@ class OptionScannerService:
 
                 for opt_type, opt_map in [("CE", chain.calls), ("PE", chain.puts)]:
                     atm_opt = opt_map.get(float(atm))
-                    if atm_opt and float(atm_opt.ltp or 0) > 0:
+                    delta_val = self._option_delta(atm_opt) if atm_opt is not None else None
+                    if atm_opt and delta_val is not None and float(atm_opt.ltp or 0) > 0:
                         final.append(
                             ScanResult(
                                 symbol=atm_opt.symbol,
@@ -878,8 +896,8 @@ class OptionScannerService:
                                 score=50,
                                 bias="NEUTRAL",
                                 bias_reason="Monitoring ATM (No strong momentum)",
-                                delta=0.5,
-                                iv=float(atm_opt.iv or 0) if hasattr(atm_opt, "iv") else 0.0,
+                                delta=delta_val,
+                                iv=float(atm_opt.iv or 0) if hasattr(atm_opt, "iv") else 0,
                             )
                         )
                         logger.info("Fallback: Selected %s for monitoring", atm_opt.symbol)

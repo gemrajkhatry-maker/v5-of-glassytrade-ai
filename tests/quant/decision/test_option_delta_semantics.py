@@ -112,3 +112,75 @@ def test_greeks_port_supplies_option_delta():
     )
     assert ctx.option_delta == 0.42
 
+
+def test_scanner_missing_delta_is_none_and_contract_is_not_scored():
+    from types import SimpleNamespace
+
+    from quant.amt.session.scanner import OptionScannerService
+
+    scanner = OptionScannerService(SimpleNamespace())
+    option = SimpleNamespace(
+        symbol="NIFTY 29 SEP 24600 CALL",
+        ltp=50.0,
+        oi=10_000,
+        volume=1_000,
+        bid=49.0,
+        ask=51.0,
+        delta=None,
+        iv=15.0,
+    )
+
+    score = OptionScannerService._score_contract(
+        strike=100,
+        atm=100,
+        interval=50,
+        oi=10_000,
+        vol=1_000,
+        opt=option,
+        ltp=50.0,
+        bid=49.0,
+        ask=51.0,
+        underlying_upper="NIFTY",
+    )
+
+    assert score[0] == 0.0
+    assert score[2] is None
+    assert scanner._process_contract(
+        u="NIFTY",
+        opt_type="CE",
+        strike=100,
+        atm=100,
+        interval=50,
+        option_map={100.0: option},
+        bullish_only=False,
+        bias="BULLISH",
+        bias_reason="test",
+        chain=SimpleNamespace(),
+        is_mcx=False,
+    ) is None
+
+
+def test_timesfm_option_scoring_rejects_missing_delta():
+    from types import SimpleNamespace
+
+    from quant.decision.timesfm_option_selector import simulate_contract_payoff
+
+    option = SimpleNamespace(
+        ltp=100.0,
+        bid=99.0,
+        ask=101.0,
+        oi=100_000,
+        volume=10_000,
+        delta=None,
+    )
+
+    assert simulate_contract_payoff(
+        opt=option,
+        strike=24600,
+        option_type="CE",
+        underlying="NIFTY",
+        expiry_str="2099-12-31",
+        forecast=None,
+        direction="LONG",
+    ) is None
+

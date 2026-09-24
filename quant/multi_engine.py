@@ -1982,8 +1982,9 @@ class QuantCoordinator:
         from quant.contracts.instrument_registry import is_option_contract, root_token
         from quant.execution.execution_model import ExecutionModel
         underlying_gateway = None
+        option_contract = is_option_contract(symbol)
         execution_model = self.config.get("execution_model", "independent")
-        if is_option_contract(symbol):
+        if option_contract:
             root = root_token(symbol)
             fut_sym = None
             with self._lock:
@@ -2005,7 +2006,7 @@ class QuantCoordinator:
             if underlying_gateway is None:
                 logger.warning(
                     "Option engine %s has no underlying futures feed — "
-                    "premium-tape Triple-A is unreliable; execution stays independent",
+                    "premium-tape observation only; execution disabled",
                     symbol,
                 )
 
@@ -2025,8 +2026,7 @@ class QuantCoordinator:
         if self.config.get("advisor_enabled", False):
             advisor = build_live_advisor(None)
 
-        # Ultra-fast independent scalping: all symbols (futures and options) have execution enabled.
-        execution_enabled = True
+        execution_enabled = not (option_contract and underlying_gateway is None)
 
         # Resolve the exact broker-neutral identity before engine construction.
         # The engine and OMS must share one contract object; no execution path
@@ -2105,7 +2105,7 @@ class QuantCoordinator:
         # receives LiveOMS; every paper engine receives the cost-aware factory
         # with a validated ContractRef. QuantEngine's direct-construction
         # fallback remains test/replay-only and is not reachable here.
-        if self.config.get("live_oms_enabled") and self.broker is not None:
+        if execution_enabled and self.config.get("live_oms_enabled") and self.broker is not None:
             portfolio = self._portfolio
             lot_size = self._resolve_lot_size(symbol)
             live_oms = LiveOMS(

@@ -30,6 +30,7 @@ from config.strategy_resolve import resolved_strategy_for_filesystem
 
 from app.config_models import SystemConfig
 from app.config_models.loader import load_config as load_system_config
+from quant.contracts.constants import HMP_BASE_RISK_PCT
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +269,7 @@ class ModeConfigLoader:
         logger.info("  Risk Settings:")
         logger.info("    - Risk per Trade: %.2f%%", 
                     config.system_config.risk.risk_per_trade_pct * 100)
+        logger.info("    - Effective Base Risk: %.2f%%", HMP_BASE_RISK_PCT * 100)
         logger.info("    - Max Daily Loss: %.2f%%", 
                     config.system_config.risk.max_daily_loss_pct * 100)
         logger.info("    - Max Positions: %d", 

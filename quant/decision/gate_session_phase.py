@@ -17,6 +17,7 @@ Bid-Ask spread must satisfy Ask - Bid <= 2*tau (where tau is the minimum tick in
 from __future__ import annotations
 
 from quant.amt.session.context import get_session_info
+from quant.contracts.constants import amt_spread_limit
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 from quant.session_gates import session_allow_entry
@@ -82,8 +83,6 @@ def gate_session_phase(ctx: DecisionContext) -> GateResult:
             passed=False,
             reason="No bid/ask book — cannot verify spread",
         )
-    from quant.contracts.instrument_registry import is_option_contract
-
     spread = ctx.ask - ctx.bid
     # Instrument price basis: mid of the book (option premium or futures LTP),
     # not an underlying bar that may be attached on translated engines.
@@ -95,12 +94,13 @@ def gate_session_phase(ctx: DecisionContext) -> GateResult:
         if ctx.contract_symbol
         else (is_option_contract(ctx.symbol) or ctx.option_delta is not None)
     )
-    if is_option:
-        # Options: wider spread allowance for normal market liquidity (up to 1.5% of premium or 10 ticks, min ₹2.00)
-        max_spread = max(10.0 * tick, px * 0.015, 2.00)
-    else:
-        # Futures / Underlying: tight spread filter (2x tick, 0.1% of price, min ₹0.50)
-        max_spread = max(2.0 * tick, px * 0.001, 0.50)
+    max_spread = amt_spread_limit(
+        px,
+        tick,
+        is_expiry=bool(ctx.is_expiry),
+        is_option=is_option,
+    )
+
     if spread > max_spread:
         pct = (spread / px * 100.0) if px > 0 else 0.0
         return GateResult(

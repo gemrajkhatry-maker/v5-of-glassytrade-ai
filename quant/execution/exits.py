@@ -65,7 +65,8 @@ class ExitEngine:
         time_stop_bars: int = 30,
         cvd_kill_threshold: float = float("inf"),
         trail_giveback_pct: float = 0.20,
-        spread_max_pct: float = 0.03,
+        spread_max_pct: float | None = None,
+        tick_size: float = 0.05,
         cvd_be_threshold: float = 2.0,
         vwap_adverse_drift_pct: float = 0.03,
         enable_vwap_drift: bool = False,
@@ -74,6 +75,7 @@ class ExitEngine:
         self.cvd_kill_threshold = cvd_kill_threshold
         self.trail_giveback_pct = trail_giveback_pct
         self.spread_max_pct = spread_max_pct
+        self.tick_size = float(tick_size) if tick_size and float(tick_size) > 0 else 0.05
         self.cvd_be_threshold = cvd_be_threshold
         # VWAP adverse drift early exit is disabled by default to prevent
         # premature stops during strong trend expansion / option scale mismatch.
@@ -237,7 +239,15 @@ class ExitEngine:
         risk = abs(entry - sl)
 
         # Rule 1: Spread blowout
-        r = check_spread_blowout(position, close, best_bid, best_ask, is_expiry, self.spread_max_pct)
+        r = check_spread_blowout(
+            position,
+            close,
+            best_bid,
+            best_ask,
+            is_expiry,
+            self.spread_max_pct,
+            tick_size=self.tick_size,
+        )
         if r:
             self.last_exit_source = f"DETERMINISTIC:{r.reason}"
             return r

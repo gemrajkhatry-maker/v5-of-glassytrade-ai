@@ -32,6 +32,31 @@ def test_no_blowout_without_depth():
 
 def test_no_blowout_below_threshold():
     d = ExitEngine().evaluate(
-        _position(), bar_close=100.5, bar_index=5, best_bid=100.0, best_ask=101.0
+        _position(), bar_close=100.5, bar_index=5, best_bid=100.0, best_ask=100.2
     )
     assert not d.should_exit
+
+
+def test_default_spread_uses_amt_absolute_policy():
+    d = ExitEngine().evaluate(
+        _position(), bar_close=100.0, bar_index=5, best_bid=99.9, best_ask=100.5
+    )
+    assert d.should_exit
+    assert d.reason == "SPREAD_BLOWOUT"
+
+
+def test_expiry_spread_is_tighter_than_normal_session():
+    normal = ExitEngine().evaluate(
+        _position(), bar_close=100.0, bar_index=5, best_bid=99.825, best_ask=100.175
+    )
+    expiry = ExitEngine().evaluate(
+        _position(),
+        bar_close=100.0,
+        bar_index=5,
+        best_bid=99.825,
+        best_ask=100.175,
+        is_expiry=True,
+    )
+    assert not normal.should_exit
+    assert expiry.should_exit
+    assert expiry.reason == "SPREAD_BLOWOUT"

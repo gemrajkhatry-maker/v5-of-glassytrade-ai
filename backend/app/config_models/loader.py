@@ -31,6 +31,7 @@ from app.config_models import (
     SymbolConfig,
     SystemConfig,
 )
+from quant.contracts.constants import HMP_BASE_RISK_PCT
 
 logger = logging.getLogger(__name__)
 
@@ -313,8 +314,9 @@ def _log_startup_summary(config: SystemConfig) -> None:
     logger.info("  Active symbols: %s", config.active_symbols())
     logger.info("  Active exchanges: %s", [ex.name for ex in config.active_exchanges()])
     logger.info(
-        "  Risk: per_trade=%.2f%% daily_loss=%.2f%% max_positions=%d",
+        "  Risk: per_trade=%.2f%% effective_base=%.2f%% daily_loss=%.2f%% max_positions=%d",
         config.risk.risk_per_trade_pct * 100,
+        HMP_BASE_RISK_PCT * 100,
         config.risk.max_daily_loss_pct * 100,
         config.risk.max_concurrent_positions,
     )

@@ -110,6 +110,16 @@ def simulate_contract_payoff(
     Downside risk:
         Risk = |Δ| · ΔS_adverse + |Θ| · Δt + ½ · spread
     """
+    raw_delta = getattr(opt, "delta", None)
+    if raw_delta is None:
+        return None
+    try:
+        delta = abs(float(raw_delta))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(delta) or not 0.0 < delta <= 1.0:
+        return None
+
     ltp = float(opt.ltp or 0.0)
     if ltp <= 0.0:
         return None
@@ -120,8 +130,6 @@ def simulate_contract_payoff(
     oi = int(opt.oi or 0)
     volume = int(opt.volume or 0)
 
-    # Greeks resolution
-    delta = abs(float(getattr(opt, "delta", 0.5) or 0.5))
     gamma = float(getattr(opt, "gamma", 0.0) or 0.0)
     theta = abs(float(getattr(opt, "theta", 0.0) or 0.0))
     iv = float(getattr(opt, "iv", 0.0) or 0.0)

@@ -78,13 +78,45 @@ def test_no_underlying_feed_warns_once_per_engine_and_falls_back():
     still runs on the option premium (fallback). No module-global flag."""
     assert _module_has_no_global_underlying_warned_flag()
     option = SyntheticGateway(_quiet_option_ticks())
-    eng = QuantEngine(option, "NIFTY 11 AUG 24600 CALL",
+    eng = QuantEngine(option, "NIFTY 29 SEP 24600 CALL",
                       interval_seconds=1, market="NSE")
     trace = eng.run()
     assert any(isinstance(e, BarClosed) for e in trace), "fallback must still produce bars"
     # The warning state is per-engine: the engine that ran the fallback has
     # set its own flag; a second engine must start unwarned.
     assert eng._underlying_warned is True, "startup warning must be emitted once per engine"
-    eng2 = QuantEngine(SyntheticGateway(_quiet_option_ticks()), "NIFTY 11 AUG 24700 CALL",
+    eng2 = QuantEngine(SyntheticGateway(_quiet_option_ticks()), "NIFTY 29 SEP 24700 CALL",
                        interval_seconds=1, market="NSE")
     assert eng2._underlying_warned is False, "warning flag must not leak across engines"
+
+
+def test_coordinator_option_without_underlying_is_observation_only(monkeypatch, tmp_path):
+    from quant.multi_engine import QuantCoordinator
+
+    monkeypatch.setattr(
+        QuantCoordinator,
+        "_start_engine_loop",
+        lambda self, engine: None,
+    )
+
+    class _MarketData:
+        def get_lot_size(self, symbol):
+            return 65
+
+    coordinator = QuantCoordinator(
+        _MarketData(),
+        config={
+            "underlyings": ["NIFTY"],
+            "n": 1,
+            "contracts_file": str(tmp_path / "contracts.json"),
+            "session_levels_file": str(tmp_path / "levels.json"),
+        },
+    )
+    try:
+        engine = coordinator._spawn_engine("NIFTY 29 SEP 24600 CALL")
+        assert engine is not None
+        assert engine._underlying_gateway is None
+        assert engine._decision_loop._execution_enabled is False
+    finally:
+        coordinator._stop_engine("NIFTY 29 SEP 24600 CALL")
+        coordinator._executor.shutdown(wait=False, cancel_futures=True)

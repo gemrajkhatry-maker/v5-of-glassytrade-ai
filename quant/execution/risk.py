@@ -7,6 +7,13 @@ from enum import Enum
 from typing import Any
 
 from quant.contracts.aggregates import INITIAL_CAPITAL
+from quant.contracts.constants import (
+    AMT_EXPIRY_RISK_MULTIPLIER,
+    HMP_BASE_RISK_PCT,
+    HMP_CUSHION_TIER_1_RATE,
+    HMP_MOMENTUM_RISK_PCT,
+    HMP_RISK_CEILING_PCT,
+)
 from quant.contracts.timezones import IST
 from quant.execution.lots import clamp_to_freeze, snap_to_lot, snap_to_lot_floor
 
@@ -57,6 +64,8 @@ class RiskState:
     cushion_tier: str = "CONSERVATIVE"
     session_r: float = 0.0
     peak_daily_pnl: float = 0.0
+    base_risk_pct: float = HMP_BASE_RISK_PCT
+    effective_base_risk_pct: float = HMP_BASE_RISK_PCT
 
 
 class SessionRisk:
@@ -144,6 +153,14 @@ class SessionRisk:
     def load_status(self) -> RiskLoadStatus:
         """How this session's initial state was established — for telemetry."""
         return self._load_status
+
+    @property
+    def base_risk_pct(self) -> float:
+        return float(self._base_risk_pct)
+
+    @property
+    def effective_base_risk_pct(self) -> float:
+        return HMP_BASE_RISK_PCT
 
     def _load(self) -> None:
         if self._storage is None:
@@ -429,7 +446,7 @@ class SessionRisk:
             if max_rupee_risk_cap is not None and max_rupee_risk_cap > 0:
                 risk_amount = min(risk_amount, max_rupee_risk_cap)
             if is_expiry:
-                risk_amount *= 0.5
+                risk_amount *= AMT_EXPIRY_RISK_MULTIPLIER
 
             loss_per_unit = abs(entry - sl)
             if loss_per_unit <= 0:
@@ -543,6 +560,8 @@ class SessionRisk:
                 cushion_tier=self._cushion_tier(),
                 session_r=self.session_r_multiple(),
                 peak_daily_pnl=self._peak_daily_pnl,
+                base_risk_pct=float(self._base_risk_pct),
+                effective_base_risk_pct=HMP_BASE_RISK_PCT,
             )
 
     def _cushion_tier(self) -> str:
@@ -589,22 +608,17 @@ class SessionRisk:
 
         tier = self._cushion_tier()
         if tier == "BASE_RETRACEMENT_VETO":
-            risk = 0.0025  # 0.25%
+            risk = HMP_BASE_RISK_PCT
         elif tier == "MOMENTUM":
-            risk = 0.0040  # 0.40% Momentum Day (flat; no whole-pct profit cap)
+            risk = HMP_MOMENTUM_RISK_PCT
         elif tier == "CUSHION_TIER_1":
-            # §12.2 literal: Risk₹ = E0×0.0025 + 0.40×Cushion, ceiling 0.50%.
-            # (The 30%-of-profit cushion cap is deleted — offensive sizing
-            # scales to the absolute 0.50% ceiling only.)
-            base = 0.0025
-            cushion_add = max(0.0, self._daily_pnl) * 0.40 / self._starting_equity
-            risk = min(base + cushion_add, 0.0050)
+            base = HMP_BASE_RISK_PCT
+            cushion_add = max(0.0, self._daily_pnl) * HMP_CUSHION_TIER_1_RATE / self._starting_equity
+            risk = min(base + cushion_add, HMP_RISK_CEILING_PCT)
         else:
-            # Conservative: 0.25%
-            risk = 0.0025
+            risk = HMP_BASE_RISK_PCT
 
-        # Absolute ceiling: never > 0.50% of account
-        risk = min(risk, 0.0050)
+        risk = min(risk, HMP_RISK_CEILING_PCT)
 
         if self._macro_risk_cap is not None and self._macro_risk_cap > 0:
             risk = min(risk, self._macro_risk_cap)

@@ -14,7 +14,7 @@ exchanges:
 
 # Conservative production risk
 risk:
-  risk_per_trade_pct: 0.002  # 0.2% per trade (very conservative)
+  risk_per_trade_pct: 0.0025  # House Money Protocol floor: 0.25% per trade
   max_daily_loss_pct: 0.01   # 1% daily max loss
   max_consecutive_losses: 2   # Halt after 2 consecutive losses
   max_concurrent_positions: 3

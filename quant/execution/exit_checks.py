@@ -6,6 +6,7 @@ in priority order; each rule is now independently testable and readable.
 
 from __future__ import annotations
 
+from quant.contracts.constants import AMT_EXPIRY_SPREAD_MULTIPLIER, amt_spread_limit
 from quant.contracts.enums import MarketState
 from quant.execution.exits import ExitDecision
 from quant.execution.order import Position
@@ -13,12 +14,22 @@ from quant.execution.order import Position
 
 def check_spread_blowout(
     position: Position, close: float, best_bid: float | None, best_ask: float | None,
-    is_expiry: bool, spread_max_pct: float,
+    is_expiry: bool, spread_max_pct: float | None, tick_size: float = 0.05,
 ) -> ExitDecision | None:
     """Rule 1: spread blowout — book is untradeable."""
-    effective = (spread_max_pct * 0.5) if is_expiry else spread_max_pct
-    if (best_bid is not None and best_ask is not None and close > 0
-            and (best_ask - best_bid) / close >= effective):
+    if best_bid is None or best_ask is None or close <= 0:
+        return None
+    spread = best_ask - best_bid
+    if spread_max_pct is None:
+        max_spread = amt_spread_limit(close, tick_size, is_expiry=is_expiry)
+    else:
+        effective = (
+            spread_max_pct * AMT_EXPIRY_SPREAD_MULTIPLIER
+            if is_expiry
+            else spread_max_pct
+        )
+        max_spread = close * effective
+    if spread >= max_spread:
         return ExitDecision(True, "SPREAD_BLOWOUT", (best_bid + best_ask) / 2)
     return None
 

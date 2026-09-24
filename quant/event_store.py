@@ -821,6 +821,7 @@ class EventStore:
             )
 
         elif event_type == "RiskUpdated":
+            from quant.contracts.constants import HMP_BASE_RISK_PCT
             risk_data = payload.get("risk", {})
             risk = RiskState(
                 daily_pnl=float(risk_data.get("daily_pnl") or 0.0),
@@ -831,6 +832,10 @@ class EventStore:
                 trades_today=int(risk_data.get("trades_today") or 0),
                 equity=float(risk_data.get("equity") or 0.0),
                 cushion_tier=str(risk_data.get("cushion_tier") or "CONSERVATIVE"),
+                base_risk_pct=float(risk_data.get("base_risk_pct") or HMP_BASE_RISK_PCT),
+                effective_base_risk_pct=float(
+                    risk_data.get("effective_base_risk_pct") or HMP_BASE_RISK_PCT
+                ),
             )
             return RiskUpdated(symbol=symbol, time=time, risk=risk)
 

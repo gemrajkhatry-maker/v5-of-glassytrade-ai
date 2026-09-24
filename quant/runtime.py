@@ -455,6 +455,7 @@ class QuantEngine:
             time_stop_bars=time_stop_bars,
             cvd_kill_threshold=CVD_KILL_THRESHOLD,
             cvd_be_threshold=_cvd_be,
+            tick_size=self._tick_size,
         )
         # Strategy — single entry authority (decision 2026-09-17): the
         # deterministic Fabio AMT gate pipeline. An explicitly injected strategy

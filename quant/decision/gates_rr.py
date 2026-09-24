@@ -1,6 +1,10 @@
 """Gate 4 — structural stop cap on the Triple-A edge (SignalBuilder owns R:R)."""
 
-from quant.contracts.constants import MAX_STOP_DISTANCE_TICKS, MIN_RR_RATIO as MIN_RR
+from quant.contracts.constants import (
+    MAX_STOP_DISTANCE_TICKS,
+    MIN_RR_RATIO as MIN_RR,
+    amt_stop_distance_limit,
+)
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import TICK_SIZE_NSE_OPTIONS
@@ -28,14 +32,13 @@ def gate_risk_reward(
     if sl <= 0:
         return GateResult(4, False, "Stop at/below zero", f"SL={sl:.4f} entry={entry:.2f}")
     risk = abs(entry - sl)
-    # Stop-cap: futures use 0.75% of price; options cap at 30% of premium
-    # (never the futures 200-tick rubber stamp on cheap premiums).
     from quant.contracts.instrument_registry import is_option_contract
-    if is_option_contract(ctx.symbol):
-        scaled_cap_ticks = max(1.0, (entry * 0.30) / tick)
-    else:
-        dynamic_factor = entry * 0.0075 / tick
-        scaled_cap_ticks = max(max_distance_ticks, dynamic_factor)
+    scaled_cap_ticks = amt_stop_distance_limit(
+        entry,
+        tick,
+        is_option=is_option_contract(ctx.symbol),
+        max_futures_ticks=max_distance_ticks,
+    ) / tick
     if risk > scaled_cap_ticks * tick:
         return GateResult(
             4, False,

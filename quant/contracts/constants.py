@@ -153,10 +153,62 @@ STRUCTURE_BYPASS_CONFIDENCE = 70
 MIN_RR_RATIO = 1.5
 MAX_STOP_DISTANCE_TICKS = 200.0
 MAX_CUSHION_TICKS = 10
+AMT_ENTRY_SPREAD_TICK_MULTIPLIER = 2.0
+AMT_ENTRY_SPREAD_PRICE_FRACTION = 0.001
+AMT_ENTRY_SPREAD_MIN_RUPEES = 0.40
+AMT_OPTION_SPREAD_TICK_MULTIPLIER = 10.0
+AMT_OPTION_SPREAD_PRICE_FRACTION = 0.015
+AMT_OPTION_SPREAD_MIN_RUPEES = 2.00
+AMT_EXPIRY_SPREAD_MULTIPLIER = 0.5
+AMT_OPTION_STOP_FRACTION = 0.30
+AMT_FUTURES_STOP_FRACTION = 0.0075
+HMP_BASE_RISK_PCT = 0.0025
+HMP_CUSHION_TIER_1_RATE = 0.40
+HMP_MOMENTUM_RISK_PCT = 0.0040
+HMP_RISK_CEILING_PCT = 0.0050
+AMT_EXPIRY_RISK_MULTIPLIER = 0.5
 # 60s scalar-session default; runtime override via SIGNAL_STALE_SECONDS setting
 SIGNAL_TTL_SECONDS = 60
 VWAP_EXTREME_MULTIPLIER = 1.01
 DECISION_HISTORY_LIMIT = 1000
+
+
+def amt_spread_limit(
+    price: float,
+    tick_size: float,
+    *,
+    is_expiry: bool = False,
+    is_option: bool = False,
+) -> float:
+    tick = float(tick_size) if tick_size and float(tick_size) > 0 else 0.05
+    if is_option:
+        limit = max(
+            AMT_OPTION_SPREAD_TICK_MULTIPLIER * tick,
+            max(float(price), 0.0) * AMT_OPTION_SPREAD_PRICE_FRACTION,
+            AMT_OPTION_SPREAD_MIN_RUPEES,
+        )
+    else:
+        limit = max(
+            AMT_ENTRY_SPREAD_TICK_MULTIPLIER * tick,
+            max(float(price), 0.0) * AMT_ENTRY_SPREAD_PRICE_FRACTION,
+            AMT_ENTRY_SPREAD_MIN_RUPEES,
+        )
+    return limit * (AMT_EXPIRY_SPREAD_MULTIPLIER if is_expiry else 1.0)
+
+
+def amt_stop_distance_limit(
+    price: float,
+    tick_size: float,
+    *,
+    is_option: bool,
+    max_futures_ticks: float = MAX_STOP_DISTANCE_TICKS,
+) -> float:
+    tick = float(tick_size) if tick_size and float(tick_size) > 0 else 0.05
+    fraction = AMT_OPTION_STOP_FRACTION if is_option else AMT_FUTURES_STOP_FRACTION
+    cap_ticks = max(1.0, max(float(price), 0.0) * fraction / tick)
+    if not is_option:
+        cap_ticks = max(float(max_futures_ticks), cap_ticks)
+    return cap_ticks * tick
 
 # ============================================================================
 # Risk Management (FR-10)
