@@ -251,19 +251,23 @@ class TripleAMachine:
         self, signal: str, close: float, vwap: float, cvd_slope: float
     ) -> bool:
         """Confirm the breakout bar agrees with VWAP and CVD (spec §8)."""
+        try:
+            price = float(close)
+            vwap_value = float(vwap)
+            slope = float(cvd_slope)
+        except (TypeError, ValueError):
+            return False
+        if not all(math.isfinite(value) for value in (price, vwap_value, slope)):
+            return False
         if (
-            vwap is None
-            or vwap <= 0
-            or cvd_slope is None
-            or self._cluster_high <= 0
-            or self._cluster_low <= 0
-            or self._cluster_low >= self._cluster_high
+            vwap_value <= 0
+            or not self._valid_cluster(self._cluster_high, self._cluster_low)
         ):
             return False
         if signal == "LONG":
-            return close > self._cluster_high and close > vwap and cvd_slope > 0
+            return price > self._cluster_high and price > vwap_value and slope > 0
         if signal == "SHORT":
-            return close < self._cluster_low and close < vwap and cvd_slope < 0
+            return price < self._cluster_low and price < vwap_value and slope < 0
         return False
 
     def _is_near_poc(

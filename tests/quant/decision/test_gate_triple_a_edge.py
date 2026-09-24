@@ -8,6 +8,7 @@ everywhere); only a DEAD market rejects.
 from quant.bars import Bar
 from quant.decision.context import DecisionContext
 from quant.decision.gates_edge import gate_triple_a_edge
+from quant.decision.setup_state import SetupEvidence
 
 
 def _ctx(**kw):
@@ -29,6 +30,7 @@ def _ctx(**kw):
     )
     triple_a_phase = kw.pop("triple_a_phase", "")
     triple_a_signal = kw.pop("triple_a_signal", "")
+    setup_evidence = kw.pop("setup_evidence", None)
     market = kw.pop("market", "NSE")
     session_vwap = kw.pop("session_vwap", 100.5 if agent_direction == "SHORT" else 99.0)
     cluster_high = kw.pop("absorption_cluster_high", 100.2 if agent_direction == "SHORT" else 99.9)
@@ -54,12 +56,30 @@ def _ctx(**kw):
         tick_size=0.05,
         triple_a_phase=triple_a_phase,
         triple_a_signal=triple_a_signal,
+        setup_evidence=setup_evidence,
     )
 
 
 def test_passes_on_aggression_signal():
     r = gate_triple_a_edge(_ctx(triple_a_phase="AGGRESSION", triple_a_signal="LONG", cvd_slope=1.5, leg_lvn=100.0))
     assert r.passed and r.gate == 3
+
+
+def test_partial_triple_a_evidence_cannot_bypass_gate3():
+    evidence = SetupEvidence(
+        setup_type="TRIPLE_A",
+        direction="LONG",
+        absorption=True,
+        accumulation=True,
+        aggression=True,
+        acceptance=True,
+        cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        price=100.0,
+        session_vwap=0.0,
+    )
+    result = gate_triple_a_edge(_ctx(setup_evidence=evidence))
+    assert result.passed is False
 
 
 def test_rejects_raw_absorption_without_accumulation_aggression():

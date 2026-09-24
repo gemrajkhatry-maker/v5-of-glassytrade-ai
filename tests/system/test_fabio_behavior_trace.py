@@ -49,6 +49,16 @@ def decision_for(
     vwap_lower_2: float = 90.0,
 ):
     bar = _make_dummy_bar(close_px)
+    if direction == "LONG":
+        evidence_vwap = close_px - 1.0
+        evidence_cluster_high = close_px - 0.5
+        evidence_cluster_low = close_px - 1.0
+        absorption_side = "SELL_ABSORBED"
+    else:
+        evidence_vwap = close_px + 1.0
+        evidence_cluster_high = close_px + 1.5
+        evidence_cluster_low = close_px + 1.0
+        absorption_side = "BUY_ABSORBED"
     evidence = SetupEvidence(
         setup_type=setup_type,
         direction=direction,
@@ -59,6 +69,11 @@ def decision_for(
         cvd_agrees=(cvd_slope > -0.2 if direction == "LONG" else cvd_slope < 0.2),
         obi_agrees=True,
         breakout_beyond_cluster=True,
+        price=close_px,
+        session_vwap=evidence_vwap,
+        cluster_high=evidence_cluster_high,
+        cluster_low=evidence_cluster_low,
+        cvd_slope=cvd_slope,
         lvn_proximity_ok=True,
     )
     ctx = DecisionContext(
@@ -80,6 +95,10 @@ def decision_for(
         vwap_upper_2=vwap_upper_2,
         vwap_lower_2=vwap_lower_2,
         cvd_slope=cvd_slope,
+        session_vwap=evidence_vwap,
+        absorption_cluster_high=evidence_cluster_high,
+        absorption_cluster_low=evidence_cluster_low,
+        absorption_side=absorption_side,
         obi=obi,
         allow_trend=True,
         allow_reversion=True,

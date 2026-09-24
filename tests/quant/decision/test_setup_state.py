@@ -21,10 +21,29 @@ def test_triple_a_requires_all_three_legs_and_acceptance():
         cvd_agrees=True,
         breakout_beyond_cluster=True,
         lvn_proximity_ok=True,
-        price=100.0,
-        session_vwap=99.0,
+        price=101.0,
+        session_vwap=100.0,
+        cluster_high=100.5,
+        cluster_low=99.5,
+        cvd_slope=1.0,
     )
     assert evidence.is_complete() is True
+
+
+def test_triple_a_partial_evidence_fails_closed():
+    evidence = SetupEvidence(
+        setup_type="TRIPLE_A",
+        direction="LONG",
+        absorption=True,
+        accumulation=True,
+        aggression=True,
+        acceptance=True,
+        cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        price=100.0,
+        session_vwap=0.0,
+    )
+    assert evidence.is_complete() is False
 
 
 def test_triple_a_rejects_invalid_cluster_evidence():

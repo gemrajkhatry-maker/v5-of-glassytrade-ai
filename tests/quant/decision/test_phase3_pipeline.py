@@ -106,6 +106,9 @@ def test_all_setup_paths_pass_gate3():
         lvn_proximity_ok=True,
         price=100.0,
         session_vwap=99.0,
+        cluster_high=99.5,
+        cluster_low=98.5,
+        cvd_slope=0.5,
     )
     ctx_ev = DecisionContext(
         bar=_bar(100.0),
@@ -114,6 +117,10 @@ def test_all_setup_paths_pass_gate3():
         agent_direction="LONG",
         setup_evidence=ev,
         cvd_slope=0.2,
+        session_vwap=99.0,
+        absorption_cluster_high=99.5,
+        absorption_cluster_low=98.5,
+        absorption_side="SELL_ABSORBED",
     )
     res_ev = gate_triple_a_edge(ctx_ev)
     assert res_ev.passed and "TRIPLE_A confirmed" in res_ev.reason

@@ -43,6 +43,16 @@ def evaluate_case(
     price_loc = "ABOVE_VAH" if setup_type == "TRIPLE_A" else "IN_VA"
     if setup_type == "VA_FADE" and outside_va:
         price_loc = "IN_VA"  # reclaim inside after outside probe
+    if direction == "LONG":
+        evidence_vwap = 100.0
+        evidence_cluster_high = 100.25
+        evidence_cluster_low = 99.5
+        absorption_side = "SELL_ABSORBED"
+    else:
+        evidence_vwap = 101.0
+        evidence_cluster_high = 101.25
+        evidence_cluster_low = 100.75
+        absorption_side = "BUY_ABSORBED"
     evidence = SetupEvidence(
         setup_type=setup_type,
         direction=direction,
@@ -59,8 +69,11 @@ def evaluate_case(
         price_location=price_loc,
         price=100.5,
         tick_size=0.05,
-        session_vwap=100.0,
+        session_vwap=evidence_vwap,
         breakout_beyond_cluster=True,
+        cluster_high=evidence_cluster_high,
+        cluster_low=evidence_cluster_low,
+        cvd_slope=1.0 if direction == "LONG" else -1.0,
         lvn_proximity_ok=bool(at_lvn and lvn_level > 0),
         departed_and_reapproached=True,
     ) if setup_type is not None else None
@@ -83,8 +96,11 @@ def evaluate_case(
         poc=97.0,
         vwap_upper_2=105.0,
         vwap_lower_2=90.0,
-        session_vwap=100.0,
-        cvd_slope=1.0 if cvd_agrees else -1.0,
+        session_vwap=evidence_vwap,
+        cvd_slope=(1.0 if direction == "LONG" else -1.0) if cvd_agrees else (-1.0 if direction == "LONG" else 1.0),
+        absorption_side=absorption_side,
+        absorption_cluster_high=evidence_cluster_high,
+        absorption_cluster_low=evidence_cluster_low,
         allow_trend=True,
         allow_reversion=True,
         bid=100.45,

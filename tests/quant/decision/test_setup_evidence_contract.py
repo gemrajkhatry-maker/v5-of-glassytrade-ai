@@ -85,6 +85,9 @@ def test_complete_triple_a_requires_breakout_without_lvn_requirement():
         lvn_proximity_ok=True,
         price=101.0,
         session_vwap=100.0,
+        cluster_high=100.5,
+        cluster_low=99.5,
+        cvd_slope=1.0,
         tick_size=0.05,
     )
     assert incomplete.is_complete() is False
@@ -102,6 +105,9 @@ def test_complete_triple_a_requires_breakout_without_lvn_requirement():
         lvn_proximity_ok=True,
         price=101.0,
         session_vwap=100.0,
+        cluster_high=100.5,
+        cluster_low=99.5,
+        cvd_slope=1.0,
         tick_size=0.05,
     )
     assert complete.is_complete() is True
@@ -119,6 +125,9 @@ def test_triple_a_does_not_require_leg_lvn_proximity():
         breakout_beyond_cluster=True,
         price=101.0,
         session_vwap=100.0,
+        cluster_high=100.5,
+        cluster_low=99.5,
+        cvd_slope=1.0,
         tick_size=0.05,
     )
     assert ev.is_complete() is True

@@ -42,6 +42,11 @@ def test_scenario_triple_a_bullish_trend_day():
         acceptance=True,
         cvd_agrees=True,
         breakout_beyond_cluster=True,
+        price=24540.0,
+        session_vwap=24500.0,
+        cluster_high=24530.0,
+        cluster_low=24520.0,
+        cvd_slope=2.5,
         lvn_proximity_ok=True,
     )
     ctx = DecisionContext(
@@ -60,6 +65,10 @@ def test_scenario_triple_a_bullish_trend_day():
         vwap_upper_2=24600.0,
         vwap_lower_2=24350.0,
         cvd_slope=2.5,
+        session_vwap=24500.0,
+        absorption_cluster_high=24530.0,
+        absorption_cluster_low=24520.0,
+        absorption_side="SELL_ABSORBED",
         allow_trend=True,
         allow_reversion=True,
         bid=24539.95,
@@ -129,6 +138,12 @@ def test_scenario_midday_blocks_trend_continuation():
         aggression=True,
         acceptance=True,
         cvd_agrees=True,
+        breakout_beyond_cluster=True,
+        price=24720.0,
+        session_vwap=24700.0,
+        cluster_high=24710.0,
+        cluster_low=24690.0,
+        cvd_slope=1.5,
     )
     ctx = DecisionContext(
         bar=bar,
@@ -146,6 +161,10 @@ def test_scenario_midday_blocks_trend_continuation():
         vwap_upper_2=24750.0,
         vwap_lower_2=24500.0,
         cvd_slope=1.5,
+        session_vwap=24700.0,
+        absorption_cluster_high=24710.0,
+        absorption_cluster_low=24690.0,
+        absorption_side="SELL_ABSORBED",
         allow_trend=False,  # Blocked in midday
         allow_reversion=True,
     )

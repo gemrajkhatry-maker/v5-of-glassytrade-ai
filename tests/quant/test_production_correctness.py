@@ -182,7 +182,9 @@ def test_short_stop_is_behind_the_level_not_inside():
 
 def test_signal_builder_and_gate4_share_the_same_stop():
     ctx = _ctx(close=110.0, poc=100.0, vah=102.0, val=98.0, tick_size=0.05)
-    sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
+    gates = [GateResult(i, True) for i in range(1, 5)]
+    assert SignalBuilder().build(ctx, gates) is None
+    sig = SignalBuilder().build(ctx, gates, model_label="Triple-A")
     g4 = gate_risk_reward(ctx)
     assert sig is not None
     assert "101.90" in (g4.extra or g4.reason)
@@ -399,6 +401,29 @@ def test_triple_a_machine_clears_stale_cluster_when_current_cluster_is_missing()
     assert result.phase != AGGRESSION
     assert result.cluster_high == 0.0
     assert result.cluster_low == 0.0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("close", float("inf")),
+        ("close", float("nan")),
+        ("vwap", float("inf")),
+        ("vwap", float("nan")),
+        ("cvd_slope", float("inf")),
+        ("cvd_slope", float("nan")),
+    ],
+)
+def test_triple_a_machine_confirm_rejects_nonfinite_inputs(field, value):
+    machine = _absorbing_machine()
+    close, vwap, cvd_slope = 101.0, 100.0, 1.0
+    if field == "close":
+        close = value
+    elif field == "vwap":
+        vwap = value
+    else:
+        cvd_slope = value
+    assert machine._confirm_direction("LONG", close, vwap, cvd_slope) is False
 
 
 def test_float_epoch_normalizes_to_ist_date_not_prefix():

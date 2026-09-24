@@ -284,11 +284,7 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
             return GateResult(3, False, f"Evidence direction {ev.direction} conflicts with trade direction {ctx.agent_direction}")
 
         stype = str(ev.setup_type or "").upper()
-        if stype == "TRIPLE_A" and (
-            getattr(ev, "cluster_high", None) is not None
-            or getattr(ev, "cluster_low", None) is not None
-            or getattr(ev, "cvd_slope", None) is not None
-        ):
+        if stype == "TRIPLE_A":
             failure = _triple_a_aggression_failure(ctx, cvd_slope)
             if failure:
                 return GateResult(3, False, failure)

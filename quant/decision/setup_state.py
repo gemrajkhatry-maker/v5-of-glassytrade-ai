@@ -122,14 +122,7 @@ class SetupEvidence:
         return abs(self.price - self.level) <= (max_ticks * tick + 1e-9)
 
     def _vwap_side_ok(self) -> bool:
-        if (
-            self.setup_type == "TRIPLE_A"
-            and (
-                self.cvd_slope is not None
-                or self.cluster_high is not None
-                or self.cluster_low is not None
-            )
-        ):
+        if self.setup_type == "TRIPLE_A":
             return triple_a_vwap_confirmed(
                 self.direction,
                 self.price,
@@ -145,20 +138,14 @@ class SetupEvidence:
         return False
 
     def _triple_a_cvd_ok(self) -> bool:
-        if self.cvd_slope is None:
-            return True
         return triple_a_cvd_confirmed(self.direction, self.cvd_slope)
 
     def _triple_a_cluster_ok(self) -> bool:
-        if self.cluster_high is None and self.cluster_low is None:
-            return True
         return triple_a_cluster_valid(self.cluster_high, self.cluster_low)
 
     def _triple_a_breakout_ok(self) -> bool:
         if not self.breakout_beyond_cluster:
             return False
-        if self.cluster_high is None and self.cluster_low is None:
-            return True
         return triple_a_breakout_confirmed(
             self.direction,
             self.price,
