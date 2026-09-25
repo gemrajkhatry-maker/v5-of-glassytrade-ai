@@ -136,11 +136,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     );
 
     // REST/WS targets:
-    // - VITE_BACKEND_URL: full origin (e.g. http://127.0.0.1:9090) for prod / custom setups
+    // - VITE_BACKEND_URL: full origin (e.g. http://127.0.0.1:8090) for prod / custom setups
     // - Dev: same-origin `/api/...` so Vite's proxy (vite.config) reaches the backend
-    // - Else: direct host:PORT (default9090)
+    // - Else: direct host:PORT (default 8090)
     const explicitBackend = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim();
-    const defaultPort = Number(import.meta.env.VITE_BACKEND_PORT) || 9090;
+    const defaultPort = Number(import.meta.env.VITE_BACKEND_PORT) || 8090;
     const backendPortRef = useRef<number>(defaultPort);
     const backendUrl = (path: string) => {
         if (explicitBackend) {

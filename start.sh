@@ -67,7 +67,7 @@ export TIMESFM_ADVISOR_ENABLED="${TIMESFM_ADVISOR_ENABLED:-false}"
 export TIMESFM_CONTRACT_SELECTION="${TIMESFM_CONTRACT_SELECTION:-false}"
 export LLM_ADVISOR_ENABLED="${LLM_ADVISOR_ENABLED:-false}"
 export LAYA_MODEL_ENABLED="${LAYA_MODEL_ENABLED:-false}"
-export DHAN_ALLOW_PROXY_CVD="${DHAN_ALLOW_PROXY_CVD:-false}"
+export DHAN_ALLOW_PROXY_CVD="${DHAN_ALLOW_PROXY_CVD:-true}"
 export PYTHONPATH="$PROJECT_DIR:$BACKEND_DIR:$BACKEND_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 export DEBUG=false
 
@@ -85,12 +85,8 @@ BACKEND_PID="$(cat "$BACKEND_DIR/.target-architecture-backend.pid")"
 echo "Backend PID: $BACKEND_PID"
 
 echo "Starting frontend on $BIND_HOST:$FRONTEND_PORT..."
-(
-  cd "$FRONTEND_DIR"
-  nohup npm run dev -- --host "$BIND_HOST" --port "$FRONTEND_PORT" \
-    </dev/null >"$FRONTEND_DIR/frontend.log" 2>&1 &
-  echo $! >"$FRONTEND_DIR/.target-architecture-frontend.pid"
-)
+export PATH="/opt/homebrew/bin:$PATH"
+"$VENV_PYTHON" -c "import subprocess; p = subprocess.Popen(['node', './node_modules/vite/bin/vite.js', '--host', '$BIND_HOST', '--port', '$FRONTEND_PORT'], cwd='$FRONTEND_DIR', start_new_session=True, stdout=open('$FRONTEND_DIR/frontend.log', 'w'), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL); print(p.pid)" >"$FRONTEND_DIR/.target-architecture-frontend.pid"
 FRONTEND_PID="$(cat "$FRONTEND_DIR/.target-architecture-frontend.pid")"
 echo "Frontend PID: $FRONTEND_PID"
 
