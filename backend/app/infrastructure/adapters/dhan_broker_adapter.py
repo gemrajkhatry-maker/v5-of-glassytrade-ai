@@ -25,7 +25,10 @@ from quant.contracts.entities import Position, Signal
 from quant.contracts.enums import Side, Source
 from quant.contracts.numeric import to_float
 from quant.contracts.ports.broker import IBroker
-from quant.execution.live_oms import ReconciliationRequiredError
+from quant.execution.live_oms import (
+    EntryDispatchBlockedError,
+    ReconciliationRequiredError,
+)
 from shared.money import to_decimal as _strict_to_decimal
 
 logger = logging.getLogger(__name__)
@@ -64,9 +67,6 @@ class DhanBrokerAdapter(IBroker):
 
     def __init__(self, config: Configuration, storage=None):
         self._config = config
-        # C4: optional durable order storage. When wired, every order state
-        # transition is persisted so a crash between place_order and the fill
-        # ack cannot silently lose an in-flight order. None in tests/paper.
         self._storage = storage
         self._broker: DhanBroker | None = None
         self._broker_lock = threading.Lock()
@@ -232,8 +232,6 @@ class DhanBrokerAdapter(IBroker):
             # payload from known fields and ignores extra attrs.
             setattr(order, "user_order_id", str(signal.signal_id))
 
-            # C4: persist SUBMITTED before place_order so a crash mid-submit is
-            # recoverable; record the broker order id once we have it.
             self._persist_order_submitted(signal, symbol, qty, order_type, limit_price)
             placed_order = broker.place_order(order)
             placed_order_id = str(getattr(placed_order, "order_id", ""))
@@ -411,7 +409,7 @@ class DhanBrokerAdapter(IBroker):
                 initial_stop=_to_decimal(signal.stop_loss),
                 metadata=metadata,
             )
-        except ReconciliationRequiredError:
+        except (EntryDispatchBlockedError, ReconciliationRequiredError):
             raise
         except DhanError as exc:
             logger.error("Dhan API error executing signal %s: %s", signal.signal_id, exc)
@@ -944,17 +942,17 @@ class DhanBrokerAdapter(IBroker):
     def _persist_order_submitted(
         self, signal: Signal, symbol: str, qty: int, order_type, price: float
     ) -> None:
-        """Record SUBMITTED before place_order so a crash mid-submit still leaves
-        a durable record of the intended order. Best-effort: a persistence
-        failure must never block trading."""
         storage = getattr(self, "_storage", None)
         order_id = str(getattr(signal, "signal_id", "") or "").strip()
         if storage is None or not order_id:
-            return
-        try:
-            from quant.contracts.timezones import IST
+            raise EntryDispatchBlockedError(
+                "Entry dispatch blocked: durable storage and order identity are required"
+            )
 
-            now = datetime.now(tz=IST).isoformat()
+        from quant.contracts.timezones import IST
+
+        now = datetime.now(tz=IST).isoformat()
+        try:
             storage.save_order(
                 {
                     "order_id": order_id,
@@ -970,10 +968,10 @@ class DhanBrokerAdapter(IBroker):
                     "updated_at": now,
                 }
             )
-        except Exception:
-            logger.exception(
-                "order persistence (SUBMITTED) failed for %s — trading continues", order_id
-            )
+        except Exception as exc:
+            raise EntryDispatchBlockedError(
+                f"Entry dispatch blocked: intent persistence failed for {order_id}"
+            ) from exc
 
     def _persist_order_terminal(
         self,

@@ -13,6 +13,7 @@ All tests mock DhanBroker so no live credentials or network are needed.
 from __future__ import annotations
 
 import os
+import sqlite3
 import sys
 import threading
 from datetime import datetime
@@ -30,6 +31,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter  # noqa: E402
+from app.infrastructure.storage.database import SQLiteStorageAdapter  # noqa: E402
 from quant.contracts.entities import Signal  # noqa: E402
 from quant.contracts.enums import SignalType, SetupType, Source  # noqa: E402
 from quant.contracts.aggregates import Portfolio  # noqa: E402
@@ -52,6 +54,9 @@ def _make_adapter(mock_broker: MagicMock) -> DhanBrokerAdapter:
     adapter._config = None
     adapter._executing_signal_ids = set()
     adapter._executing_lock = threading.Lock()
+    # B1: entries require durable storage; valid-execution fixtures supply it.
+    # Missing-storage tests explicitly replace/delete this field.
+    adapter._storage = _RecordingStorage()
     return adapter
 
 
@@ -351,15 +356,136 @@ def test_execute_order_persists_rejected_on_broker_rejection():
     assert "REJECTED" in statuses
 
 
-def test_execute_order_no_storage_is_noop():
-    """C4: without storage wired, persistence is a safe no-op (still executes)."""
+@pytest.mark.parametrize("missing_attribute", [False, True])
+def test_entry_dispatch_blocks_missing_storage(missing_attribute):
+    """B1: entry dispatch requires durable storage; missing storage must block
+    the broker call (replaces the old 'safe no-op' expectation)."""
     broker = _mock_broker_filled(quantity=4)
-    adapter = _make_adapter(broker)  # no _storage attribute set
-    signal = _make_signal(price=100.0, metadata={"order_quantity": 4})
+    adapter = _make_adapter(broker)
+    adapter._storage = None
+    if missing_attribute:
+        del adapter._storage
+    adapter._persist_order_terminal = MagicMock()
+    signal = _make_signal(metadata={"order_quantity": 4})
 
-    pos = adapter.execute_order(signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL")
+    with pytest.raises(RuntimeError, match="Entry dispatch blocked:"):
+        adapter.execute_order(
+            signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL"
+        )
 
-    assert pos is not None
+    broker.place_order.assert_not_called()
+    broker.cancel_order.assert_not_called()
+    broker.get_order_status.assert_not_called()
+    adapter._persist_order_terminal.assert_not_called()
+
+
+def test_entry_dispatch_blocks_failed_intent_write():
+    """B1: a storage failure on the intent write must prevent dispatch."""
+    broker = _mock_broker_filled(quantity=4)
+    adapter = _make_adapter(broker)
+    storage = MagicMock(spec=["save_order", "update_order_status"])
+    failure = sqlite3.OperationalError("simulated disk failure")
+    storage.save_order.side_effect = failure
+    adapter._storage = storage
+    signal = _make_signal(metadata={"order_quantity": 4})
+
+    with pytest.raises(RuntimeError, match="Entry dispatch blocked:") as caught:
+        adapter.execute_order(
+            signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL"
+        )
+
+    assert caught.value.__cause__ is failure
+    storage.save_order.assert_called_once()
+    storage.update_order_status.assert_not_called()
+    broker.place_order.assert_not_called()
+    broker.cancel_order.assert_not_called()
+
+
+def test_entry_dispatch_blocks_missing_order_identity():
+    """B1: no usable order identity -> no intent row -> no dispatch."""
+    broker = _mock_broker_filled(quantity=4)
+    adapter = _make_adapter(broker)
+    storage = MagicMock(spec=["save_order", "update_order_status"])
+    adapter._storage = storage
+    signal = _make_signal(metadata={"order_quantity": 4})
+    signal.signal_id = "   "
+
+    with pytest.raises(RuntimeError, match="Entry dispatch blocked:"):
+        adapter.execute_order(
+            signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL"
+        )
+
+    storage.save_order.assert_not_called()
+    storage.update_order_status.assert_not_called()
+    broker.place_order.assert_not_called()
+
+
+def test_entry_intent_is_committed_before_broker_dispatch(tmp_path):
+    """B1: the SUBMITTED intent row is durable (visible from a second SQLite
+    connection) before place_order is called."""
+    path = tmp_path / "entry-intent.db"
+    storage = SQLiteStorageAdapter(str(path))
+    broker = _mock_broker_filled(quantity=4)
+    adapter = _make_adapter(broker)
+    adapter._storage = storage
+    signal = _make_signal(metadata={"order_quantity": 4})
+
+    def dispatch(order):
+        with sqlite3.connect(path) as observer:
+            row = observer.execute(
+                "SELECT status, quantity FROM orders WHERE order_id = ?",
+                (signal.signal_id,),
+            ).fetchone()
+        assert row == ("SUBMITTED", 4.0)
+        assert order.quantity == 4
+        return SimpleNamespace(order_id="ORD-1", quantity=4)
+
+    broker.place_order.side_effect = dispatch
+    try:
+        position = adapter.execute_order(
+            signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL"
+        )
+        assert position is not None
+        broker.place_order.assert_called_once()
+    finally:
+        storage.close()
+
+
+def test_entry_dispatch_blocks_when_commit_acknowledgement_is_lost(
+    tmp_path, monkeypatch
+):
+    """B1: commit-then-lost-acknowledgement must block dispatch, keep the
+    durable row as an inflight obligation, and not overwrite it as REJECTED."""
+    path = tmp_path / "entry-ack.db"
+    storage = SQLiteStorageAdapter(str(path))
+    broker = _mock_broker_filled(quantity=4)
+    adapter = _make_adapter(broker)
+    adapter._storage = storage
+    signal = _make_signal(metadata={"order_quantity": 4})
+    save_order = storage.save_order
+
+    def commit_then_raise(order):
+        save_order(order)
+        raise sqlite3.OperationalError("simulated acknowledgement loss")
+
+    monkeypatch.setattr(storage, "save_order", commit_then_raise)
+    try:
+        with pytest.raises(RuntimeError, match="Entry dispatch blocked:"):
+            adapter.execute_order(
+                signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL"
+            )
+        broker.place_order.assert_not_called()
+        with sqlite3.connect(path) as observer:
+            row = observer.execute(
+                "SELECT status, broker_order_id FROM orders WHERE order_id = ?",
+                (signal.signal_id,),
+            ).fetchone()
+        assert row is not None
+        assert row[0] == "SUBMITTED"
+        assert not row[1]
+        assert len(storage.load_inflight_orders()) == 1
+    finally:
+        storage.close()
 
 
 # ---------------------------------------------------------------------------

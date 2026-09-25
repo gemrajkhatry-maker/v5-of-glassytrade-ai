@@ -47,11 +47,20 @@ class ReconciliationRequiredError(RuntimeError):
         self.fill_price = fill_price
 
 
-__all__ = ["EmergencyFlattenError", "ReconciliationRequiredError", "LiveOMS"]
+__all__ = [
+    "EmergencyFlattenError",
+    "EntryDispatchBlockedError",
+    "ReconciliationRequiredError",
+    "LiveOMS",
+]
 
 
 class EmergencyFlattenError(RuntimeError):
     """Raised when Phase 2 contingent stop placement fails and emergency flatten is triggered."""
+
+
+class EntryDispatchBlockedError(RuntimeError):
+    """Entry dispatch did not begin because its intent was not acknowledged."""
 
 
 class LiveOMS:

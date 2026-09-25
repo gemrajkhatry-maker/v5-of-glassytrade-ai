@@ -534,3 +534,52 @@ class TestPortfolioRiskIntegration:
         assert len(portfolio_risk.registered) == 1
         assert len(portfolio_risk.released) == 1
         assert portfolio_risk.released[0] == portfolio_risk.registered[0]
+
+
+# ---------------------------------------------------------------------------
+# B1: pre-dispatch persistence barrier
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("storage_available", [False, True])
+def test_pre_dispatch_persistence_failure_releases_only_attempt_reservation(
+    storage_available,
+):
+    """EntryDispatchBlockedError (missing storage or failed intent write)
+    unwinds this attempt's reservation without any broker call and without
+    publishing approval/open events."""
+    import sqlite3
+    import threading
+
+    from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter
+    from quant.contracts.aggregates import Portfolio
+    from quant.execution.live_oms import LiveOMS
+
+    broker = MagicMock()
+    adapter = DhanBrokerAdapter.__new__(DhanBrokerAdapter)
+    adapter._broker = broker
+    adapter._config = None
+    adapter._executing_lock = threading.Lock()
+    adapter._executing_signal_ids = set()
+    adapter._storage = None
+    if storage_available:
+        adapter._storage = MagicMock(spec=["save_order", "update_order_status"])
+        adapter._storage.save_order.side_effect = sqlite3.OperationalError(
+            "simulated disk failure"
+        )
+
+    oms = LiveOMS(adapter, Portfolio.create_default(), lot_size=1.0)
+    portfolio_risk = FakePortfolioRisk()
+    handler, emitted = make_submission_handler(
+        oms=oms, portfolio_risk=portfolio_risk
+    )
+
+    result = handler.submit(make_signal(), FakeBar(), {}, MagicMock(), "Triple-A")
+
+    assert result is False
+    assert len(portfolio_risk.registered) == 1
+    assert portfolio_risk.released == pytest.approx(portfolio_risk.registered)
+    assert handler._get_open_trade_risk() == 0.0
+    assert not any(isinstance(event, SignalApproved) for event in emitted)
+    assert not any(isinstance(event, PositionOpened) for event in emitted)
+    broker.place_order.assert_not_called()
+    broker.cancel_order.assert_not_called()

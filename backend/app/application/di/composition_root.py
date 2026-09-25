@@ -134,9 +134,9 @@ def _create_broker_adapter(container: DIContainer, config: "Configuration"):
     if live_mode:
         from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter
         from quant.contracts.ports.storage import IStorage
-        # C4: wire durable order storage so live order state transitions are
-        # persisted for crash recovery. Best-effort — a missing storage adapter
-        # must never block live execution.
+        # Durable order storage for live order state transitions. A missing
+        # adapter still allows read/close paths; since B1, live entry dispatch
+        # itself is blocked without it (EntryDispatchBlockedError), by design.
         try:
             storage = container.resolve(IStorage)
         except Exception:

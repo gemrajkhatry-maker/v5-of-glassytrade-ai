@@ -41,6 +41,7 @@ def _adapter(broker: MagicMock) -> DhanBrokerAdapter:
     adapter._order_poll_timeout = 0.05
     adapter._executing_signal_ids = set()
     adapter._executing_lock = threading.Lock()
+    adapter._storage = MagicMock(spec=["save_order", "update_order_status"])
     return adapter
 
 
